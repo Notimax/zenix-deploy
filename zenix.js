@@ -381,19 +381,27 @@ async function detectSeriesSupport() {
     probeOk = false;
   }
 
-  // Keep full catalog mode active even when the probe fails transiently.
-  state.seriesSupported = true;
+  state.seriesSupported = probeOk;
   refs.supportInfo.textContent = probeOk
     ? "Series et animes actives: episodes multiples accessibles."
-    : "Verification episodes indisponible: mode complet maintenu.";
+    : "Series indisponibles: mode films uniquement active.";
 
   applySeriesSupportToNav();
 }
 
 function applySeriesSupportToNav() {
   refs.navPills.forEach((pill) => {
-    pill.style.display = "";
+    const view = pill.dataset.view || "";
+    const blocked = !state.seriesSupported && (view === "tv" || view === "anime");
+    pill.style.display = blocked ? "none" : "";
   });
+
+  if (!state.seriesSupported && (state.view === "tv" || state.view === "anime")) {
+    state.view = "movie";
+    refs.navPills.forEach((entry) => {
+      entry.classList.toggle("active", (entry.dataset.view || "") === "movie");
+    });
+  }
 }
 
 function renderFilterChips() {
@@ -401,9 +409,11 @@ function renderFilterChips() {
     { id: "all", label: "Tous" },
     { id: "recent", label: "Recents" },
     { id: "movie", label: "Films" },
-    { id: "tv", label: "Series" },
-    { id: "anime", label: "Anime" },
   ];
+  if (state.seriesSupported) {
+    chips.push({ id: "tv", label: "Series" });
+    chips.push({ id: "anime", label: "Anime" });
+  }
 
   if (!chips.some((chip) => chip.id === state.chip)) {
     state.chip = "all";
@@ -494,7 +504,7 @@ async function loadTopDaily() {
     const payload = await fetchJson(`${API_BASE}/catalog/top-10-for-home`);
     const rows = Array.isArray(payload?.data?.items) ? payload.data.items : [];
     const mapped = rows.map(normalizeCatalogItem);
-    state.topDaily = mapped;
+    state.topDaily = state.seriesSupported ? mapped : mapped.filter((item) => item.type === "movie");
     if (!state.activeHeroId && mapped[0]) {
       state.activeHeroId = mapped[0].id;
     }
@@ -531,7 +541,7 @@ function upsertCatalogItems(items, { prepend }) {
   const incoming = [];
 
   for (const raw of items) {
-    const item = raw;
+    const item = !state.seriesSupported && raw.type === "tv" ? null : raw;
     if (!item) {
       continue;
     }
@@ -581,7 +591,8 @@ function normalizeCatalogItem(raw) {
 }
 
 function buildTopFromCatalog() {
-  return state.catalog
+  const base = state.seriesSupported ? state.catalog : state.catalog.filter((item) => item.type === "movie");
+  return base
     .slice()
     .sort((a, b) => parseReleaseDate(b.releaseDate) - parseReleaseDate(a.releaseDate))
     .slice(0, 10);
@@ -626,6 +637,10 @@ function getVisibleCatalog() {
 
   if (state.chip === "recent") {
     list.sort((a, b) => parseReleaseDate(b.releaseDate) - parseReleaseDate(a.releaseDate));
+  }
+
+  if (!state.seriesSupported) {
+    list = list.filter((item) => item.type === "movie");
   }
 
   const query = state.query.trim().toLowerCase();
@@ -1062,6 +1077,10 @@ async function openDetails(id) {
   if (!item) {
     throw new Error("Item not found");
   }
+  if (!state.seriesSupported && item.type === "tv") {
+    showMessage("Series indisponibles actuellement. Mode films actif.", true);
+    return;
+  }
   state.activeHeroId = id;
 
   const details = await ensureDetails(id);
@@ -1179,6 +1198,9 @@ async function openPlayer(id, options = {}) {
   if (!item) {
     throw new Error("Item not found");
   }
+  if (!state.seriesSupported && item.type === "tv") {
+    throw new Error("Series disabled");
+  }
 
   const token = ++state.playToken;
   const resume = state.progress[id] || null;
@@ -1290,7 +1312,12 @@ async function switchPlayerEpisode(season, episode) {
 }
 
 function pickSource(payload) {
-  const sources = payload?.data?.items?.sources;
+  const items = payload?.data?.items;
+  const sources = Array.isArray(items?.sources)
+    ? items.sources
+    : Array.isArray(items)
+      ? items
+      : [];
   if (!Array.isArray(sources) || sources.length === 0) {
     return null;
   }
