@@ -1,0 +1,9 @@
+.git
+__render_debug
+*.log
+*.tmp
+*.ps1
+publish-github.ps1
+clone-chrome-profile.ps1
+render-session-check.js
+render-login-attempt.js
