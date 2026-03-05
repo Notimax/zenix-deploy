@@ -1,82 +1,162 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="fr">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="description" content="Zenix: streaming 100% gratuit, rapide et direct. Aucune offre payante." />
-  <meta name="theme-color" content="#081226" />
+  <meta name="description" content="Zenix: streaming gratuit, rapide et mis a jour automatiquement." />
+  <meta name="theme-color" content="#070910" />
   <meta name="apple-mobile-web-app-title" content="Zenix" />
   <meta name="application-name" content="Zenix" />
-  <title>Zenix | Streaming Gratuit</title>
+  <title>Zenix | Streaming Communautaire</title>
   <link rel="icon" type="image/png" sizes="192x192" href="/android-chrome-192x192.png" />
   <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Instrument+Serif:ital@0;1&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/zenix.css" />
   <script defer src="/zenix.js"></script>
 </head>
 <body>
-  <div class="app-bg" aria-hidden="true"></div>
-  <div class="app-noise" aria-hidden="true"></div>
+  <div class="app-canvas" aria-hidden="true"></div>
+  <div class="app-grain" aria-hidden="true"></div>
 
   <header class="topbar">
     <a class="brand" href="/" aria-label="Accueil Zenix">
       <span class="brand-mark">Z</span>
       <span class="brand-text">Zenix</span>
     </a>
-    <nav class="top-nav">
-      <button class="nav-pill active" data-nav="all" type="button">Accueil</button>
-      <button class="nav-pill" data-nav="recent" type="button">Nouveautes</button>
-      <button class="nav-pill" data-nav="movie" type="button">Films</button>
-      <button class="nav-pill" data-nav="tv" type="button">Series</button>
+
+    <nav class="main-nav" aria-label="Navigation principale">
+      <button class="nav-pill active" data-view="all" type="button">Accueil</button>
+      <button class="nav-pill" data-view="top" type="button">Top du jour</button>
+      <button class="nav-pill" data-view="movie" type="button">Films</button>
+      <button class="nav-pill" data-view="tv" type="button">Series</button>
+      <button class="nav-pill" data-view="anime" type="button">Anime</button>
     </nav>
-    <div class="status-badge">100% gratuit</div>
+
+    <div class="header-tools">
+      <input id="searchInput" class="search-input" type="search" placeholder="Rechercher un titre..." autocomplete="off" />
+      <span class="free-chip">FREE</span>
+    </div>
   </header>
 
   <main class="layout">
     <section class="hero" id="hero">
       <div class="hero-content">
-        <p class="hero-overline">Streaming rapide et sans abonnement</p>
-        <h1 id="heroTitle">Zenix Originals</h1>
-        <p id="heroDescription">Lecture instantanee, design propre, zero paywall.</p>
+        <p class="hero-kicker">Streaming communautaire, rapide, sans sortie de domaine</p>
+        <h1 id="heroTitle">Zenix Prime</h1>
+        <p id="heroDescription">Catalogue synchronise automatiquement depuis Purstream.</p>
+
         <div class="hero-actions">
           <button class="btn btn-primary" id="heroPlayBtn" type="button">Lire maintenant</button>
-          <button class="btn btn-ghost" id="heroInfoBtn" type="button">Plus d'infos</button>
+          <button class="btn btn-soft" id="heroInfoBtn" type="button">Voir les details</button>
+          <button class="btn btn-ghost" id="heroTrailerBtn" type="button">Bande-annonce</button>
         </div>
+
         <div class="hero-meta" id="heroMeta"></div>
       </div>
-      <img class="hero-art" id="heroArt" alt="Affiche mise en avant" loading="eager" />
+      <img class="hero-art" id="heroArt" alt="Affiche hero" loading="eager" />
     </section>
 
-    <section class="filters">
-      <div class="search-wrap">
-        <input id="searchInput" type="search" placeholder="Rechercher un film ou une serie..." autocomplete="off" />
+    <section class="status-strip">
+      <p id="syncInfo">Synchronisation en cours...</p>
+      <p id="supportInfo">Test episodes series en cours...</p>
+    </section>
+
+    <section class="top-section" id="topSection">
+      <div class="section-head">
+        <h2>Top du jour</h2>
+        <p>Classement automatiquement actualise chaque jour.</p>
       </div>
-      <div class="chip-row" id="genreChips"></div>
-      <p class="filters-note">Lecture: ouverture directe dans un nouvel onglet (sans popup bloque).</p>
+      <div class="top-grid" id="topGrid"></div>
+    </section>
+
+    <section class="filters-panel">
+      <div class="chip-row" id="filterChips"></div>
     </section>
 
     <section class="continue" id="continueSection" hidden>
       <div class="section-head">
-        <h2>Reprendre</h2>
-        <p>Continue ta lecture en 1 clic.</p>
+        <h2>Continuer</h2>
+        <p>Reprends instantanement tes lectures precedentes.</p>
       </div>
       <div class="continue-grid" id="continueGrid"></div>
     </section>
 
-    <section class="catalog">
+    <section class="catalog-section" id="catalogSection">
       <div class="section-head">
-        <h2>Catalogue gratuit</h2>
-        <p>Aucun contenu payant. Tout est lance directement.</p>
+        <h2>Catalogue live</h2>
+        <p>Nouveaux titres detectes automatiquement.</p>
       </div>
       <div class="catalog-grid" id="catalogGrid"></div>
       <div class="catalog-actions">
-        <button class="btn btn-ghost load-more" id="loadMoreBtn" type="button">Charger plus</button>
+        <button class="btn btn-soft" id="loadMoreBtn" type="button">Charger plus</button>
       </div>
-      <p class="empty" id="emptyState" hidden>Aucun resultat pour cette recherche.</p>
+      <p class="empty" id="emptyState" hidden>Aucun resultat.</p>
     </section>
   </main>
+
+  <aside class="detail-modal" id="detailModal" hidden>
+    <div class="detail-panel">
+      <button class="modal-close" id="detailCloseBtn" type="button" aria-label="Fermer les details">Fermer</button>
+      <div class="detail-layout">
+        <img id="detailPoster" class="detail-poster" alt="Affiche detail" loading="lazy" />
+        <div class="detail-content">
+          <p class="detail-kicker" id="detailKicker">Details</p>
+          <h3 id="detailTitle">Titre</h3>
+          <p class="detail-meta" id="detailMeta"></p>
+          <p class="detail-overview" id="detailOverview"></p>
+          <div class="detail-badges" id="detailBadges"></div>
+
+          <div class="detail-actions">
+            <button class="btn btn-primary" id="detailPlayBtn" type="button">Lire sur Zenix</button>
+            <button class="btn btn-ghost" id="detailTrailerBtn" type="button">Bande-annonce</button>
+          </div>
+
+          <div class="series-controls" id="detailSeriesControls" hidden>
+            <label class="field">
+              Saison
+              <select id="detailSeasonSelect"></select>
+            </label>
+            <label class="field">
+              Episode
+              <select id="detailEpisodeSelect"></select>
+            </label>
+          </div>
+
+          <div class="trailer-wrap" id="trailerWrap" hidden>
+            <iframe id="trailerFrame" title="Bande-annonce" loading="lazy" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>
+          </div>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <section class="player-overlay" id="playerOverlay" hidden>
+    <div class="player-panel">
+      <div class="player-head">
+        <div>
+          <p class="player-kicker">Lecture sur Zenix</p>
+          <h3 id="playerTitle">Titre</h3>
+        </div>
+        <button class="modal-close" id="playerCloseBtn" type="button" aria-label="Fermer le lecteur">Fermer</button>
+      </div>
+
+      <div class="series-controls" id="playerSeriesControls" hidden>
+        <label class="field">
+          Saison
+          <select id="playerSeasonSelect"></select>
+        </label>
+        <label class="field">
+          Episode
+          <select id="playerEpisodeSelect"></select>
+        </label>
+      </div>
+
+      <p class="player-status" id="playerStatus">Preparation de la lecture...</p>
+      <video id="playerVideo" controls playsinline preload="metadata"></video>
+    </div>
+  </section>
 </body>
 </html>
