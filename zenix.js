@@ -1,6 +1,6 @@
 ﻿const API_BASE = "https://api.purstream.co/api/v1";
-const STORAGE_KEY = "zenix-progress-v2";
-const CLEANUP_KEY = "zenix-sw-cleaned-v2";
+const STORAGE_KEY = "zenix-progress-v3";
+const CLEANUP_KEY = "zenix-sw-cleaned-v3";
 
 const FALLBACK_ITEMS = [
   {
@@ -39,8 +39,6 @@ const state = {
   detailsCache: new Map(),
   seriesCache: new Map(),
   progress: loadProgress(),
-  nowPlaying: null,
-  playToken: 0,
 };
 
 const refs = {
@@ -57,19 +55,10 @@ const refs = {
   continueSection: document.getElementById("continueSection"),
   continueGrid: document.getElementById("continueGrid"),
   loadMoreBtn: document.getElementById("loadMoreBtn"),
-  playerSheet: document.getElementById("playerSheet"),
-  playerTitle: document.getElementById("playerTitle"),
-  playerVideo: document.getElementById("playerVideo"),
-  closePlayerBtn: document.getElementById("closePlayerBtn"),
-  playerMessage: document.getElementById("playerMessage"),
-  episodeControls: document.getElementById("episodeControls"),
-  seasonSelect: document.getElementById("seasonSelect"),
-  episodeSelect: document.getElementById("episodeSelect"),
   navPills: Array.from(document.querySelectorAll(".nav-pill[data-nav]")),
 };
 
 let searchTimer = null;
-let lastProgressWrite = 0;
 
 init();
 
@@ -103,21 +92,24 @@ function bindEvents() {
   });
 
   refs.heroPlayBtn.addEventListener("click", () => {
-    if (state.activeId) {
-      openPlayer(state.activeId).catch(() => {
-        setPlayerMessage("Lecture indisponible pour ce titre.", true);
-      });
+    if (!state.activeId) {
+      return;
     }
+    openPlayer(state.activeId).catch(() => {
+      showUserError("Lecture indisponible pour ce titre.");
+    });
   });
 
   refs.heroInfoBtn.addEventListener("click", () => {
     if (!state.activeId) {
       return;
     }
+
     const card = document.querySelector(`[data-card-id="${state.activeId}"]`);
     if (!card) {
       return;
     }
+
     card.scrollIntoView({ behavior: "smooth", block: "center" });
     card.animate(
       [
@@ -140,48 +132,6 @@ function bindEvents() {
     loadMoreCatalog().catch(() => {
       updateLoadMoreButton();
     });
-  });
-
-  refs.closePlayerBtn.addEventListener("click", closePlayer);
-
-  refs.playerSheet.addEventListener("click", (event) => {
-    if (event.target === refs.playerSheet) {
-      closePlayer();
-    }
-  });
-
-  refs.seasonSelect.addEventListener("change", () => {
-    if (!state.nowPlaying || state.nowPlaying.type !== "tv") {
-      return;
-    }
-    const season = Number(refs.seasonSelect.value || "1");
-    const seasons = state.seriesCache.get(state.nowPlaying.id) || [];
-    const episodes = getEpisodesForSeason(seasons, season);
-    const defaultEpisode = episodes[0] ? Number(episodes[0].episode) : 1;
-    populateEpisodeOptions(episodes, defaultEpisode);
-    switchEpisode(season, defaultEpisode).catch(() => {
-      setPlayerMessage("Impossible de charger cet episode.", true);
-    });
-  });
-
-  refs.episodeSelect.addEventListener("change", () => {
-    if (!state.nowPlaying || state.nowPlaying.type !== "tv") {
-      return;
-    }
-    const season = Number(refs.seasonSelect.value || "1");
-    const episode = Number(refs.episodeSelect.value || "1");
-    switchEpisode(season, episode).catch(() => {
-      setPlayerMessage("Impossible de charger cet episode.", true);
-    });
-  });
-
-  refs.playerVideo.addEventListener("timeupdate", onPlayerProgress);
-  refs.playerVideo.addEventListener("ended", onPlayerEnded);
-
-  window.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") {
-      closePlayer();
-    }
   });
 }
 
@@ -452,7 +402,7 @@ function renderHero() {
   }
 
   ensureDetails(item.id).catch(() => {
-    // silent fallback to catalog metadata
+    // silent fallback
   });
 }
 
@@ -467,7 +417,7 @@ function renderCatalog(items) {
 
 function renderContinue() {
   const resumable = Object.values(state.progress)
-    .filter((entry) => typeof entry.time === "number" && entry.time > 15)
+    .filter((entry) => Number(entry?.lastPlayed || 0) > 0)
     .sort((a, b) => (b.lastPlayed || 0) - (a.lastPlayed || 0))
     .slice(0, 4);
 
@@ -496,9 +446,8 @@ function renderContinue() {
         openPlayer(item.id, {
           season: entry.season || 1,
           episode: entry.episode || 1,
-          resumeTime: entry.time || 0,
         }).catch(() => {
-          setPlayerMessage("Impossible de reprendre cette lecture.", true);
+          showUserError("Impossible de reprendre cette lecture.");
         });
       });
     }
@@ -518,7 +467,7 @@ function buildCard(item, progress) {
   const year = getYear(item.releaseDate) || "-";
 
   const progressPercent = progress && progress.time
-    ? Math.max(0, Math.min(100, Math.round((progress.time / (progress.duration || 3600)) * 100)))
+    ? Math.max(0, Math.min(100, Math.round((progress.time / (progress.duration || 100)) * 100)))
     : 0;
 
   card.innerHTML = `
@@ -544,7 +493,7 @@ function buildCard(item, progress) {
   if (playButton) {
     playButton.addEventListener("click", () => {
       openPlayer(item.id).catch(() => {
-        setPlayerMessage("Lecture indisponible pour ce titre.", true);
+        showUserError("Lecture indisponible pour ce titre.");
       });
     });
   }
@@ -605,7 +554,6 @@ async function getSeriesSeasons(id) {
         ? entry.episodes.map((episode) => ({
             episode: Number(episode?.episode || 0),
             name: String(episode?.name || `Episode ${episode?.episode || "?"}`),
-            runtime: episode?.runtime?.minutes || null,
           }))
         : [],
     }))
@@ -621,146 +569,69 @@ function getEpisodesForSeason(seasons, seasonNumber) {
   return current ? current.episodes : [];
 }
 
-function populateSeasonOptions(seasons, selectedSeason) {
-  refs.seasonSelect.innerHTML = "";
-  for (const season of seasons) {
-    const option = document.createElement("option");
-    option.value = String(season.season);
-    option.textContent = `Saison ${season.season}`;
-    option.selected = season.season === selectedSeason;
-    refs.seasonSelect.appendChild(option);
-  }
-}
-
-function populateEpisodeOptions(episodes, selectedEpisode) {
-  refs.episodeSelect.innerHTML = "";
-  for (const episode of episodes) {
-    const option = document.createElement("option");
-    option.value = String(episode.episode);
-    option.textContent = `E${String(episode.episode).padStart(2, "0")} - ${episode.name}`;
-    option.selected = episode.episode === selectedEpisode;
-    refs.episodeSelect.appendChild(option);
-  }
-}
-
 async function openPlayer(id, resume = {}) {
   const item = getItemById(id);
   if (!item) {
     return;
   }
 
-  const token = ++state.playToken;
-  state.activeId = id;
-  renderHero();
+  const remembered = state.progress[item.id] || {};
+  const viewer = openLoadingWindow(item.title);
 
-  refs.playerSheet.hidden = false;
-  document.body.style.overflow = "hidden";
-  refs.playerTitle.textContent = item.title;
-  setPlayerMessage("Preparation de la lecture...");
+  try {
+    let streamUrl = "";
+    let season = 1;
+    let episode = 1;
 
-  if (item.type === "tv") {
-    refs.episodeControls.hidden = false;
+    if (item.type === "tv") {
+      const seasons = await getSeriesSeasons(item.id);
+      if (seasons.length === 0) {
+        throw new Error("No seasons available");
+      }
 
-    const seasons = await getSeriesSeasons(item.id);
-    if (token !== state.playToken) {
-      return;
+      season = Number(resume.season || remembered.season || seasons[0].season);
+      if (!seasons.some((entry) => entry.season === season)) {
+        season = seasons[0].season;
+      }
+
+      const episodes = getEpisodesForSeason(seasons, season);
+      if (episodes.length === 0) {
+        throw new Error("No episodes available");
+      }
+
+      episode = Number(resume.episode || remembered.episode || episodes[0].episode);
+      if (!episodes.some((entry) => entry.episode === episode)) {
+        episode = episodes[0].episode;
+      }
+
+      const payload = await fetchJson(
+        `${API_BASE}/stream/${item.id}/episode?season=${season}&episode=${episode}`
+      );
+      const source = pickSource(payload);
+      if (!source) {
+        throw new Error("No source available");
+      }
+
+      streamUrl = source.stream_url;
+    } else {
+      const payload = await fetchJson(`${API_BASE}/stream/${item.id}`);
+      const source = pickSource(payload);
+      if (!source) {
+        throw new Error("No source available");
+      }
+
+      streamUrl = source.stream_url;
     }
 
-    if (seasons.length === 0) {
-      throw new Error("No seasons available");
+    registerLaunch(item, { season, episode });
+    navigatePlayerWindow(viewer, streamUrl);
+    renderContinue();
+  } catch (error) {
+    if (viewer && !viewer.closed) {
+      viewer.close();
     }
-
-    let season = Number(resume.season || seasons[0].season);
-    if (!seasons.some((entry) => entry.season === season)) {
-      season = seasons[0].season;
-    }
-
-    const episodes = getEpisodesForSeason(seasons, season);
-    if (episodes.length === 0) {
-      throw new Error("No episode for season");
-    }
-
-    let episode = Number(resume.episode || episodes[0].episode);
-    if (!episodes.some((entry) => entry.episode === episode)) {
-      episode = episodes[0].episode;
-    }
-
-    populateSeasonOptions(seasons, season);
-    populateEpisodeOptions(episodes, episode);
-
-    await loadEpisodeStream(item, season, episode, Number(resume.resumeTime || 0), token);
-    return;
+    throw error;
   }
-
-  refs.episodeControls.hidden = true;
-  await loadMovieStream(item, Number(resume.resumeTime || 0), token);
-}
-
-async function loadMovieStream(item, resumeTime, token) {
-  setPlayerMessage("Connexion au flux film...");
-  const payload = await fetchJson(`${API_BASE}/stream/${item.id}`);
-  if (token !== state.playToken) {
-    return;
-  }
-
-  const source = pickSource(payload);
-  if (!source) {
-    throw new Error("No source available");
-  }
-
-  await startPlayback(source.stream_url, resumeTime, token);
-  state.nowPlaying = {
-    id: item.id,
-    type: "movie",
-    title: item.title,
-    poster: item.poster,
-    season: 1,
-    episode: 1,
-  };
-}
-
-async function loadEpisodeStream(item, season, episode, resumeTime, token) {
-  setPlayerMessage(`Chargement S${season}E${episode}...`);
-  const payload = await fetchJson(
-    `${API_BASE}/stream/${item.id}/episode?season=${season}&episode=${episode}`
-  );
-
-  if (token !== state.playToken) {
-    return;
-  }
-
-  const source = pickSource(payload);
-  if (!source) {
-    throw new Error("No source available");
-  }
-
-  await startPlayback(source.stream_url, resumeTime, token);
-
-  state.nowPlaying = {
-    id: item.id,
-    type: "tv",
-    title: item.title,
-    poster: item.poster,
-    season,
-    episode,
-  };
-
-  setPlayerMessage(`Lecture S${season}E${episode} active.`);
-}
-
-async function switchEpisode(season, episode) {
-  const now = state.nowPlaying;
-  if (!now || now.type !== "tv") {
-    return;
-  }
-
-  const item = getItemById(now.id);
-  if (!item) {
-    return;
-  }
-
-  const token = ++state.playToken;
-  await loadEpisodeStream(item, season, episode, 0, token);
 }
 
 function pickSource(payload) {
@@ -773,118 +644,47 @@ function pickSource(payload) {
   return mp4 || sources[0];
 }
 
-async function startPlayback(streamUrl, resumeTime, token) {
-  const video = refs.playerVideo;
-
-  video.pause();
-  video.src = streamUrl;
-  video.load();
-
-  await waitForVideoReady(video);
-  if (token !== state.playToken) {
-    return;
-  }
-
-  if (resumeTime > 5 && Number.isFinite(video.duration) && resumeTime < video.duration - 8) {
-    video.currentTime = resumeTime;
-  }
-
-  try {
-    await video.play();
-    setPlayerMessage("");
-  } catch {
-    setPlayerMessage("Clique sur Play dans le lecteur pour demarrer la video.");
-  }
-}
-
-function waitForVideoReady(video) {
-  return new Promise((resolve, reject) => {
-    const timeoutId = setTimeout(() => {
-      cleanup();
-      reject(new Error("Video timeout"));
-    }, 15000);
-
-    function onReady() {
-      cleanup();
-      resolve();
-    }
-
-    function onError() {
-      cleanup();
-      reject(new Error("Video error"));
-    }
-
-    function cleanup() {
-      clearTimeout(timeoutId);
-      video.removeEventListener("loadedmetadata", onReady);
-      video.removeEventListener("error", onError);
-    }
-
-    video.addEventListener("loadedmetadata", onReady, { once: true });
-    video.addEventListener("error", onError, { once: true });
-  });
-}
-
-function closePlayer() {
-  refs.playerSheet.hidden = true;
-  document.body.style.overflow = "";
-  refs.playerVideo.pause();
-  refs.playerVideo.removeAttribute("src");
-  refs.playerVideo.load();
-  refs.episodeControls.hidden = true;
-  setPlayerMessage("");
-}
-
-function onPlayerProgress() {
-  if (!state.nowPlaying) {
-    return;
-  }
-
-  const now = Date.now();
-  if (now - lastProgressWrite < 1200) {
-    return;
-  }
-
-  lastProgressWrite = now;
-
-  const entry = {
-    id: state.nowPlaying.id,
-    type: state.nowPlaying.type,
-    title: state.nowPlaying.title,
-    poster: state.nowPlaying.poster,
-    season: state.nowPlaying.season || 1,
-    episode: state.nowPlaying.episode || 1,
-    time: refs.playerVideo.currentTime,
-    duration: Number.isFinite(refs.playerVideo.duration) ? refs.playerVideo.duration : null,
-    lastPlayed: now,
+function registerLaunch(item, playback) {
+  state.progress[item.id] = {
+    id: item.id,
+    type: item.type,
+    title: item.title,
+    poster: item.poster,
+    season: playback.season || 1,
+    episode: playback.episode || 1,
+    time: 30,
+    duration: 100,
+    lastPlayed: Date.now(),
   };
-
-  state.progress[state.nowPlaying.id] = entry;
   saveProgress(state.progress);
 }
 
-function onPlayerEnded() {
-  if (!state.nowPlaying) {
+function openLoadingWindow(title) {
+  const viewer = window.open("about:blank", "_blank", "noopener");
+  if (!viewer) {
+    return null;
+  }
+
+  const safeTitle = escapeHtml(title || "Lecteur");
+  viewer.document.write(`<!doctype html><html lang="fr"><head><meta charset="utf-8"><title>${safeTitle}</title><style>body{font-family:Segoe UI,Arial,sans-serif;background:#09152d;color:#e8efff;display:grid;place-items:center;height:100vh;margin:0}p{opacity:.88}</style></head><body><p>Chargement de la video...</p></body></html>`);
+  viewer.document.close();
+  return viewer;
+}
+
+function navigatePlayerWindow(viewer, streamUrl) {
+  if (viewer && !viewer.closed) {
+    viewer.location.replace(streamUrl);
     return;
   }
 
-  const entry = state.progress[state.nowPlaying.id];
-  if (entry) {
-    entry.time = 0;
-    entry.lastPlayed = Date.now();
-    saveProgress(state.progress);
+  const opened = window.open(streamUrl, "_blank", "noopener");
+  if (!opened) {
+    window.location.href = streamUrl;
   }
-
-  renderContinue();
 }
 
 function getItemById(id) {
   return state.items.find((item) => item.id === id) || null;
-}
-
-function setPlayerMessage(message, isError = false) {
-  refs.playerMessage.textContent = message || "";
-  refs.playerMessage.style.color = isError ? "#fca5a5" : "#8ee5ff";
 }
 
 function toHumanRuntime(minutes) {
@@ -920,6 +720,10 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+function showUserError(message) {
+  window.alert(message);
 }
 
 function loadProgress() {

@@ -3,7 +3,7 @@ const path = require("node:path");
 const http = require("node:http");
 
 const ROOT = __dirname;
-const PORT = Number(process.env.PORT || 10000);
+const PORT = Number(process.env.PORT || 4173);
 
 const MIME = {
   ".html": "text/html; charset=utf-8",

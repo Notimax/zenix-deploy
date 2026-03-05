@@ -55,6 +55,7 @@
         <input id="searchInput" type="search" placeholder="Rechercher un film ou une serie..." autocomplete="off" />
       </div>
       <div class="chip-row" id="genreChips"></div>
+      <p class="filters-note">Lecture: ouverture directe dans un nouvel onglet (sans popup bloque).</p>
     </section>
 
     <section class="continue" id="continueSection" hidden>
@@ -77,30 +78,5 @@
       <p class="empty" id="emptyState" hidden>Aucun resultat pour cette recherche.</p>
     </section>
   </main>
-
-  <section class="player-sheet" id="playerSheet" hidden>
-    <div class="player-panel">
-      <div class="player-head">
-        <div>
-          <p class="player-kicker">Lecture en cours</p>
-          <h3 id="playerTitle">Titre</h3>
-        </div>
-        <button class="player-close" id="closePlayerBtn" type="button" aria-label="Fermer le lecteur">Fermer</button>
-      </div>
-      <div class="episode-controls" id="episodeControls" hidden>
-        <label class="episode-field">
-          Saison
-          <select id="seasonSelect"></select>
-        </label>
-        <label class="episode-field">
-          Episode
-          <select id="episodeSelect"></select>
-        </label>
-      </div>
-      <p class="player-message" id="playerMessage"></p>
-      <video id="playerVideo" controls playsinline preload="metadata"></video>
-      <p class="player-note">Lecture gratuite via la source catalogue distante.</p>
-    </div>
-  </section>
 </body>
 </html>
