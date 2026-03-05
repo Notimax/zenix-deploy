@@ -411,6 +411,21 @@ body {
   padding: 28px 8px;
 }
 
+.catalog-actions {
+  display: flex;
+  justify-content: center;
+  padding-top: 14px;
+}
+
+.load-more {
+  min-width: 220px;
+}
+
+.load-more[disabled] {
+  cursor: wait;
+  opacity: 0.7;
+}
+
 .player-sheet {
   position: fixed;
   inset: 0;
@@ -459,6 +474,37 @@ body {
   background: transparent;
   color: var(--text-main);
   cursor: pointer;
+}
+
+.episode-controls {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.episode-field {
+  display: grid;
+  gap: 4px;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
+.episode-field select {
+  min-width: 140px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(8, 18, 38, 0.55);
+  color: var(--text-main);
+  padding: 8px 10px;
+  font: inherit;
+}
+
+.player-message {
+  margin: 0 0 8px;
+  min-height: 20px;
+  font-size: 0.86rem;
+  color: #8ee5ff;
 }
 
 #playerVideo {

@@ -27,10 +27,10 @@
       <span class="brand-text">Zenix</span>
     </a>
     <nav class="top-nav">
-      <button class="nav-pill active" type="button">Accueil</button>
-      <button class="nav-pill" type="button">Nouveautes</button>
-      <button class="nav-pill" type="button">Populaires</button>
-      <button class="nav-pill" type="button">Direct</button>
+      <button class="nav-pill active" data-nav="all" type="button">Accueil</button>
+      <button class="nav-pill" data-nav="recent" type="button">Nouveautes</button>
+      <button class="nav-pill" data-nav="movie" type="button">Films</button>
+      <button class="nav-pill" data-nav="tv" type="button">Series</button>
     </nav>
     <div class="status-badge">100% gratuit</div>
   </header>
@@ -71,6 +71,9 @@
         <p>Aucun contenu payant. Tout est lance directement.</p>
       </div>
       <div class="catalog-grid" id="catalogGrid"></div>
+      <div class="catalog-actions">
+        <button class="btn btn-ghost load-more" id="loadMoreBtn" type="button">Charger plus</button>
+      </div>
       <p class="empty" id="emptyState" hidden>Aucun resultat pour cette recherche.</p>
     </section>
   </main>
@@ -84,8 +87,19 @@
         </div>
         <button class="player-close" id="closePlayerBtn" type="button" aria-label="Fermer le lecteur">Fermer</button>
       </div>
+      <div class="episode-controls" id="episodeControls" hidden>
+        <label class="episode-field">
+          Saison
+          <select id="seasonSelect"></select>
+        </label>
+        <label class="episode-field">
+          Episode
+          <select id="episodeSelect"></select>
+        </label>
+      </div>
+      <p class="player-message" id="playerMessage"></p>
       <video id="playerVideo" controls playsinline preload="metadata"></video>
-      <p class="player-note">Source libre ou sous licence ouverte, gratuite d'acces.</p>
+      <p class="player-note">Lecture gratuite via la source catalogue distante.</p>
     </div>
   </section>
 </body>
