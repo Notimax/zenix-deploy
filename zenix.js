@@ -511,10 +511,17 @@ function applySeriesSupportToNav() {
     const blocked = !state.seriesSupported && (view === "tv" || view === "anime");
     pill.style.display = blocked ? "none" : "";
   });
+  refs.quickLinks.forEach((link) => {
+    const view = link.dataset.viewJump || "";
+    const blocked = !state.seriesSupported && (view === "tv" || view === "anime");
+    link.style.display = blocked ? "none" : "";
+  });
 
   if (!state.seriesSupported && (state.view === "tv" || state.view === "anime")) {
     state.view = "movie";
+    state.chip = "movie";
     setActiveNav("movie");
+    renderFilterChips();
     return;
   }
   setActiveNav(state.view);
@@ -1471,49 +1478,61 @@ async function openPlayer(id, options = {}) {
   refs.playerOverlay.hidden = false;
   refs.playerTitle.textContent = item.title;
   setPlayerStatus("Preparation de la lecture...");
+  if (refs.playerSourceMeta) {
+    refs.playerSourceMeta.textContent = "";
+  }
   updateBodyScrollLock();
+  try {
+    if (item.type === "tv") {
+      const seasons = await ensureSeasons(id);
+      if (token !== state.playToken) {
+        return;
+      }
+      if (seasons.length === 0) {
+        throw new Error("No seasons available");
+      }
 
-  if (item.type === "tv") {
-    const seasons = await ensureSeasons(id);
-    if (token !== state.playToken) {
+      let season = Number(options.season || resume?.season || seasons[0].season);
+      if (!seasons.some((entry) => entry.season === season)) {
+        season = seasons[0].season;
+      }
+
+      const episodes = getEpisodesForSeason(seasons, season);
+      if (episodes.length === 0) {
+        throw new Error("No episode for selected season");
+      }
+
+      let episode = Number(options.episode || resume?.episode || episodes[0].episode);
+      if (!episodes.some((entry) => entry.episode === episode)) {
+        episode = episodes[0].episode;
+      }
+
+      populateSeasonSelect(refs.playerSeasonSelect, seasons, season);
+      populateEpisodeSelect(refs.playerEpisodeSelect, episodes, episode);
+      refs.playerSeriesControls.hidden = false;
+
+      await loadEpisodeStream(
+        item,
+        season,
+        episode,
+        Number(options.resumeTime || resume?.time || 0),
+        token,
+        options.syncRoute !== false
+      );
       return;
     }
-    if (seasons.length === 0) {
-      throw new Error("No seasons available");
-    }
 
-    let season = Number(options.season || resume?.season || seasons[0].season);
-    if (!seasons.some((entry) => entry.season === season)) {
-      season = seasons[0].season;
-    }
-
-    const episodes = getEpisodesForSeason(seasons, season);
-    if (episodes.length === 0) {
-      throw new Error("No episode for selected season");
-    }
-
-    let episode = Number(options.episode || resume?.episode || episodes[0].episode);
-    if (!episodes.some((entry) => entry.episode === episode)) {
-      episode = episodes[0].episode;
-    }
-
-    populateSeasonSelect(refs.playerSeasonSelect, seasons, season);
-    populateEpisodeSelect(refs.playerEpisodeSelect, episodes, episode);
-    refs.playerSeriesControls.hidden = false;
-
-    await loadEpisodeStream(
+    refs.playerSeriesControls.hidden = true;
+    await loadMovieStream(
       item,
-      season,
-      episode,
       Number(options.resumeTime || resume?.time || 0),
       token,
       options.syncRoute !== false
     );
-    return;
+  } catch (error) {
+    closePlayer({ syncRoute: false });
+    throw error;
   }
-
-  refs.playerSeriesControls.hidden = true;
-  await loadMovieStream(item, Number(options.resumeTime || resume?.time || 0), token, options.syncRoute !== false);
 }
 
 async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
