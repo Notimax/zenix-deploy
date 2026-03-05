@@ -36,6 +36,23 @@ function send404(res) {
   res.end("Not Found");
 }
 
+function resolveCacheControl(filePath, ext) {
+  const baseName = path.basename(filePath).toLowerCase();
+  const noCacheFiles = new Set([
+    "index.html",
+    "zenix.js",
+    "zenix.css",
+    "sw.js",
+    "manifest.webmanifest",
+  ]);
+
+  if (noCacheFiles.has(baseName) || ext === ".html" || ext === ".webmanifest") {
+    return "no-cache";
+  }
+
+  return "public, max-age=31536000, immutable";
+}
+
 function streamFile(req, res, filePath) {
   fs.stat(filePath, (err, stats) => {
     if (err || !stats.isFile()) {
@@ -45,6 +62,7 @@ function streamFile(req, res, filePath) {
 
     const ext = path.extname(filePath).toLowerCase();
     const contentType = MIME[ext] || "application/octet-stream";
+    const cacheControl = resolveCacheControl(filePath, ext);
     const range = req.headers.range;
 
     if (range) {
@@ -74,7 +92,7 @@ function streamFile(req, res, filePath) {
         "Content-Range": `bytes ${start}-${end}/${stats.size}`,
         "Accept-Ranges": "bytes",
         "Content-Length": end - start + 1,
-        "Cache-Control": "public, max-age=31536000, immutable",
+        "Cache-Control": cacheControl,
       });
       fs.createReadStream(filePath, { start, end }).pipe(res);
       return;
@@ -84,10 +102,7 @@ function streamFile(req, res, filePath) {
       "Content-Type": contentType,
       "Content-Length": stats.size,
       "Accept-Ranges": "bytes",
-      "Cache-Control":
-        ext === ".html" || ext === ".webmanifest"
-          ? "no-cache"
-          : "public, max-age=31536000, immutable",
+      "Cache-Control": cacheControl,
     });
     fs.createReadStream(filePath).pipe(res);
   });
