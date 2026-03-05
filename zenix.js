@@ -6,6 +6,9 @@ const REFRESH_FEED_MS = 10 * 60 * 1000;
 const REFRESH_TOP_MS = 60 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = 15000;
 const RETRY_DELAYS_MS = [350, 900];
+const INITIAL_CATALOG_WARMUP_PAGES = 4;
+const BACKGROUND_CATALOG_DELAY_MS = 70;
+const BACKGROUND_CATALOG_RENDER_EVERY = 8;
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
 
 const FALLBACK_ITEMS = [
@@ -38,8 +41,11 @@ const state = {
   query: "",
   searchToken: 0,
   page: 0,
+  totalPages: 0,
+  catalogSyncPage: 0,
   hasMore: true,
   loadingCatalog: false,
+  backgroundSyncRunning: false,
   loadingTop: false,
   seriesSupported: true,
   catalog: [],
@@ -527,16 +533,37 @@ async function loadInitialCatalog() {
 
   try {
     state.catalog = [];
-    for (let page = 1; page <= 4; page += 1) {
+    state.page = 0;
+    state.totalPages = 0;
+    state.catalogSyncPage = 0;
+    state.hasMore = true;
+
+    const firstResult = await fetchCatalogPage(1);
+    upsertCatalogItems(firstResult.items, { prepend: false });
+    state.page = firstResult.currentPage;
+    state.totalPages = firstResult.lastPage;
+    state.catalogSyncPage = firstResult.currentPage;
+    state.hasMore = firstResult.currentPage < firstResult.lastPage;
+
+    const warmupLastPage = Math.min(firstResult.lastPage, INITIAL_CATALOG_WARMUP_PAGES);
+    for (let page = 2; page <= warmupLastPage; page += 1) {
       const result = await fetchCatalogPage(page);
       upsertCatalogItems(result.items, { prepend: false });
       state.page = result.currentPage;
+      state.totalPages = result.lastPage;
+      state.catalogSyncPage = result.currentPage;
       state.hasMore = result.currentPage < result.lastPage;
     }
     state.lastSyncAt = new Date();
+
+    if (state.page < state.totalPages) {
+      startBackgroundCatalogSync(state.page + 1, state.totalPages);
+    }
   } catch {
     state.catalog = FALLBACK_ITEMS.slice();
     state.page = 1;
+    state.totalPages = 1;
+    state.catalogSyncPage = 1;
     state.hasMore = false;
   } finally {
     state.loadingCatalog = false;
@@ -548,7 +575,7 @@ async function loadInitialCatalog() {
 }
 
 async function loadMoreCatalog() {
-  if (state.loadingCatalog || !state.hasMore || state.view === "top") {
+  if (state.loadingCatalog || state.backgroundSyncRunning || !state.hasMore || state.view === "top") {
     return;
   }
 
@@ -559,7 +586,9 @@ async function loadMoreCatalog() {
     const result = await fetchCatalogPage(state.page + 1);
     upsertCatalogItems(result.items, { prepend: false });
     state.page = result.currentPage;
-    state.hasMore = result.currentPage < result.lastPage;
+    state.totalPages = Math.max(state.totalPages, result.lastPage);
+    state.catalogSyncPage = result.currentPage;
+    state.hasMore = state.page < state.totalPages;
     state.lastSyncAt = new Date();
     renderAll();
   } finally {
@@ -568,11 +597,52 @@ async function loadMoreCatalog() {
   }
 }
 
+async function startBackgroundCatalogSync(startPage, lastPage) {
+  if (state.backgroundSyncRunning || startPage > lastPage) {
+    return;
+  }
+
+  state.backgroundSyncRunning = true;
+  updateLoadMoreButton();
+
+  try {
+    for (let page = startPage; page <= lastPage; page += 1) {
+      const result = await fetchCatalogPage(page);
+      upsertCatalogItems(result.items, { prepend: false });
+
+      state.page = Math.max(state.page, result.currentPage);
+      state.totalPages = Math.max(state.totalPages, result.lastPage);
+      state.catalogSyncPage = result.currentPage;
+      state.hasMore = state.page < state.totalPages;
+      state.lastSyncAt = new Date();
+
+      if (page === lastPage || page % BACKGROUND_CATALOG_RENDER_EVERY === 0) {
+        renderAll();
+      } else {
+        updateSyncText();
+      }
+
+      if (BACKGROUND_CATALOG_DELAY_MS > 0) {
+        await wait(BACKGROUND_CATALOG_DELAY_MS);
+      }
+    }
+  } catch {
+    showToast("Sync catalogue complete interrompue. Nouvelle tentative auto plus tard.", true);
+  } finally {
+    state.backgroundSyncRunning = false;
+    state.hasMore = state.page < state.totalPages;
+    updateLoadMoreButton();
+    updateSyncText();
+  }
+}
+
 async function refreshCatalogHead() {
   try {
     const result = await fetchCatalogPage(1);
     const beforeCount = state.catalog.length;
     upsertCatalogItems(result.items, { prepend: true });
+    state.totalPages = Math.max(state.totalPages, result.lastPage);
+    state.catalogSyncPage = Math.max(state.catalogSyncPage, result.currentPage);
     state.lastSyncAt = new Date();
     if (state.catalog.length !== beforeCount) {
       renderAll();
@@ -1100,7 +1170,7 @@ function buildMediaCard(item, resume = false, progressEntry = null) {
 }
 
 function updateLoadMoreButton() {
-  if (state.view === "top" || state.view === "list" || !state.hasMore) {
+  if (state.backgroundSyncRunning || state.view === "top" || state.view === "list" || !state.hasMore) {
     refs.loadMoreBtn.hidden = true;
     refs.loadMoreBtn.disabled = false;
     refs.loadMoreBtn.textContent = "Charger plus";
@@ -1124,8 +1194,14 @@ function updateSyncText(customText = "") {
     year: "numeric",
   });
 
+  if (state.backgroundSyncRunning && state.totalPages > 0) {
+    const current = Math.min(state.catalogSyncPage || state.page || 0, state.totalPages);
+    refs.syncInfo.textContent = `Top du jour ${topLabel}. Synchronisation Purstream (/movie) ${current}/${state.totalPages}...`;
+    return;
+  }
+
   if (!state.lastSyncAt) {
-    refs.syncInfo.textContent = `Top du jour ${topLabel}. Synchronisation initiale en cours.`;
+    refs.syncInfo.textContent = `Top du jour ${topLabel}. Synchronisation initiale Purstream (/movie) en cours.`;
     return;
   }
 
@@ -1133,7 +1209,7 @@ function updateSyncText(customText = "") {
     hour: "2-digit",
     minute: "2-digit",
   });
-  refs.syncInfo.textContent = `Top du jour ${topLabel}. Derniere synchro catalogue: ${timeLabel}.`;
+  refs.syncInfo.textContent = `Top du jour ${topLabel}. Derniere synchro catalogue Purstream: ${timeLabel}.`;
 }
 
 async function ensureDetails(id) {
