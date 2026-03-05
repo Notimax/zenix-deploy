@@ -96,8 +96,8 @@ try {
     git commit -m "Initial Zenix Stream import" | Out-Null
   }
 
-  git remote get-url origin *> $null
-  if ($LASTEXITCODE -eq 0) {
+  $hasOrigin = (git remote) -contains "origin"
+  if ($hasOrigin) {
     git remote set-url origin $remoteUrl
   }
   else {
