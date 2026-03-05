@@ -1026,7 +1026,7 @@ function buildMediaCard(item, resume = false, progressEntry = null) {
 }
 
 function updateLoadMoreButton() {
-  if (state.view === "top" || !state.hasMore) {
+  if (state.view === "top" || state.view === "list" || !state.hasMore) {
     refs.loadMoreBtn.hidden = true;
     refs.loadMoreBtn.disabled = false;
     refs.loadMoreBtn.textContent = "Charger plus";
