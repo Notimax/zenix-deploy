@@ -235,6 +235,9 @@ function bindEvents() {
   });
 
   refs.clearContinueBtn.addEventListener("click", () => {
+    if (!window.confirm("Vider tout l'historique Continuer ?")) {
+      return;
+    }
     state.progress = {};
     saveProgress(state.progress);
     renderAll();
@@ -242,6 +245,9 @@ function bindEvents() {
   });
 
   refs.clearListBtn.addEventListener("click", () => {
+    if (!window.confirm("Vider completement Ma liste ?")) {
+      return;
+    }
     state.favorites = {};
     saveFavorites(state.favorites);
     if (state.view === "list") {
@@ -414,6 +420,12 @@ function bindEvents() {
     if (!refs.detailModal.hidden) {
       closeDetails();
     }
+  });
+
+  window.addEventListener("popstate", () => {
+    handlePopState().catch(() => {
+      // no-op
+    });
   });
 }
 
@@ -877,6 +889,7 @@ function renderHero(item) {
   refs.heroDescription.textContent = overview;
   refs.heroArt.src = details?.posters?.wallpaper || details?.posters?.small || item.backdrop || item.poster;
   refs.heroArt.alt = item.title;
+  wireImageFallback(refs.heroArt, item.title, true);
 
   refs.heroMeta.innerHTML = "";
   const tags = [];
@@ -934,6 +947,11 @@ function renderTopDaily() {
         </div>
       </div>
     `;
+
+    const topImg = card.querySelector("img");
+    if (topImg) {
+      wireImageFallback(topImg, item.title, true);
+    }
 
     card.addEventListener("click", (event) => {
       if (event.target instanceof HTMLElement && event.target.tagName.toLowerCase() === "button") {
@@ -1033,6 +1051,11 @@ function buildMediaCard(item, resume = false, progressEntry = null) {
       </div>
     </div>
   `;
+
+  const mediaImg = card.querySelector("img");
+  if (mediaImg) {
+    wireImageFallback(mediaImg, item.title, false);
+  }
 
   const play = card.querySelector(`[data-card-play="${item.id}"]`);
   const info = card.querySelector(`[data-card-info="${item.id}"]`);
@@ -1204,7 +1227,7 @@ function populateEpisodeSelect(select, episodes, selectedEpisode) {
   });
 }
 
-async function openDetails(id) {
+async function openDetails(id, options = {}) {
   state.selectedDetailId = id;
   const item = findItemById(id) || (await buildItemFromDetails(id));
   if (!item) {
@@ -1215,13 +1238,16 @@ async function openDetails(id) {
     return;
   }
   state.activeHeroId = id;
-  setAppRoute({ detail: id });
+  if (options.syncRoute !== false) {
+    setAppRoute({ detail: id });
+  }
 
   const details = await ensureDetails(id);
   const trailers = await ensureTrailers(id);
 
   refs.detailPoster.src = details?.posters?.large || details?.posters?.small || item.poster || item.backdrop;
   refs.detailPoster.alt = item.title;
+  wireImageFallback(refs.detailPoster, item.title, false);
   refs.detailKicker.textContent = item.type === "tv" ? "Serie detail" : "Film detail";
   refs.detailTitle.textContent = details?.title || item.title;
 
@@ -1297,11 +1323,11 @@ async function openDetails(id) {
   updateBodyScrollLock();
 }
 
-function closeDetails() {
+function closeDetails(options = {}) {
   refs.detailModal.hidden = true;
   refs.trailerWrap.hidden = true;
   refs.trailerFrame.src = "";
-  if (refs.playerOverlay.hidden) {
+  if (options.syncRoute !== false && refs.playerOverlay.hidden) {
     setAppRoute({}, { replace: true });
   }
   updateBodyScrollLock();
@@ -1376,15 +1402,22 @@ async function openPlayer(id, options = {}) {
     populateEpisodeSelect(refs.playerEpisodeSelect, episodes, episode);
     refs.playerSeriesControls.hidden = false;
 
-    await loadEpisodeStream(item, season, episode, Number(options.resumeTime || resume?.time || 0), token);
+    await loadEpisodeStream(
+      item,
+      season,
+      episode,
+      Number(options.resumeTime || resume?.time || 0),
+      token,
+      options.syncRoute !== false
+    );
     return;
   }
 
   refs.playerSeriesControls.hidden = true;
-  await loadMovieStream(item, Number(options.resumeTime || resume?.time || 0), token);
+  await loadMovieStream(item, Number(options.resumeTime || resume?.time || 0), token, options.syncRoute !== false);
 }
 
-async function loadMovieStream(item, resumeTime, token) {
+async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
   setPlayerStatus("Connexion au flux film...");
   const payload = await fetchJson(`${API_BASE}/stream/${item.id}`);
   if (token !== state.playToken) {
@@ -1410,10 +1443,12 @@ async function loadMovieStream(item, resumeTime, token) {
     season: 1,
     episode: 1,
   };
-  setAppRoute({ watch: item.id }, { replace: true });
+  if (syncRoute) {
+    setAppRoute({ watch: item.id }, { replace: true });
+  }
 }
 
-async function loadEpisodeStream(item, season, episode, resumeTime, token) {
+async function loadEpisodeStream(item, season, episode, resumeTime, token, syncRoute = true) {
   setPlayerStatus(`Chargement S${season}E${episode}...`);
 
   const payload = await fetchJson(
@@ -1443,7 +1478,9 @@ async function loadEpisodeStream(item, season, episode, resumeTime, token) {
     season,
     episode,
   };
-  setAppRoute({ watch: item.id, season, episode }, { replace: true });
+  if (syncRoute) {
+    setAppRoute({ watch: item.id, season, episode }, { replace: true });
+  }
   setPlayerStatus(`Lecture S${season}E${episode}`);
 }
 
@@ -1556,7 +1593,7 @@ function setPlayerStatus(message, isError = false) {
   refs.playerStatus.style.color = isError ? "var(--danger)" : "#9bdfff";
 }
 
-function closePlayer() {
+function closePlayer(options = {}) {
   refs.playerOverlay.hidden = true;
   refs.playerSeriesControls.hidden = true;
 
@@ -1568,9 +1605,9 @@ function closePlayer() {
   state.sourcePool = [];
   state.sourceIndex = -1;
   state.nowPlaying = null;
-  if (!refs.detailModal.hidden && state.selectedDetailId) {
+  if (options.syncRoute !== false && !refs.detailModal.hidden && state.selectedDetailId) {
     setAppRoute({ detail: state.selectedDetailId }, { replace: true });
-  } else {
+  } else if (options.syncRoute !== false) {
     setAppRoute({}, { replace: true });
   }
   updateBodyScrollLock();
@@ -1731,6 +1768,49 @@ function showToast(message, isError = false) {
   toastTimer = setTimeout(() => {
     refs.toast.hidden = true;
   }, 3400);
+}
+
+function wireImageFallback(img, title, landscape = false) {
+  if (!img) {
+    return;
+  }
+
+  const fallback = buildImagePlaceholder(title, landscape);
+  img.dataset.fallbackSrc = fallback;
+  if (!img.getAttribute("src")) {
+    img.src = fallback;
+  }
+
+  if (img.dataset.fallbackBound !== "1") {
+    img.dataset.fallbackBound = "1";
+    img.addEventListener("error", onImageFallbackError);
+  }
+}
+
+function buildImagePlaceholder(title, landscape = false) {
+  const label = String(title || "Zenix")
+    .replace(/[^a-zA-Z0-9 ]/g, "")
+    .slice(0, 28);
+  const width = landscape ? 1280 : 600;
+  const height = landscape ? 720 : 900;
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='${width}' height='${height}' viewBox='0 0 ${width} ${height}'>
+<defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0%' stop-color='#0f1117'/><stop offset='100%' stop-color='#2a0d12'/></linearGradient></defs>
+<rect width='100%' height='100%' fill='url(#g)'/>
+<text x='50%' y='50%' dominant-baseline='middle' text-anchor='middle' fill='#f3f4f8' font-family='Arial, sans-serif' font-size='${landscape ? 42 : 34}'>${label || "Zenix"}</text>
+</svg>`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+function onImageFallbackError(event) {
+  const img = event.currentTarget;
+  if (!(img instanceof HTMLImageElement)) {
+    return;
+  }
+
+  const fallback = img.dataset.fallbackSrc || "";
+  if (fallback && img.src !== fallback) {
+    img.src = fallback;
+  }
 }
 
 function isFavorite(id) {
@@ -1931,6 +2011,7 @@ async function applyInitialRoute() {
       await openPlayer(route.watch, {
         season: route.season || 1,
         episode: route.episode || 1,
+        syncRoute: false,
       });
     } catch {
       showToast("Lien de lecture invalide ou indisponible.", true);
@@ -1941,11 +2022,40 @@ async function applyInitialRoute() {
 
   if (route.detail > 0) {
     try {
-      await openDetails(route.detail);
+      await openDetails(route.detail, { syncRoute: false });
     } catch {
       showToast("Lien detail invalide ou indisponible.", true);
       setAppRoute({}, { replace: true });
     }
+  }
+}
+
+async function handlePopState() {
+  applyBrowseStateFromRoute();
+  renderFilterChips();
+  applySeriesSupportToNav();
+  renderAll();
+
+  const route = readAppRoute();
+  if (route.watch > 0) {
+    await openPlayer(route.watch, {
+      season: route.season || 1,
+      episode: route.episode || 1,
+      syncRoute: false,
+    });
+    return;
+  }
+
+  if (route.detail > 0) {
+    await openDetails(route.detail, { syncRoute: false });
+    return;
+  }
+
+  if (!refs.playerOverlay.hidden) {
+    closePlayer({ syncRoute: false });
+  }
+  if (!refs.detailModal.hidden) {
+    closeDetails({ syncRoute: false });
   }
 }
 
