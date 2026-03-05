@@ -63,7 +63,16 @@
 
     <section class="status-strip">
       <p id="syncInfo">Synchronisation en cours...</p>
-      <p id="supportInfo">Test episodes series en cours...</p>
+      <p id="supportInfo">Streaming direct 100% gratuit, sans compte.</p>
+    </section>
+
+    <section class="quick-links" aria-label="Acces rapide">
+      <button class="quick-link" data-view-jump="all" type="button">Tout le catalogue</button>
+      <button class="quick-link" data-view-jump="movie" type="button">Films gratuits</button>
+      <button class="quick-link" data-view-jump="tv" type="button">Series</button>
+      <button class="quick-link" data-view-jump="anime" type="button">Anime</button>
+      <button class="quick-link" data-view-jump="top" type="button">Top du jour</button>
+      <button class="quick-link" data-view-jump="list" type="button">Ma liste</button>
     </section>
 
     <section class="top-section" id="topSection">
@@ -203,6 +212,7 @@
       </div>
 
       <p class="player-status" id="playerStatus">Preparation de la lecture...</p>
+      <p class="player-source" id="playerSourceMeta"></p>
       <video id="playerVideo" controls playsinline preload="metadata"></video>
     </div>
   </section>

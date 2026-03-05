@@ -1,13 +1,14 @@
 ﻿:root {
-  --bg: #0a0a0d;
-  --bg-2: #101015;
-  --surface: #15151d;
-  --surface-2: #1d1d26;
-  --surface-3: #252531;
+  --bg: #07080d;
+  --bg-2: #111219;
+  --surface: #14151d;
+  --surface-2: #1c1e29;
+  --surface-3: #252838;
   --text: #f3f4f8;
   --muted: #a8acb8;
-  --accent: #e50914;
-  --accent-2: #ff3b3b;
+  --accent: #f11424;
+  --accent-2: #ff5a3a;
+  --accent-3: #ffc861;
   --good: #22c55e;
   --danger: #ff6b6b;
   --border: rgba(255, 255, 255, 0.12);
@@ -44,10 +45,10 @@ body {
   inset: -20vh -10vw;
   z-index: -2;
   background:
-    radial-gradient(circle at 0% 0%, rgba(229, 9, 20, 0.3), transparent 38%),
-    radial-gradient(circle at 100% 18%, rgba(229, 9, 20, 0.16), transparent 46%),
-    radial-gradient(circle at 50% 100%, rgba(255, 59, 59, 0.13), transparent 50%),
-    linear-gradient(162deg, #08080b 0%, #0d0d12 54%, #111119 100%);
+    radial-gradient(circle at 0% 0%, rgba(241, 20, 36, 0.3), transparent 38%),
+    radial-gradient(circle at 100% 18%, rgba(255, 90, 58, 0.2), transparent 46%),
+    radial-gradient(circle at 50% 100%, rgba(255, 200, 97, 0.12), transparent 50%),
+    linear-gradient(162deg, #08080b 0%, #0d0f18 54%, #111625 100%);
 }
 
 .app-grain {
@@ -70,8 +71,8 @@ body {
   gap: 12px;
   padding: 14px 22px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.09);
-  background: rgba(7, 7, 10, 0.9);
-  backdrop-filter: blur(10px);
+  background: linear-gradient(180deg, rgba(8, 9, 13, 0.94), rgba(8, 9, 13, 0.86));
+  backdrop-filter: blur(14px);
 }
 
 .brand {
@@ -173,7 +174,9 @@ body {
   overflow: hidden;
   border-radius: var(--radius-xl);
   border: 1px solid rgba(255, 255, 255, 0.14);
-  background: linear-gradient(118deg, #0f0f14 0%, #15151d 55%, #1b1b24 100%);
+  background:
+    radial-gradient(circle at 16% 0%, rgba(255, 90, 58, 0.18), transparent 44%),
+    linear-gradient(118deg, #0f1118 0%, #131724 55%, #1c2233 100%);
   box-shadow: var(--shadow-lg);
 }
 
@@ -255,13 +258,43 @@ body {
   padding: 12px 14px;
   border-radius: var(--radius-md);
   border: 1px solid rgba(255, 255, 255, 0.12);
-  background: linear-gradient(160deg, rgba(229, 9, 20, 0.16), rgba(255, 255, 255, 0.03));
+  background: linear-gradient(165deg, rgba(255, 90, 58, 0.2), rgba(255, 200, 97, 0.07), rgba(255, 255, 255, 0.03));
 }
 
 .status-strip p {
   margin: 0;
   color: #d6d9e2;
   font-size: 0.86rem;
+}
+
+.quick-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.quick-link {
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.03);
+  color: #f1f3f8;
+  font: inherit;
+  font-size: 0.76rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 9px 12px;
+  cursor: pointer;
+  transition: border-color 140ms ease, transform 140ms ease, background 140ms ease;
+}
+
+.quick-link:hover {
+  transform: translateY(-1px);
+  border-color: rgba(255, 90, 58, 0.72);
+  background: rgba(255, 90, 58, 0.16);
 }
 
 .section-head {
@@ -404,6 +437,14 @@ body {
   background: linear-gradient(170deg, #14141b 0%, #0e0e13 100%);
   overflow: hidden;
   box-shadow: var(--shadow-md);
+  transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+}
+
+.top-card:hover,
+.media-card:hover {
+  transform: translateY(-3px);
+  border-color: rgba(255, 90, 58, 0.42);
+  box-shadow: 0 20px 52px rgba(0, 0, 0, 0.52);
 }
 
 .top-card {
@@ -490,9 +531,9 @@ body {
 }
 
 .flag.hot {
-  background: rgba(229, 9, 20, 0.24);
-  border-color: rgba(229, 9, 20, 0.55);
-  color: #ffd8da;
+  background: rgba(255, 90, 58, 0.26);
+  border-color: rgba(255, 90, 58, 0.62);
+  color: #ffe3d8;
 }
 
 .progress-track {
@@ -557,7 +598,7 @@ body {
 .btn-primary,
 .btn-play {
   color: #fff;
-  background: linear-gradient(135deg, #b1040f 0%, var(--accent) 55%, var(--accent-2) 100%);
+  background: linear-gradient(135deg, #b80d17 0%, var(--accent) 52%, var(--accent-2) 100%);
 }
 
 .btn-soft,
@@ -758,6 +799,13 @@ body {
   font-size: 0.86rem;
 }
 
+.player-source {
+  margin: 0 0 8px;
+  color: #b2d6ff;
+  font-size: 0.78rem;
+  letter-spacing: 0.03em;
+}
+
 #playerVideo {
   width: 100%;
   max-height: min(72vh, 650px);
@@ -860,6 +908,11 @@ body {
     width: min(240px, 100%);
   }
 
+  .quick-link {
+    flex: 1 1 calc(50% - 8px);
+    text-align: center;
+  }
+
   .top-grid,
   .continue-grid,
   .catalog-grid {
@@ -880,5 +933,9 @@ body {
   .continue-grid,
   .catalog-grid {
     grid-template-columns: 1fr;
+  }
+
+  .quick-link {
+    flex-basis: 100%;
   }
 }

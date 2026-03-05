@@ -10,6 +10,9 @@ const INITIAL_CATALOG_WARMUP_PAGES = 4;
 const BACKGROUND_CATALOG_DELAY_MS = 70;
 const BACKGROUND_CATALOG_RENDER_EVERY = 8;
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
+const HLS_JS_URL = "https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js";
+const HLS_MIME = "application/vnd.apple.mpegurl";
+const DASH_MIME = "application/dash+xml";
 
 const FALLBACK_ITEMS = [
   {
@@ -60,6 +63,8 @@ const state = {
   nowPlaying: null,
   sourcePool: [],
   sourceIndex: -1,
+  hlsScriptPromise: null,
+  hlsInstance: null,
   playToken: 0,
   lastSyncAt: null,
   refreshFeedTimer: null,
@@ -84,6 +89,7 @@ const refs = {
 
   searchInput: document.getElementById("searchInput"),
   navPills: Array.from(document.querySelectorAll(".nav-pill[data-view]")),
+  quickLinks: Array.from(document.querySelectorAll(".quick-link[data-view-jump]")),
   filterChips: document.getElementById("filterChips"),
   sortSelect: document.getElementById("sortSelect"),
   refreshNowBtn: document.getElementById("refreshNowBtn"),
@@ -130,6 +136,7 @@ const refs = {
   playerSeasonSelect: document.getElementById("playerSeasonSelect"),
   playerEpisodeSelect: document.getElementById("playerEpisodeSelect"),
   playerStatus: document.getElementById("playerStatus"),
+  playerSourceMeta: document.getElementById("playerSourceMeta"),
   playerVideo: document.getElementById("playerVideo"),
   toast: document.getElementById("toast"),
 };
@@ -182,6 +189,22 @@ function bindEvents() {
       state.view = view;
       setActiveNav(view);
       renderAll();
+    });
+  });
+
+  refs.quickLinks.forEach((button) => {
+    button.addEventListener("click", () => {
+      const view = button.dataset.viewJump || "all";
+      state.view = view;
+      if (view === "top") {
+        state.chip = "all";
+      } else if (view === "movie" || view === "tv" || view === "anime") {
+        state.chip = view;
+      }
+      setActiveNav(view);
+      renderFilterChips();
+      renderAll();
+      document.getElementById("catalogSection")?.scrollIntoView({ behavior: "smooth", block: "start" });
     });
   });
 
@@ -469,15 +492,15 @@ async function detectSeriesSupport() {
   try {
     const payload = await fetchJson(`${API_BASE}/stream/3830/episode?season=1&episode=3`);
     const source = pickSource(payload);
-    probeOk = Boolean(source?.stream_url);
+    probeOk = Boolean(source?.url);
   } catch {
     probeOk = false;
   }
 
   state.seriesSupported = probeOk;
   refs.supportInfo.textContent = probeOk
-    ? "Series et animes actives: episodes multiples accessibles."
-    : "Series indisponibles: mode films uniquement active.";
+    ? "Series et animes actives: episodes multiples accessibles, sans inscription."
+    : "Series indisponibles: mode films gratuit active.";
 
   applySeriesSupportToNav();
 }
@@ -953,7 +976,7 @@ function renderHero(item) {
   }
 
   const details = state.detailsCache.get(item.id);
-  const overview = details?.overview || "Decouvre le catalogue communautaire mis a jour automatiquement.";
+  const overview = details?.overview || "Streaming rapide, sans compte et sans abonnement.";
 
   refs.heroTitle.textContent = item.title;
   refs.heroDescription.textContent = overview;
@@ -1500,17 +1523,12 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
     return;
   }
 
-  const sources = extractSources(payload);
-  if (sources.length === 0) {
+  state.sourcePool = extractSources(payload);
+  if (state.sourcePool.length === 0) {
     throw new Error("No movie source");
   }
-
-  state.sourcePool = sources
-    .map((entry) => String(entry?.stream_url || ""))
-    .filter((url) => url.length > 0);
-  state.sourceIndex = 0;
-
-  await startPlayerSource(state.sourcePool[0], resumeTime, token);
+  state.sourceIndex = -1;
+  await playFromSourcePool(resumeTime, token, 0);
   state.nowPlaying = {
     id: item.id,
     type: "movie",
@@ -1534,17 +1552,12 @@ async function loadEpisodeStream(item, season, episode, resumeTime, token, syncR
     return;
   }
 
-  const sources = extractSources(payload);
-  if (sources.length === 0) {
+  state.sourcePool = extractSources(payload);
+  if (state.sourcePool.length === 0) {
     throw new Error("No episode source");
   }
-
-  state.sourcePool = sources
-    .map((entry) => String(entry?.stream_url || ""))
-    .filter((url) => url.length > 0);
-  state.sourceIndex = 0;
-
-  await startPlayerSource(state.sourcePool[0], resumeTime, token);
+  state.sourceIndex = -1;
+  await playFromSourcePool(resumeTime, token, 0);
 
   state.nowPlaying = {
     id: item.id,
@@ -1576,20 +1589,30 @@ async function switchPlayerEpisode(season, episode) {
 
 function pickSource(payload) {
   const sources = extractSources(payload);
-  if (sources.length === 0) {
-    return null;
-  }
-  const mp4 = sources.find((entry) => String(entry?.format || "").toLowerCase() === "mp4");
-  return mp4 || sources[0];
+  return sources[0] || null;
 }
 
 function extractSources(payload) {
   const items = payload?.data?.items;
-  return Array.isArray(items?.sources)
+  const rawSources = Array.isArray(items?.sources)
     ? items.sources
     : Array.isArray(items)
       ? items
       : [];
+
+  const normalized = rawSources
+    .map((entry, index) => normalizeSourceEntry(entry, index))
+    .filter(Boolean)
+    .sort((left, right) => right.score - left.score);
+
+  const seen = new Set();
+  return normalized.filter((entry) => {
+    if (seen.has(entry.url)) {
+      return false;
+    }
+    seen.add(entry.url);
+    return true;
+  });
 }
 
 async function trySwitchToNextSource() {
@@ -1606,20 +1629,160 @@ async function trySwitchToNextSource() {
 
   const token = ++state.playToken;
   const resumeTime = Number(refs.playerVideo.currentTime || 0);
-  state.sourceIndex = nextIndex;
-
-  setPlayerStatus(`Bascule source ${nextIndex + 1}/${state.sourcePool.length}...`);
-  await startPlayerSource(state.sourcePool[nextIndex], resumeTime, token);
+  await playFromSourcePool(resumeTime, token, nextIndex);
   showToast("Source alternative active.");
 }
 
-async function startPlayerSource(streamUrl, resumeTime, token) {
-  const video = refs.playerVideo;
-  video.pause();
-  video.src = streamUrl;
-  video.load();
+async function playFromSourcePool(resumeTime, token, startIndex = 0) {
+  let lastError = null;
+  for (let index = startIndex; index < state.sourcePool.length; index += 1) {
+    state.sourceIndex = index;
+    const source = state.sourcePool[index];
+    setPlayerStatus(`Connexion source ${index + 1}/${state.sourcePool.length}...`);
+    try {
+      await startPlayerSource(source, resumeTime, token);
+      return;
+    } catch (error) {
+      lastError = error;
+    }
+  }
 
-  await waitVideoReady(video);
+  throw lastError || new Error("No playable source");
+}
+
+function normalizeSourceEntry(entry, index) {
+  const url = String(
+    entry?.stream_url ||
+      entry?.url ||
+      entry?.file ||
+      entry?.src ||
+      ""
+  ).trim();
+  if (!url) {
+    return null;
+  }
+
+  const format = guessSourceFormat(entry, url);
+  const quality = String(entry?.quality || entry?.resolution || entry?.label || "").trim();
+  const host = getSourceHost(url);
+  const score = getSourceScore(format, quality, index);
+
+  return {
+    url,
+    format,
+    quality,
+    host,
+    score,
+  };
+}
+
+function guessSourceFormat(entry, url) {
+  const raw = String(entry?.format || entry?.type || "").toLowerCase();
+  if (raw.includes("m3u8") || raw.includes("hls")) {
+    return "hls";
+  }
+  if (raw.includes("mp4")) {
+    return "mp4";
+  }
+  if (raw.includes("webm")) {
+    return "webm";
+  }
+  if (raw.includes("mpd") || raw.includes("dash")) {
+    return "dash";
+  }
+
+  const cleanUrl = String(url || "").split("#")[0].split("?")[0].toLowerCase();
+  if (cleanUrl.endsWith(".m3u8")) {
+    return "hls";
+  }
+  if (cleanUrl.endsWith(".mp4")) {
+    return "mp4";
+  }
+  if (cleanUrl.endsWith(".webm")) {
+    return "webm";
+  }
+  if (cleanUrl.endsWith(".mpd")) {
+    return "dash";
+  }
+
+  return "unknown";
+}
+
+function getSourceHost(url) {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return "";
+  }
+}
+
+function getSourceScore(format, quality, index) {
+  let score = 0;
+  if (format === "mp4") {
+    score += 300;
+  } else if (format === "hls") {
+    score += 260;
+  } else if (format === "webm") {
+    score += 230;
+  } else if (format === "dash") {
+    score += 180;
+  } else {
+    score += 110;
+  }
+
+  const qualityText = String(quality || "").toLowerCase();
+  const qualityMatch = qualityText.match(/\d{3,4}/);
+  if (qualityMatch) {
+    score += Number(qualityMatch[0]) / 10;
+  } else if (qualityText.includes("hd")) {
+    score += 70;
+  }
+
+  score += Math.max(0, 30 - index);
+  return score;
+}
+
+function formatSourceLabel(source, index, total) {
+  const chunks = [`Source ${index + 1}/${total}`];
+  if (source?.quality) {
+    chunks.push(String(source.quality));
+  }
+  if (source?.format && source.format !== "unknown") {
+    chunks.push(source.format.toUpperCase());
+  }
+  if (source?.host) {
+    chunks.push(source.host);
+  }
+  return chunks.join(" · ");
+}
+
+async function startPlayerSource(source, resumeTime, token) {
+  const streamUrl = String(source?.url || "").trim();
+  if (!streamUrl) {
+    throw new Error("Missing source URL");
+  }
+
+  const video = refs.playerVideo;
+  teardownPlayerEngine(video);
+  if (refs.playerSourceMeta) {
+    refs.playerSourceMeta.textContent = formatSourceLabel(
+      source,
+      Math.max(0, state.sourceIndex),
+      state.sourcePool.length || 1
+    );
+  }
+
+  if (source?.format === "hls") {
+    await startHlsPlayback(video, streamUrl, token);
+  } else {
+    if (source?.format === "dash" && !video.canPlayType(DASH_MIME)) {
+      throw new Error("DASH not supported");
+    }
+    video.src = streamUrl;
+    video.load();
+    await waitVideoReady(video);
+  }
+
   if (token !== state.playToken) {
     return;
   }
@@ -1630,13 +1793,144 @@ async function startPlayerSource(streamUrl, resumeTime, token) {
 
   try {
     await video.play();
-    setPlayerStatus("");
+    setPlayerStatus("Lecture en cours.");
   } catch {
     setPlayerStatus("Clique sur Play dans le lecteur pour demarrer.");
   }
 }
 
+async function startHlsPlayback(video, streamUrl, token) {
+  if (video.canPlayType(HLS_MIME)) {
+    video.src = streamUrl;
+    video.load();
+    await waitVideoReady(video);
+    return;
+  }
+
+  const Hls = await loadHlsLibrary();
+  if (!Hls || !Hls.isSupported()) {
+    throw new Error("HLS not supported");
+  }
+
+  const hls = new Hls({
+    enableWorker: true,
+    lowLatencyMode: false,
+    maxBufferLength: 30,
+  });
+  state.hlsInstance = hls;
+
+  await new Promise((resolve, reject) => {
+    const timeoutId = setTimeout(() => {
+      cleanup();
+      reject(new Error("HLS timeout"));
+    }, 15000);
+
+    const onMediaAttached = () => {
+      hls.loadSource(streamUrl);
+    };
+    const onManifestParsed = () => {
+      cleanup();
+      resolve();
+    };
+    const onError = (_event, data) => {
+      if (!data?.fatal) {
+        return;
+      }
+      cleanup();
+      reject(new Error(`HLS fatal error: ${String(data?.type || "unknown")}`));
+    };
+
+    function cleanup() {
+      clearTimeout(timeoutId);
+      hls.off(Hls.Events.MEDIA_ATTACHED, onMediaAttached);
+      hls.off(Hls.Events.MANIFEST_PARSED, onManifestParsed);
+      hls.off(Hls.Events.ERROR, onError);
+    }
+
+    hls.on(Hls.Events.MEDIA_ATTACHED, onMediaAttached);
+    hls.on(Hls.Events.MANIFEST_PARSED, onManifestParsed);
+    hls.on(Hls.Events.ERROR, onError);
+    hls.attachMedia(video);
+  });
+
+  if (token !== state.playToken) {
+    return;
+  }
+
+  hls.on(Hls.Events.ERROR, (_event, data) => {
+    if (!data?.fatal) {
+      return;
+    }
+    if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+      try {
+        hls.recoverMediaError();
+        return;
+      } catch {
+        // continue to fallback source
+      }
+    }
+    trySwitchToNextSource().catch(() => {
+      setPlayerStatus("Source indisponible. Aucun secours disponible.", true);
+    });
+  });
+
+  await waitVideoReady(video);
+}
+
+function teardownPlayerEngine(video) {
+  destroyHlsInstance();
+  video.pause();
+  video.removeAttribute("src");
+  video.load();
+}
+
+function destroyHlsInstance() {
+  if (!state.hlsInstance) {
+    return;
+  }
+  try {
+    state.hlsInstance.destroy();
+  } catch {
+    // ignore teardown errors
+  }
+  state.hlsInstance = null;
+}
+
+async function loadHlsLibrary() {
+  if (window.Hls) {
+    return window.Hls;
+  }
+  if (state.hlsScriptPromise) {
+    return state.hlsScriptPromise;
+  }
+
+  state.hlsScriptPromise = new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = HLS_JS_URL;
+    script.async = true;
+    script.onload = () => {
+      if (!window.Hls) {
+        state.hlsScriptPromise = null;
+        reject(new Error("hls.js unavailable"));
+        return;
+      }
+      resolve(window.Hls);
+    };
+    script.onerror = () => {
+      state.hlsScriptPromise = null;
+      reject(new Error("Failed to load hls.js"));
+    };
+    document.head.appendChild(script);
+  });
+
+  return state.hlsScriptPromise;
+}
+
 function waitVideoReady(video) {
+  if (video.readyState >= 1) {
+    return Promise.resolve();
+  }
+
   return new Promise((resolve, reject) => {
     const timeoutId = setTimeout(() => {
       cleanup();
@@ -1672,12 +1966,12 @@ function setPlayerStatus(message, isError = false) {
 function closePlayer(options = {}) {
   refs.playerOverlay.hidden = true;
   refs.playerSeriesControls.hidden = true;
-
-  refs.playerVideo.pause();
-  refs.playerVideo.removeAttribute("src");
-  refs.playerVideo.load();
+  teardownPlayerEngine(refs.playerVideo);
 
   setPlayerStatus("");
+  if (refs.playerSourceMeta) {
+    refs.playerSourceMeta.textContent = "";
+  }
   state.sourcePool = [];
   state.sourceIndex = -1;
   state.nowPlaying = null;
