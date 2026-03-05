@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: zenix
+    runtime: node
+    plan: free
+    rootDir: .
+    buildCommand: npm install --omit=dev
+    startCommand: npm start
+    autoDeploy: true
+    healthCheckPath: /
