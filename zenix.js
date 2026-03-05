@@ -110,7 +110,9 @@ let lastProgressSave = 0;
 init();
 
 async function init() {
-  cleanupLegacyServiceWorker();
+  cleanupLegacyServiceWorker().catch(() => {
+    // cleanup best effort only
+  });
   bindEvents();
 
   refs.syncInfo.textContent = "Synchronisation initiale en cours...";
@@ -119,7 +121,16 @@ async function init() {
   await detectSeriesSupport();
   renderFilterChips();
 
-  await Promise.all([loadTopDaily(), loadInitialCatalog()]);
+  await Promise.allSettled([loadTopDaily(), loadInitialCatalog()]);
+
+  if (state.catalog.length === 0) {
+    state.catalog = FALLBACK_ITEMS.slice();
+    state.page = 1;
+    state.hasMore = false;
+  }
+  if (state.topDaily.length === 0) {
+    state.topDaily = buildTopFromCatalog();
+  }
 
   if (!state.activeHeroId) {
     const first = state.topDaily[0] || state.catalog[0];
@@ -134,9 +145,6 @@ function bindEvents() {
   refs.navPills.forEach((button) => {
     button.addEventListener("click", () => {
       const view = button.dataset.view || "all";
-      if (!state.seriesSupported && (view === "tv" || view === "anime")) {
-        return;
-      }
       state.view = view;
       refs.navPills.forEach((entry) => entry.classList.toggle("active", entry === button));
       renderAll();
@@ -318,34 +326,28 @@ function startAutoRefresh() {
 }
 
 async function detectSeriesSupport() {
+  let probeOk = true;
   try {
     const payload = await fetchJson(`${API_BASE}/stream/3830/episode?season=1&episode=3`);
     const source = pickSource(payload);
-    state.seriesSupported = Boolean(source?.stream_url);
+    probeOk = Boolean(source?.stream_url);
   } catch {
-    state.seriesSupported = false;
+    probeOk = false;
   }
 
-  refs.supportInfo.textContent = state.seriesSupported
-    ? "Series confirmees: episodes multiples accessibles."
-    : "Series bloquees detectees: mode films uniquement active.";
+  // Keep full catalog mode active even when the probe fails transiently.
+  state.seriesSupported = true;
+  refs.supportInfo.textContent = probeOk
+    ? "Series et animes actives: episodes multiples accessibles."
+    : "Verification episodes indisponible: mode complet maintenu.";
 
   applySeriesSupportToNav();
 }
 
 function applySeriesSupportToNav() {
   refs.navPills.forEach((pill) => {
-    const view = pill.dataset.view;
-    const blocked = !state.seriesSupported && (view === "tv" || view === "anime");
-    pill.style.display = blocked ? "none" : "";
+    pill.style.display = "";
   });
-
-  if (!state.seriesSupported && (state.view === "tv" || state.view === "anime")) {
-    state.view = "movie";
-    refs.navPills.forEach((entry) => {
-      entry.classList.toggle("active", (entry.dataset.view || "") === "movie");
-    });
-  }
 }
 
 function renderFilterChips() {
@@ -353,12 +355,9 @@ function renderFilterChips() {
     { id: "all", label: "Tous" },
     { id: "recent", label: "Recents" },
     { id: "movie", label: "Films" },
+    { id: "tv", label: "Series" },
+    { id: "anime", label: "Anime" },
   ];
-
-  if (state.seriesSupported) {
-    chips.push({ id: "tv", label: "Series" });
-    chips.push({ id: "anime", label: "Anime" });
-  }
 
   if (!chips.some((chip) => chip.id === state.chip)) {
     state.chip = "all";
@@ -393,9 +392,7 @@ async function loadInitialCatalog() {
     }
     state.lastSyncAt = new Date();
   } catch {
-    state.catalog = state.seriesSupported
-      ? FALLBACK_ITEMS.slice()
-      : FALLBACK_ITEMS.filter((item) => item.type === "movie");
+    state.catalog = FALLBACK_ITEMS.slice();
     state.page = 1;
     state.hasMore = false;
   } finally {
@@ -450,17 +447,14 @@ async function loadTopDaily() {
   try {
     const payload = await fetchJson(`${API_BASE}/catalog/top-10-for-home`);
     const rows = Array.isArray(payload?.data?.items) ? payload.data.items : [];
-    let mapped = rows.map(normalizeCatalogItem);
-
-    if (!state.seriesSupported) {
-      mapped = mapped.filter((item) => item.type === "movie");
-    }
-
+    const mapped = rows.map(normalizeCatalogItem);
     state.topDaily = mapped;
     if (!state.activeHeroId && mapped[0]) {
       state.activeHeroId = mapped[0].id;
     }
     updateSyncText();
+  } catch {
+    state.topDaily = buildTopFromCatalog();
   } finally {
     state.loadingTop = false;
   }
@@ -491,7 +485,7 @@ function upsertCatalogItems(items, { prepend }) {
   const incoming = [];
 
   for (const raw of items) {
-    const item = !state.seriesSupported && raw.type === "tv" ? null : raw;
+    const item = raw;
     if (!item) {
       continue;
     }
@@ -540,6 +534,13 @@ function normalizeCatalogItem(raw) {
   };
 }
 
+function buildTopFromCatalog() {
+  return state.catalog
+    .slice()
+    .sort((a, b) => parseReleaseDate(b.releaseDate) - parseReleaseDate(a.releaseDate))
+    .slice(0, 10);
+}
+
 function renderAll() {
   const visible = getVisibleCatalog();
   const heroItem = getHeroItem(visible);
@@ -573,10 +574,6 @@ function getVisibleCatalog() {
     list = list.filter((item) => item.type === "tv");
   } else if (state.chip === "anime") {
     list = list.filter((item) => item.isAnime);
-  }
-
-  if (!state.seriesSupported) {
-    list = list.filter((item) => item.type === "movie");
   }
 
   if (state.chip === "recent") {
@@ -877,9 +874,6 @@ async function ensureTrailers(id) {
 }
 
 async function ensureSeasons(id) {
-  if (!state.seriesSupported) {
-    return [];
-  }
   if (state.seasonsCache.has(id)) {
     return state.seasonsCache.get(id);
   }
@@ -994,7 +988,7 @@ async function openDetails(id) {
 
   refs.detailTrailerBtn.disabled = trailers.length === 0;
 
-  if (item.type === "tv" && state.seriesSupported) {
+  if (item.type === "tv") {
     try {
       const seasons = await ensureSeasons(id);
       if (seasons.length > 0) {
@@ -1066,7 +1060,7 @@ async function openPlayer(id, options = {}) {
   setPlayerStatus("Preparation de la lecture...");
   updateBodyScrollLock();
 
-  if (item.type === "tv" && state.seriesSupported) {
+  if (item.type === "tv") {
     const seasons = await ensureSeasons(id);
     if (token !== state.playToken) {
       return;
