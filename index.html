@@ -76,6 +76,39 @@
       <div class="chip-row" id="filterChips"></div>
     </section>
 
+    <section class="community-panel">
+      <div class="community-stats" id="communityStats"></div>
+      <div class="community-controls">
+        <label class="field-inline" for="sortSelect">
+          Tri
+          <select id="sortSelect">
+            <option value="featured">Recommande</option>
+            <option value="recent">Plus recents</option>
+            <option value="title-asc">Titre A-Z</option>
+            <option value="title-desc">Titre Z-A</option>
+            <option value="runtime-desc">Duree max</option>
+          </select>
+        </label>
+        <button class="btn btn-soft" id="refreshNowBtn" type="button">Synchroniser maintenant</button>
+      </div>
+    </section>
+
+    <section class="spotlight" id="latestSection">
+      <div class="section-head">
+        <h2>Nouveautes</h2>
+        <p>Derniers ajouts detectes dans le catalogue.</p>
+      </div>
+      <div class="catalog-grid" id="latestGrid"></div>
+    </section>
+
+    <section class="spotlight" id="popularSection">
+      <div class="section-head">
+        <h2>Populaires</h2>
+        <p>Top du jour + tendances de lecture.</p>
+      </div>
+      <div class="catalog-grid" id="popularGrid"></div>
+    </section>
+
     <section class="continue" id="continueSection" hidden>
       <div class="section-head">
         <h2>Continuer</h2>
@@ -158,5 +191,7 @@
       <video id="playerVideo" controls playsinline preload="metadata"></video>
     </div>
   </section>
+
+  <div class="toast" id="toast" hidden role="status" aria-live="polite"></div>
 </body>
 </html>

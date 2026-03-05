@@ -33,6 +33,7 @@ const FALLBACK_ITEMS = [
 const state = {
   view: "all",
   chip: "all",
+  sortBy: "featured",
   query: "",
   searchToken: 0,
   page: 0,
@@ -73,6 +74,13 @@ const refs = {
   searchInput: document.getElementById("searchInput"),
   navPills: Array.from(document.querySelectorAll(".nav-pill[data-view]")),
   filterChips: document.getElementById("filterChips"),
+  sortSelect: document.getElementById("sortSelect"),
+  refreshNowBtn: document.getElementById("refreshNowBtn"),
+  communityStats: document.getElementById("communityStats"),
+  latestSection: document.getElementById("latestSection"),
+  latestGrid: document.getElementById("latestGrid"),
+  popularSection: document.getElementById("popularSection"),
+  popularGrid: document.getElementById("popularGrid"),
 
   continueSection: document.getElementById("continueSection"),
   continueGrid: document.getElementById("continueGrid"),
@@ -105,10 +113,12 @@ const refs = {
   playerEpisodeSelect: document.getElementById("playerEpisodeSelect"),
   playerStatus: document.getElementById("playerStatus"),
   playerVideo: document.getElementById("playerVideo"),
+  toast: document.getElementById("toast"),
 };
 
 let searchDebounce = null;
 let lastProgressSave = 0;
+let toastTimer = null;
 
 init();
 
@@ -179,6 +189,28 @@ function bindEvents() {
         renderAll();
       }
     }, 320);
+  });
+
+  refs.sortSelect.addEventListener("change", (event) => {
+    state.sortBy = String(event.target.value || "featured");
+    renderAll();
+  });
+
+  refs.refreshNowBtn.addEventListener("click", () => {
+    refs.refreshNowBtn.disabled = true;
+    refs.refreshNowBtn.textContent = "Synchronisation...";
+    Promise.allSettled([loadTopDaily(), refreshCatalogHead()])
+      .then(() => {
+        renderAll();
+        showToast("Catalogue synchronise.");
+      })
+      .catch(() => {
+        showToast("Erreur de synchronisation temporaire.", true);
+      })
+      .finally(() => {
+        refs.refreshNowBtn.disabled = false;
+        refs.refreshNowBtn.textContent = "Synchroniser maintenant";
+      });
   });
 
   refs.heroPlayBtn.addEventListener("click", () => {
@@ -292,6 +324,17 @@ function bindEvents() {
   });
 
   window.addEventListener("keydown", (event) => {
+    if (event.key === "/" && document.activeElement !== refs.searchInput) {
+      const target = event.target;
+      const typing =
+        target instanceof HTMLElement &&
+        (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
+      if (!typing) {
+        event.preventDefault();
+        refs.searchInput.focus();
+      }
+    }
+
     if (event.key !== "Escape") {
       return;
     }
@@ -550,6 +593,8 @@ function renderAll() {
 
   renderHero(heroItem);
   renderTopDaily();
+  renderCommunityStats();
+  renderSpotlights();
   renderContinue();
   renderCatalog(visible);
 
@@ -588,7 +633,79 @@ function getVisibleCatalog() {
     list = list.filter((item) => item.title.toLowerCase().includes(query));
   }
 
+  if (state.sortBy === "recent") {
+    list.sort((a, b) => parseReleaseDate(b.releaseDate) - parseReleaseDate(a.releaseDate));
+  } else if (state.sortBy === "title-asc") {
+    list.sort((a, b) => a.title.localeCompare(b.title, "fr", { sensitivity: "base" }));
+  } else if (state.sortBy === "title-desc") {
+    list.sort((a, b) => b.title.localeCompare(a.title, "fr", { sensitivity: "base" }));
+  } else if (state.sortBy === "runtime-desc") {
+    list.sort((a, b) => Number(b.runtime || 0) - Number(a.runtime || 0));
+  }
+
   return list;
+}
+
+function renderCommunityStats() {
+  const total = state.catalog.length;
+  const movies = state.catalog.filter((item) => item.type === "movie").length;
+  const series = state.catalog.filter((item) => item.type === "tv").length;
+  const anime = state.catalog.filter((item) => item.isAnime).length;
+  const activeWatch = Object.values(state.progress).filter((entry) => Number(entry?.time || 0) > 0).length;
+
+  const stats = [
+    { label: "Titres", value: total },
+    { label: "Films", value: movies },
+    { label: "Series", value: series },
+    { label: "Anime", value: anime },
+    { label: "En cours", value: activeWatch },
+  ];
+
+  refs.communityStats.innerHTML = "";
+  stats.forEach((stat) => {
+    const card = document.createElement("article");
+    card.className = "stat-card";
+    card.innerHTML = `
+      <p class="stat-label">${escapeHtml(stat.label)}</p>
+      <p class="stat-value">${escapeHtml(stat.value)}</p>
+    `;
+    refs.communityStats.appendChild(card);
+  });
+}
+
+function renderSpotlights() {
+  const latest = state.catalog
+    .slice()
+    .sort((a, b) => parseReleaseDate(b.releaseDate) - parseReleaseDate(a.releaseDate))
+    .slice(0, 10);
+
+  const popularMap = new Map();
+  state.topDaily.forEach((item) => {
+    if (!popularMap.has(item.id)) {
+      popularMap.set(item.id, item);
+    }
+  });
+
+  const watchedIds = Object.values(state.progress)
+    .sort((a, b) => Number(b.lastPlayed || 0) - Number(a.lastPlayed || 0))
+    .map((entry) => Number(entry.id || 0))
+    .filter((id) => id > 0);
+  watchedIds.forEach((id) => {
+    const item = findItemById(id);
+    if (item && !popularMap.has(item.id)) {
+      popularMap.set(item.id, item);
+    }
+  });
+
+  const popular = Array.from(popularMap.values()).slice(0, 10);
+
+  refs.latestGrid.innerHTML = "";
+  latest.forEach((item) => refs.latestGrid.appendChild(buildMediaCard(item, false)));
+  refs.latestSection.hidden = latest.length === 0;
+
+  refs.popularGrid.innerHTML = "";
+  popular.forEach((item) => refs.popularGrid.appendChild(buildMediaCard(item, false)));
+  refs.popularSection.hidden = popular.length === 0;
 }
 
 function getHeroItem(visible) {
@@ -751,6 +868,12 @@ function buildMediaCard(item, resume = false, progressEntry = null) {
 
   const year = getYear(item.releaseDate) || "-";
   const runtime = item.runtime ? toHumanRuntime(item.runtime) : "Episode";
+  const progress = progressEntry || state.progress[item.id] || null;
+  const ratioRaw = progress && Number(progress.duration || 0) > 0
+    ? (Number(progress.time || 0) / Number(progress.duration || 1)) * 100
+    : 0;
+  const ratio = Math.max(0, Math.min(100, Math.round(ratioRaw)));
+  const isRecent = parseReleaseDate(item.releaseDate) > Date.now() - 90 * 24 * 60 * 60 * 1000;
 
   card.innerHTML = `
     <div class="media-thumb">
@@ -758,8 +881,10 @@ function buildMediaCard(item, resume = false, progressEntry = null) {
       <div class="media-flags">
         <span class="flag good">FREE</span>
         <span class="flag">${item.type === "tv" ? "SERIE" : "FILM"}</span>
+        ${isRecent ? '<span class="flag hot">NEW</span>' : ""}
         ${item.isAnime ? '<span class="flag">ANIME</span>' : ""}
       </div>
+      ${ratio > 0 ? `<div class="progress-track"><span style="width:${ratio}%"></span></div>` : ""}
     </div>
     <div class="media-body">
       <h3 class="media-title">${escapeHtml(item.title)}</h3>
@@ -1347,10 +1472,27 @@ function getYear(value) {
 
 function showMessage(message, isError = false) {
   if (isError) {
-    window.alert(message);
+    showToast(message, true);
     return;
   }
   refs.syncInfo.textContent = message;
+}
+
+function showToast(message, isError = false) {
+  if (!refs.toast) {
+    return;
+  }
+
+  refs.toast.textContent = message;
+  refs.toast.className = `toast${isError ? " error" : ""}`;
+  refs.toast.hidden = false;
+
+  if (toastTimer) {
+    clearTimeout(toastTimer);
+  }
+  toastTimer = setTimeout(() => {
+    refs.toast.hidden = true;
+  }, 3400);
 }
 
 function escapeHtml(value) {
