@@ -68,6 +68,7 @@ const refs = {
   heroPlayBtn: document.getElementById("heroPlayBtn"),
   heroInfoBtn: document.getElementById("heroInfoBtn"),
   heroTrailerBtn: document.getElementById("heroTrailerBtn"),
+  heroRandomBtn: document.getElementById("heroRandomBtn"),
 
   syncInfo: document.getElementById("syncInfo"),
   supportInfo: document.getElementById("supportInfo"),
@@ -80,6 +81,9 @@ const refs = {
   filterChips: document.getElementById("filterChips"),
   sortSelect: document.getElementById("sortSelect"),
   refreshNowBtn: document.getElementById("refreshNowBtn"),
+  shareBrowseBtn: document.getElementById("shareBrowseBtn"),
+  clearContinueBtn: document.getElementById("clearContinueBtn"),
+  clearListBtn: document.getElementById("clearListBtn"),
   communityStats: document.getElementById("communityStats"),
   latestSection: document.getElementById("latestSection"),
   latestGrid: document.getElementById("latestGrid"),
@@ -140,7 +144,9 @@ async function init() {
   refs.supportInfo.textContent = "Test episodes series > 2 en cours...";
 
   await detectSeriesSupport();
+  applyBrowseStateFromRoute();
   renderFilterChips();
+  setActiveNav(state.view);
 
   await Promise.allSettled([loadTopDaily(), loadInitialCatalog()]);
 
@@ -168,7 +174,7 @@ function bindEvents() {
     button.addEventListener("click", () => {
       const view = button.dataset.view || "all";
       state.view = view;
-      refs.navPills.forEach((entry) => entry.classList.toggle("active", entry === button));
+      setActiveNav(view);
       renderAll();
     });
   });
@@ -222,6 +228,30 @@ function bindEvents() {
       });
   });
 
+  refs.shareBrowseBtn.addEventListener("click", () => {
+    copyBrowseLink().catch(() => {
+      showToast("Impossible de copier le lien de cette vue.", true);
+    });
+  });
+
+  refs.clearContinueBtn.addEventListener("click", () => {
+    state.progress = {};
+    saveProgress(state.progress);
+    renderAll();
+    showToast("Historique 'Continuer' vide.");
+  });
+
+  refs.clearListBtn.addEventListener("click", () => {
+    state.favorites = {};
+    saveFavorites(state.favorites);
+    if (state.view === "list") {
+      state.view = "all";
+      setActiveNav("all");
+    }
+    renderAll();
+    showToast("Ma liste a ete videe.");
+  });
+
   refs.heroPlayBtn.addEventListener("click", () => {
     if (!state.activeHeroId) {
       return;
@@ -246,6 +276,20 @@ function bindEvents() {
     }
     openTrailerFromHero(state.activeHeroId).catch(() => {
       showMessage("Bande-annonce indisponible.", true);
+    });
+  });
+
+  refs.heroRandomBtn.addEventListener("click", () => {
+    const pool = getVisibleCatalog();
+    if (pool.length === 0) {
+      showToast("Aucun titre disponible pour une suggestion.", true);
+      return;
+    }
+    const pick = pool[Math.floor(Math.random() * pool.length)];
+    state.activeHeroId = pick.id;
+    renderAll();
+    openDetails(pick.id).catch(() => {
+      showToast("Impossible d'ouvrir la suggestion.", true);
     });
   });
 
@@ -373,6 +417,12 @@ function bindEvents() {
   });
 }
 
+function setActiveNav(view) {
+  refs.navPills.forEach((entry) => {
+    entry.classList.toggle("active", (entry.dataset.view || "") === view);
+  });
+}
+
 function startAutoRefresh() {
   if (state.refreshFeedTimer) {
     clearInterval(state.refreshFeedTimer);
@@ -423,10 +473,10 @@ function applySeriesSupportToNav() {
 
   if (!state.seriesSupported && (state.view === "tv" || state.view === "anime")) {
     state.view = "movie";
-    refs.navPills.forEach((entry) => {
-      entry.classList.toggle("active", (entry.dataset.view || "") === "movie");
-    });
+    setActiveNav("movie");
+    return;
   }
+  setActiveNav(state.view);
 }
 
 function renderFilterChips() {
@@ -638,6 +688,7 @@ function renderAll() {
   refs.emptyState.hidden = visible.length > 0;
   refs.topSection.hidden = state.topDaily.length === 0;
 
+  syncBrowseRoute();
   updateLoadMoreButton();
   updateSyncText();
 }
@@ -1718,11 +1769,110 @@ function updateDetailFavoriteButton(id) {
 
 async function copyCurrentLink() {
   const url = window.location.href;
-  if (!navigator.clipboard || !navigator.clipboard.writeText) {
+  await copyText(url);
+  showToast("Lien copie.");
+}
+
+async function copyBrowseLink() {
+  syncBrowseRoute({ replace: true });
+  const url = window.location.href;
+  await copyText(url);
+  showToast("Lien de la vue copie.");
+}
+
+async function copyText(value) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = value;
+  textarea.setAttribute("readonly", "true");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  document.body.appendChild(textarea);
+  textarea.select();
+
+  const ok = document.execCommand("copy");
+  document.body.removeChild(textarea);
+  if (!ok) {
     throw new Error("Clipboard unavailable");
   }
-  await navigator.clipboard.writeText(url);
-  showToast("Lien copie.");
+}
+
+function applyBrowseStateFromRoute() {
+  const url = new URL(window.location.href);
+
+  const view = String(url.searchParams.get("view") || "");
+  const chip = String(url.searchParams.get("chip") || "");
+  const sort = String(url.searchParams.get("sort") || "");
+  const query = String(url.searchParams.get("q") || "").trim();
+
+  const allowedViews = new Set(["all", "top", "movie", "tv", "anime", "list"]);
+  const allowedChips = new Set(["all", "recent", "movie", "tv", "anime"]);
+  const allowedSort = new Set(["featured", "recent", "title-asc", "title-desc", "runtime-desc"]);
+
+  if (allowedViews.has(view)) {
+    state.view = view;
+  }
+  if (allowedChips.has(chip)) {
+    state.chip = chip;
+  }
+  if (allowedSort.has(sort)) {
+    state.sortBy = sort;
+  }
+
+  state.query = query;
+  refs.searchInput.value = query;
+  refs.sortSelect.value = state.sortBy;
+}
+
+function syncBrowseRoute(options = {}) {
+  const route = readAppRoute();
+  if (route.watch > 0 || route.detail > 0) {
+    return;
+  }
+
+  const replace = options.replace !== false;
+  const url = new URL(window.location.href);
+
+  if (state.view && state.view !== "all") {
+    url.searchParams.set("view", state.view);
+  } else {
+    url.searchParams.delete("view");
+  }
+
+  if (state.chip && state.chip !== "all") {
+    url.searchParams.set("chip", state.chip);
+  } else {
+    url.searchParams.delete("chip");
+  }
+
+  if (state.sortBy && state.sortBy !== "featured") {
+    url.searchParams.set("sort", state.sortBy);
+  } else {
+    url.searchParams.delete("sort");
+  }
+
+  if (state.query && state.query.length > 0) {
+    url.searchParams.set("q", state.query);
+  } else {
+    url.searchParams.delete("q");
+  }
+
+  const next =
+    url.pathname + (url.searchParams.toString().length > 0 ? `?${url.searchParams.toString()}` : "");
+  const current = window.location.pathname + window.location.search;
+  if (next === current) {
+    return;
+  }
+
+  if (replace) {
+    history.replaceState({}, "", next);
+  } else {
+    history.pushState({}, "", next);
+  }
 }
 
 function setAppRoute(route, options = {}) {
