@@ -3,6 +3,9 @@ const STORAGE_KEY = "zenix-progress-v4";
 const CLEANUP_KEY = "zenix-sw-cleaned-v4";
 const REFRESH_FEED_MS = 10 * 60 * 1000;
 const REFRESH_TOP_MS = 60 * 60 * 1000;
+const REQUEST_TIMEOUT_MS = 15000;
+const RETRY_DELAYS_MS = [350, 900];
+const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
 
 const FALLBACK_ITEMS = [
   {
@@ -1377,27 +1380,55 @@ function saveProgress(value) {
 }
 
 async function fetchJson(url) {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 15000);
+  let lastError = null;
 
-  try {
-    const response = await fetch(url, {
-      method: "GET",
-      mode: "cors",
-      credentials: "omit",
-      signal: controller.signal,
-      headers: {
-        Accept: "application/json",
-      },
-    });
+  for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt += 1) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
+    try {
+      const response = await fetch(url, {
+        method: "GET",
+        mode: "cors",
+        credentials: "omit",
+        signal: controller.signal,
+        headers: {
+          Accept: "application/json",
+        },
+      });
+
+      if (!response.ok) {
+        const retryable = RETRYABLE_STATUS.has(response.status);
+        if (retryable && attempt < RETRY_DELAYS_MS.length) {
+          await wait(RETRY_DELAYS_MS[attempt]);
+          continue;
+        }
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      return response.json();
+    } catch (error) {
+      lastError = error;
+      const retryable =
+        String(error?.name || "") === "AbortError" ||
+        String(error?.message || "").toLowerCase().includes("network");
+
+      if (retryable && attempt < RETRY_DELAYS_MS.length) {
+        await wait(RETRY_DELAYS_MS[attempt]);
+        continue;
+      }
+
+      throw error;
+    } finally {
+      clearTimeout(timeoutId);
     }
-    return response.json();
-  } finally {
-    clearTimeout(timeoutId);
   }
+
+  throw lastError || new Error("Request failed");
+}
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function cleanupLegacyServiceWorker() {
