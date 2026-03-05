@@ -33,6 +33,7 @@
       <button class="nav-pill" data-view="movie" type="button">Films</button>
       <button class="nav-pill" data-view="tv" type="button">Series</button>
       <button class="nav-pill" data-view="anime" type="button">Anime</button>
+      <button class="nav-pill" data-view="list" type="button">Ma liste</button>
     </nav>
 
     <div class="header-tools">
@@ -109,6 +110,14 @@
       <div class="catalog-grid" id="popularGrid"></div>
     </section>
 
+    <section class="my-list" id="listSection" hidden>
+      <div class="section-head">
+        <h2>Ma liste</h2>
+        <p>Ta selection perso, prete a lancer.</p>
+      </div>
+      <div class="catalog-grid" id="listGrid"></div>
+    </section>
+
     <section class="continue" id="continueSection" hidden>
       <div class="section-head">
         <h2>Continuer</h2>
@@ -145,6 +154,8 @@
           <div class="detail-actions">
             <button class="btn btn-primary" id="detailPlayBtn" type="button">Lire sur Zenix</button>
             <button class="btn btn-ghost" id="detailTrailerBtn" type="button">Bande-annonce</button>
+            <button class="btn btn-soft" id="detailFavoriteBtn" type="button">Ajouter a ma liste</button>
+            <button class="btn btn-soft" id="detailShareBtn" type="button">Partager</button>
           </div>
 
           <div class="series-controls" id="detailSeriesControls" hidden>

@@ -328,7 +328,7 @@ body {
 
 .community-stats {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -380,6 +380,11 @@ body {
 }
 
 .spotlight {
+  display: grid;
+  gap: 8px;
+}
+
+.my-list {
   display: grid;
   gap: 8px;
 }
@@ -566,6 +571,18 @@ body {
   color: #f0f2f8;
   border: 1px solid rgba(255, 255, 255, 0.2);
   background: transparent;
+}
+
+.btn-fav {
+  color: #f0f2f8;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.btn-fav.active {
+  border-color: rgba(229, 9, 20, 0.55);
+  background: rgba(229, 9, 20, 0.2);
+  color: #ffe6e8;
 }
 
 .catalog-actions {

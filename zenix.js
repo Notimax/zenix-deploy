@@ -1,5 +1,6 @@
-﻿const API_BASE = "https://api.purstream.co/api/v1";
+const API_BASE = "https://api.purstream.co/api/v1";
 const STORAGE_KEY = "zenix-progress-v4";
+const FAVORITES_KEY = "zenix-favorites-v1";
 const CLEANUP_KEY = "zenix-sw-cleaned-v4";
 const REFRESH_FEED_MS = 10 * 60 * 1000;
 const REFRESH_TOP_MS = 60 * 60 * 1000;
@@ -49,7 +50,10 @@ const state = {
   trailersCache: new Map(),
   seasonsCache: new Map(),
   progress: loadProgress(),
+  favorites: loadFavorites(),
   nowPlaying: null,
+  sourcePool: [],
+  sourceIndex: -1,
   playToken: 0,
   lastSyncAt: null,
   refreshFeedTimer: null,
@@ -81,6 +85,8 @@ const refs = {
   latestGrid: document.getElementById("latestGrid"),
   popularSection: document.getElementById("popularSection"),
   popularGrid: document.getElementById("popularGrid"),
+  listSection: document.getElementById("listSection"),
+  listGrid: document.getElementById("listGrid"),
 
   continueSection: document.getElementById("continueSection"),
   continueGrid: document.getElementById("continueGrid"),
@@ -99,6 +105,8 @@ const refs = {
   detailBadges: document.getElementById("detailBadges"),
   detailPlayBtn: document.getElementById("detailPlayBtn"),
   detailTrailerBtn: document.getElementById("detailTrailerBtn"),
+  detailFavoriteBtn: document.getElementById("detailFavoriteBtn"),
+  detailShareBtn: document.getElementById("detailShareBtn"),
   detailSeriesControls: document.getElementById("detailSeriesControls"),
   detailSeasonSelect: document.getElementById("detailSeasonSelect"),
   detailEpisodeSelect: document.getElementById("detailEpisodeSelect"),
@@ -151,6 +159,7 @@ async function init() {
   }
 
   renderAll();
+  await applyInitialRoute();
   startAutoRefresh();
 }
 
@@ -273,6 +282,20 @@ function bindEvents() {
     });
   });
 
+  refs.detailFavoriteBtn.addEventListener("click", () => {
+    if (!state.selectedDetailId) {
+      return;
+    }
+    toggleFavorite(state.selectedDetailId);
+    updateDetailFavoriteButton(state.selectedDetailId);
+  });
+
+  refs.detailShareBtn.addEventListener("click", () => {
+    copyCurrentLink().catch(() => {
+      showToast("Impossible de copier le lien.", true);
+    });
+  });
+
   refs.detailSeasonSelect.addEventListener("change", () => {
     const id = state.selectedDetailId;
     if (!id) {
@@ -320,7 +343,9 @@ function bindEvents() {
   refs.playerVideo.addEventListener("timeupdate", onPlayerProgress);
   refs.playerVideo.addEventListener("ended", onPlayerEnded);
   refs.playerVideo.addEventListener("error", () => {
-    setPlayerStatus("Erreur video detectee. Choisis un autre titre.", true);
+    trySwitchToNextSource().catch(() => {
+      setPlayerStatus("Erreur video detectee. Choisis un autre titre.", true);
+    });
   });
 
   window.addEventListener("keydown", (event) => {
@@ -606,6 +631,7 @@ function renderAll() {
   renderTopDaily();
   renderCommunityStats();
   renderSpotlights();
+  renderMyList();
   renderContinue();
   renderCatalog(visible);
 
@@ -617,7 +643,12 @@ function renderAll() {
 }
 
 function getVisibleCatalog() {
-  let list = state.view === "top" ? state.topDaily.slice() : state.catalog.slice();
+  let list = state.catalog.slice();
+  if (state.view === "top") {
+    list = state.topDaily.slice();
+  } else if (state.view === "list") {
+    list = getFavoriteCatalog();
+  }
 
   if (state.view === "movie") {
     list = list.filter((item) => item.type === "movie");
@@ -666,6 +697,7 @@ function renderCommunityStats() {
   const movies = state.catalog.filter((item) => item.type === "movie").length;
   const series = state.catalog.filter((item) => item.type === "tv").length;
   const anime = state.catalog.filter((item) => item.isAnime).length;
+  const favorites = Object.keys(state.favorites).length;
   const activeWatch = Object.values(state.progress).filter((entry) => Number(entry?.time || 0) > 0).length;
 
   const stats = [
@@ -673,6 +705,7 @@ function renderCommunityStats() {
     { label: "Films", value: movies },
     { label: "Series", value: series },
     { label: "Anime", value: anime },
+    { label: "Ma liste", value: favorites },
     { label: "En cours", value: activeWatch },
   ];
 
@@ -721,6 +754,43 @@ function renderSpotlights() {
   refs.popularGrid.innerHTML = "";
   popular.forEach((item) => refs.popularGrid.appendChild(buildMediaCard(item, false)));
   refs.popularSection.hidden = popular.length === 0;
+}
+
+function getFavoriteCatalog() {
+  const ids = Object.keys(state.favorites)
+    .map((id) => Number(id))
+    .filter((id) => id > 0);
+
+  const list = ids
+    .map((id) => {
+      const item = findItemById(id);
+      if (item) {
+        return { ...item, addedAt: Number(state.favorites[item.id]?.addedAt || 0) };
+      }
+      const favorite = state.favorites[id] || {};
+      return {
+        id,
+        type: favorite.type === "tv" ? "tv" : "movie",
+        title: String(favorite.title || "Titre"),
+        poster: "",
+        backdrop: "",
+        runtime: null,
+        releaseDate: null,
+        endDate: null,
+        isAnime: false,
+        addedAt: Number(favorite.addedAt || 0),
+      };
+    })
+    .sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0));
+
+  return list;
+}
+
+function renderMyList() {
+  const items = getFavoriteCatalog().slice(0, 15);
+  refs.listGrid.innerHTML = "";
+  items.forEach((item) => refs.listGrid.appendChild(buildMediaCard(item, false)));
+  refs.listSection.hidden = items.length === 0;
 }
 
 function getHeroItem(visible) {
@@ -883,6 +953,7 @@ function buildMediaCard(item, resume = false, progressEntry = null) {
 
   const year = getYear(item.releaseDate) || "-";
   const runtime = item.runtime ? toHumanRuntime(item.runtime) : "Episode";
+  const favorite = isFavorite(item.id);
   const progress = progressEntry || state.progress[item.id] || null;
   const ratioRaw = progress && Number(progress.duration || 0) > 0
     ? (Number(progress.time || 0) / Number(progress.duration || 1)) * 100
@@ -907,12 +978,14 @@ function buildMediaCard(item, resume = false, progressEntry = null) {
       <div class="media-actions">
         <button type="button" class="btn-small btn-play" data-card-play="${item.id}">${resume ? "Reprendre" : "Lire"}</button>
         <button type="button" class="btn-small btn-info" data-card-info="${item.id}">Details</button>
+        <button type="button" class="btn-small btn-fav${favorite ? " active" : ""}" data-card-fav="${item.id}">${favorite ? "Retirer" : "+ Liste"}</button>
       </div>
     </div>
   `;
 
   const play = card.querySelector(`[data-card-play="${item.id}"]`);
   const info = card.querySelector(`[data-card-info="${item.id}"]`);
+  const fav = card.querySelector(`[data-card-fav="${item.id}"]`);
 
   if (play) {
     play.addEventListener("click", () => {
@@ -937,6 +1010,15 @@ function buildMediaCard(item, resume = false, progressEntry = null) {
       openDetails(item.id).catch(() => {
         showMessage("Impossible de charger les details.", true);
       });
+    });
+  }
+
+  if (fav) {
+    fav.addEventListener("click", () => {
+      toggleFavorite(item.id);
+      const nowFavorite = isFavorite(item.id);
+      fav.classList.toggle("active", nowFavorite);
+      fav.textContent = nowFavorite ? "Retirer" : "+ Liste";
     });
   }
 
@@ -1082,6 +1164,7 @@ async function openDetails(id) {
     return;
   }
   state.activeHeroId = id;
+  setAppRoute({ detail: id });
 
   const details = await ensureDetails(id);
   const trailers = await ensureTrailers(id);
@@ -1134,6 +1217,7 @@ async function openDetails(id) {
   });
 
   refs.detailTrailerBtn.disabled = trailers.length === 0;
+  updateDetailFavoriteButton(id);
 
   if (item.type === "tv") {
     try {
@@ -1166,6 +1250,9 @@ function closeDetails() {
   refs.detailModal.hidden = true;
   refs.trailerWrap.hidden = true;
   refs.trailerFrame.src = "";
+  if (refs.playerOverlay.hidden) {
+    setAppRoute({}, { replace: true });
+  }
   updateBodyScrollLock();
 }
 
@@ -1253,12 +1340,17 @@ async function loadMovieStream(item, resumeTime, token) {
     return;
   }
 
-  const source = pickSource(payload);
-  if (!source) {
+  const sources = extractSources(payload);
+  if (sources.length === 0) {
     throw new Error("No movie source");
   }
 
-  await startPlayerSource(source.stream_url, resumeTime, token);
+  state.sourcePool = sources
+    .map((entry) => String(entry?.stream_url || ""))
+    .filter((url) => url.length > 0);
+  state.sourceIndex = 0;
+
+  await startPlayerSource(state.sourcePool[0], resumeTime, token);
   state.nowPlaying = {
     id: item.id,
     type: "movie",
@@ -1267,6 +1359,7 @@ async function loadMovieStream(item, resumeTime, token) {
     season: 1,
     episode: 1,
   };
+  setAppRoute({ watch: item.id }, { replace: true });
 }
 
 async function loadEpisodeStream(item, season, episode, resumeTime, token) {
@@ -1279,12 +1372,17 @@ async function loadEpisodeStream(item, season, episode, resumeTime, token) {
     return;
   }
 
-  const source = pickSource(payload);
-  if (!source) {
+  const sources = extractSources(payload);
+  if (sources.length === 0) {
     throw new Error("No episode source");
   }
 
-  await startPlayerSource(source.stream_url, resumeTime, token);
+  state.sourcePool = sources
+    .map((entry) => String(entry?.stream_url || ""))
+    .filter((url) => url.length > 0);
+  state.sourceIndex = 0;
+
+  await startPlayerSource(state.sourcePool[0], resumeTime, token);
 
   state.nowPlaying = {
     id: item.id,
@@ -1294,6 +1392,7 @@ async function loadEpisodeStream(item, season, episode, resumeTime, token) {
     season,
     episode,
   };
+  setAppRoute({ watch: item.id, season, episode }, { replace: true });
   setPlayerStatus(`Lecture S${season}E${episode}`);
 }
 
@@ -1312,17 +1411,42 @@ async function switchPlayerEpisode(season, episode) {
 }
 
 function pickSource(payload) {
-  const items = payload?.data?.items;
-  const sources = Array.isArray(items?.sources)
-    ? items.sources
-    : Array.isArray(items)
-      ? items
-      : [];
-  if (!Array.isArray(sources) || sources.length === 0) {
+  const sources = extractSources(payload);
+  if (sources.length === 0) {
     return null;
   }
   const mp4 = sources.find((entry) => String(entry?.format || "").toLowerCase() === "mp4");
   return mp4 || sources[0];
+}
+
+function extractSources(payload) {
+  const items = payload?.data?.items;
+  return Array.isArray(items?.sources)
+    ? items.sources
+    : Array.isArray(items)
+      ? items
+      : [];
+}
+
+async function trySwitchToNextSource() {
+  if (!state.sourcePool.length || state.sourceIndex < 0) {
+    setPlayerStatus("Erreur video detectee. Choisis un autre titre.", true);
+    return;
+  }
+
+  const nextIndex = state.sourceIndex + 1;
+  if (nextIndex >= state.sourcePool.length) {
+    setPlayerStatus("Source indisponible. Aucun secours disponible.", true);
+    return;
+  }
+
+  const token = ++state.playToken;
+  const resumeTime = Number(refs.playerVideo.currentTime || 0);
+  state.sourceIndex = nextIndex;
+
+  setPlayerStatus(`Bascule source ${nextIndex + 1}/${state.sourcePool.length}...`);
+  await startPlayerSource(state.sourcePool[nextIndex], resumeTime, token);
+  showToast("Source alternative active.");
 }
 
 async function startPlayerSource(streamUrl, resumeTime, token) {
@@ -1390,7 +1514,14 @@ function closePlayer() {
   refs.playerVideo.load();
 
   setPlayerStatus("");
+  state.sourcePool = [];
+  state.sourceIndex = -1;
   state.nowPlaying = null;
+  if (!refs.detailModal.hidden && state.selectedDetailId) {
+    setAppRoute({ detail: state.selectedDetailId }, { replace: true });
+  } else {
+    setAppRoute({}, { replace: true });
+  }
   updateBodyScrollLock();
 }
 
@@ -1425,13 +1556,42 @@ function onPlayerEnded() {
     return;
   }
 
+  const ended = { ...state.nowPlaying };
   const current = state.progress[state.nowPlaying.id];
   if (current) {
     current.time = 0;
     current.lastPlayed = Date.now();
     saveProgress(state.progress);
   }
+
+  if (ended.type === "tv") {
+    autoAdvanceEpisode(ended).catch(() => {
+      showToast("Fin d'episode. Selectionne le suivant.", false);
+    });
+  }
   renderContinue();
+}
+
+async function autoAdvanceEpisode(ended) {
+  const seasons = state.seasonsCache.get(ended.id) || (await ensureSeasons(ended.id));
+  const season = seasons.find((entry) => entry.season === ended.season);
+  if (!season) {
+    return;
+  }
+
+  const sortedEpisodes = season.episodes.slice().sort((a, b) => a.episode - b.episode);
+  const currentIndex = sortedEpisodes.findIndex((entry) => entry.episode === ended.episode);
+  if (currentIndex < 0 || currentIndex >= sortedEpisodes.length - 1) {
+    showToast("Fin de saison atteinte.");
+    return;
+  }
+
+  const nextEpisode = sortedEpisodes[currentIndex + 1].episode;
+  populateEpisodeSelect(refs.playerEpisodeSelect, sortedEpisodes, nextEpisode);
+  refs.playerEpisodeSelect.value = String(nextEpisode);
+
+  await switchPlayerEpisode(ended.season, nextEpisode);
+  showToast(`Episode suivant lance: S${ended.season}E${nextEpisode}.`);
 }
 
 async function buildItemFromDetails(id) {
@@ -1522,6 +1682,123 @@ function showToast(message, isError = false) {
   }, 3400);
 }
 
+function isFavorite(id) {
+  return Boolean(state.favorites[id]);
+}
+
+function toggleFavorite(id) {
+  if (!id) {
+    return;
+  }
+
+  const item = findItemById(id);
+  if (isFavorite(id)) {
+    delete state.favorites[id];
+    saveFavorites(state.favorites);
+    showToast("Retire de ta liste.");
+  } else {
+    state.favorites[id] = {
+      id,
+      type: item?.type || "movie",
+      title: item?.title || "",
+      addedAt: Date.now(),
+    };
+    saveFavorites(state.favorites);
+    showToast("Ajoute a ta liste.");
+  }
+  renderAll();
+}
+
+function updateDetailFavoriteButton(id) {
+  if (!refs.detailFavoriteBtn) {
+    return;
+  }
+  refs.detailFavoriteBtn.textContent = isFavorite(id) ? "Retirer de ma liste" : "Ajouter a ma liste";
+}
+
+async function copyCurrentLink() {
+  const url = window.location.href;
+  if (!navigator.clipboard || !navigator.clipboard.writeText) {
+    throw new Error("Clipboard unavailable");
+  }
+  await navigator.clipboard.writeText(url);
+  showToast("Lien copie.");
+}
+
+function setAppRoute(route, options = {}) {
+  const replace = Boolean(options.replace);
+  const url = new URL(window.location.href);
+
+  url.searchParams.delete("detail");
+  url.searchParams.delete("watch");
+  url.searchParams.delete("s");
+  url.searchParams.delete("e");
+
+  if (route?.watch) {
+    url.searchParams.set("watch", String(route.watch));
+    if (route.season) {
+      url.searchParams.set("s", String(route.season));
+    }
+    if (route.episode) {
+      url.searchParams.set("e", String(route.episode));
+    }
+  } else if (route?.detail) {
+    url.searchParams.set("detail", String(route.detail));
+  }
+
+  const next =
+    url.pathname + (url.searchParams.toString().length > 0 ? `?${url.searchParams.toString()}` : "");
+  const current = window.location.pathname + window.location.search;
+  if (next === current) {
+    return;
+  }
+
+  if (replace) {
+    history.replaceState({}, "", next);
+  } else {
+    history.pushState({}, "", next);
+  }
+}
+
+function readAppRoute() {
+  const url = new URL(window.location.href);
+  const watch = Number(url.searchParams.get("watch") || 0);
+  const detail = Number(url.searchParams.get("detail") || 0);
+  const season = Number(url.searchParams.get("s") || 0);
+  const episode = Number(url.searchParams.get("e") || 0);
+  return {
+    watch: watch > 0 ? watch : 0,
+    detail: detail > 0 ? detail : 0,
+    season: season > 0 ? season : 0,
+    episode: episode > 0 ? episode : 0,
+  };
+}
+
+async function applyInitialRoute() {
+  const route = readAppRoute();
+  if (route.watch > 0) {
+    try {
+      await openPlayer(route.watch, {
+        season: route.season || 1,
+        episode: route.episode || 1,
+      });
+    } catch {
+      showToast("Lien de lecture invalide ou indisponible.", true);
+      setAppRoute({}, { replace: true });
+    }
+    return;
+  }
+
+  if (route.detail > 0) {
+    try {
+      await openDetails(route.detail);
+    } catch {
+      showToast("Lien detail invalide ou indisponible.", true);
+      setAppRoute({}, { replace: true });
+    }
+  }
+}
+
 function escapeHtml(value) {
   return String(value || "")
     .replaceAll("&", "&amp;")
@@ -1546,6 +1823,23 @@ function loadProgress() {
 
 function saveProgress(value) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(value));
+}
+
+function loadFavorites() {
+  try {
+    const raw = localStorage.getItem(FAVORITES_KEY);
+    if (!raw) {
+      return {};
+    }
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveFavorites(value) {
+  localStorage.setItem(FAVORITES_KEY, JSON.stringify(value));
 }
 
 async function fetchJson(url) {
