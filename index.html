@@ -1,30 +1,92 @@
 <!doctype html>
 <html lang="fr">
-
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport"
-    content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0" />
-  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
-  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
-  <meta http-equiv="Pragma" content="no-cache" />
-  <meta http-equiv="Expires" content="0" />
-  <link rel="apple-touch-icon" sizes="180x180" href="/assets/apple-touch-icon.CKCmWR2h.png" />
-  <link rel="icon" type="image/x-icon" sizes="512x512" href="/assets/favicon.BYaz4d7M.ico" />
-  <link rel="manifest" href="/assets/site.CPK6lrvY.webmanifest" />
-  <link rel="mask-icon" href="/assets/safari-pinned-tab.D0Xo--wL.png" color="#121118" />
-  <meta name="apple-mobile-web-app-title" content="purstream" />
-  <meta name="application-name" content="purstream" />
-  <meta name="msapplication-TileColor" content="#121118" />
-  <meta name="theme-color" content="#121118" />
-  <title>Purstream</title>
-  <script defer data-domain="purstream.co" src="https://plausible.io/js/script.js"></script>
-  <script type="module" crossorigin src="/assets/index.DooWAh_A.js"></script>
-  <link rel="stylesheet" crossorigin href="/assets/index.7y4Mu4Uj.css">
-<link rel="manifest" href="/manifest.webmanifest"></head>
-
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Zenix: streaming 100% gratuit, rapide et direct. Aucune offre payante." />
+  <meta name="theme-color" content="#081226" />
+  <meta name="apple-mobile-web-app-title" content="Zenix" />
+  <meta name="application-name" content="Zenix" />
+  <title>Zenix | Streaming Gratuit</title>
+  <link rel="icon" type="image/png" sizes="192x192" href="/android-chrome-192x192.png" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/zenix.css" />
+  <script defer src="/zenix.js"></script>
+</head>
 <body>
-  <div id="root"></div>
-</body>
+  <div class="app-bg" aria-hidden="true"></div>
+  <div class="app-noise" aria-hidden="true"></div>
 
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="Accueil Zenix">
+      <span class="brand-mark">Z</span>
+      <span class="brand-text">Zenix</span>
+    </a>
+    <nav class="top-nav">
+      <button class="nav-pill active" type="button">Accueil</button>
+      <button class="nav-pill" type="button">Nouveautes</button>
+      <button class="nav-pill" type="button">Populaires</button>
+      <button class="nav-pill" type="button">Direct</button>
+    </nav>
+    <div class="status-badge">100% gratuit</div>
+  </header>
+
+  <main class="layout">
+    <section class="hero" id="hero">
+      <div class="hero-content">
+        <p class="hero-overline">Streaming rapide et sans abonnement</p>
+        <h1 id="heroTitle">Zenix Originals</h1>
+        <p id="heroDescription">Lecture instantanee, design propre, zero paywall.</p>
+        <div class="hero-actions">
+          <button class="btn btn-primary" id="heroPlayBtn" type="button">Lire maintenant</button>
+          <button class="btn btn-ghost" id="heroInfoBtn" type="button">Plus d'infos</button>
+        </div>
+        <div class="hero-meta" id="heroMeta"></div>
+      </div>
+      <img class="hero-art" id="heroArt" alt="Affiche mise en avant" loading="eager" />
+    </section>
+
+    <section class="filters">
+      <div class="search-wrap">
+        <input id="searchInput" type="search" placeholder="Rechercher un film ou une serie..." autocomplete="off" />
+      </div>
+      <div class="chip-row" id="genreChips"></div>
+    </section>
+
+    <section class="continue" id="continueSection" hidden>
+      <div class="section-head">
+        <h2>Reprendre</h2>
+        <p>Continue ta lecture en 1 clic.</p>
+      </div>
+      <div class="continue-grid" id="continueGrid"></div>
+    </section>
+
+    <section class="catalog">
+      <div class="section-head">
+        <h2>Catalogue gratuit</h2>
+        <p>Aucun contenu payant. Tout est lance directement.</p>
+      </div>
+      <div class="catalog-grid" id="catalogGrid"></div>
+      <p class="empty" id="emptyState" hidden>Aucun resultat pour cette recherche.</p>
+    </section>
+  </main>
+
+  <section class="player-sheet" id="playerSheet" hidden>
+    <div class="player-panel">
+      <div class="player-head">
+        <div>
+          <p class="player-kicker">Lecture en cours</p>
+          <h3 id="playerTitle">Titre</h3>
+        </div>
+        <button class="player-close" id="closePlayerBtn" type="button" aria-label="Fermer le lecteur">Fermer</button>
+      </div>
+      <video id="playerVideo" controls playsinline preload="metadata"></video>
+      <p class="player-note">Source libre ou sous licence ouverte, gratuite d'acces.</p>
+    </div>
+  </section>
+</body>
 </html>

@@ -1,6 +1,6 @@
-# Zenix Stream
+﻿# Zenix Stream
 
-Clone statique local de `https://purstream.co` (front build).
+Frontend Zenix de streaming gratuit avec lecture directe.
 
 ## Lancer en local
 
@@ -9,20 +9,17 @@ cd "C:\Users\user\Desktop\Bot osint\site\Zenix Stream"
 npm start
 ```
 
-Puis ouvre:
+Ouvre ensuite:
 
-`http://localhost:4173`
+`http://localhost:10000`
 
 ## Notes
 
-- Les routes SPA sont gerees (fallback `index.html`).
-- Les appels `/api` et `/socket` sont proxifies vers `https://purstream.co`.
-- Pour retelecharger les fichiers distants:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File ".\fetch.ps1"
-```
+- Interface 100% gratuite (aucun paywall).
+- Lecture directe avec un lecteur video HTML5.
+- Sauvegarde locale de reprise de lecture (`localStorage`).
+- Service worker nettoye pour eviter les caches herites.
 
 ## Deploiement Render
 
-Le blueprint Render est dans [render.yaml](C:\Users\user\Desktop\Bot osint\site\Zenix Stream\render.yaml) avec le service `zenix`.
+`render.yaml` deploie le service web `zenix` sur le plan free.

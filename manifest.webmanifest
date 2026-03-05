@@ -1,1 +1,31 @@
-{"name":"Purstream","short_name":"Purstream","start_url":"https://purstream.co/discover","display":"standalone","background_color":"#121118","lang":"fr","scope":"https://purstream.co","description":"Ta destination pour le streaming de films et séries.","categories":["entertainment"],"icons":[{"src":"/android-chrome-192x192.png","sizes":"192x192","type":"image/png","purpose":"monochrome"},{"src":"/android-chrome-512x512.png","sizes":"512x512","type":"image/png","purpose":"any"},{"src":"/apple-touch-icon.png","sizes":"180x180","type":"image/png","purpose":"any"}],"theme_color":"#121118","display_override":["minimal-ui"]}
+﻿{
+  "name": "Zenix",
+  "short_name": "Zenix",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#081226",
+  "theme_color": "#081226",
+  "lang": "fr",
+  "description": "Zenix: streaming gratuit, rapide et sans abonnement.",
+  "categories": [
+    "entertainment"
+  ],
+  "icons": [
+    {
+      "src": "/android-chrome-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/android-chrome-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    }
+  ]
+}

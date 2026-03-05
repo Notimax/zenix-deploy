@@ -1,8 +1,8 @@
-{
-  "name": "zenix-stream-local",
+﻿{
+  "name": "zenix-stream",
   "private": true,
   "version": "1.0.0",
-  "description": "Local mirror runtime for purstream.co",
+  "description": "Zenix streaming frontend (free and direct playback)",
   "scripts": {
     "start": "node server.js"
   }

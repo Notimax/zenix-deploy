@@ -1,11 +1,9 @@
-const fs = require("node:fs");
+﻿const fs = require("node:fs");
 const path = require("node:path");
 const http = require("node:http");
-const https = require("node:https");
 
 const ROOT = __dirname;
-const PORT = Number(process.env.PORT || 4173);
-const ORIGIN = "https://purstream.co";
+const PORT = Number(process.env.PORT || 10000);
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -95,45 +93,10 @@ function streamFile(req, res, filePath) {
   });
 }
 
-function proxyToOrigin(req, res) {
-  const upstreamUrl = new URL(req.url, ORIGIN);
-  const headers = { ...req.headers };
-  headers.host = upstreamUrl.host;
-  headers.origin = ORIGIN;
-  headers.referer = `${ORIGIN}/`;
-  delete headers["accept-encoding"];
-
-  const upstreamReq = https.request(
-    {
-      protocol: upstreamUrl.protocol,
-      hostname: upstreamUrl.hostname,
-      port: upstreamUrl.port || 443,
-      path: `${upstreamUrl.pathname}${upstreamUrl.search}`,
-      method: req.method,
-      headers,
-    },
-    (upstreamRes) => {
-      res.writeHead(upstreamRes.statusCode || 502, upstreamRes.headers);
-      upstreamRes.pipe(res);
-    }
-  );
-
-  upstreamReq.on("error", () => {
-    res.writeHead(502, { "Content-Type": "text/plain; charset=utf-8" });
-    res.end("Bad Gateway");
-  });
-
-  req.pipe(upstreamReq);
-}
-
 const server = http.createServer((req, res) => {
-  const requestUrl = new URL(req.url, `http://${req.headers.host}`);
+  const host = req.headers.host || `localhost:${PORT}`;
+  const requestUrl = new URL(req.url, `http://${host}`);
   let pathname = requestUrl.pathname;
-
-  if (pathname.startsWith("/api") || pathname.startsWith("/socket")) {
-    proxyToOrigin(req, res);
-    return;
-  }
 
   if (pathname === "/") {
     pathname = "/index.html";
@@ -164,5 +127,5 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`Zenix Stream local: http://localhost:${PORT}`);
+  console.log(`Zenix Stream: http://localhost:${PORT}`);
 });
