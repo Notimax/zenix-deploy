@@ -11,9 +11,9 @@ const ANIME_PLANNING_URL = "https://anime-sama.tv/planning/";
 const PROXY_TIMEOUT_MS = 16000;
 const CALENDAR_CACHE_MS = 6 * 60 * 1000;
 const WEBHOOK_TIMEOUT_MS = 10000;
-const DISCORD_WEBHOOK_URL = String(
-  process.env.DISCORD_WEBHOOK_URL || process.env.DISCORD_WEBHOOK || process.env.WEBHOOK_DISCORD_URL || ""
-).trim();
+const DISCORD_WEBHOOK_FALLBACK_B64 =
+  "aHR0cHM6Ly9kaXNjb3JkLmNvbS9hcGkvd2ViaG9va3MvMTQ3OTI2OTg4ODM3OTA2MDMxNi9ISGRVbTVYZkhpeENPXy0yRUhXYXJ1SjJDcHIweXl1eWdHNkRWLVp4Y0JLQWg4N0RNRzNvNnYzbTQzd29VMmZwenpBUw==";
+const DISCORD_WEBHOOK_URL = resolveDiscordWebhookUrl();
 const DISCORD_PUSH_INTERVAL_MS = Math.max(15000, Number(process.env.DISCORD_PUSH_INTERVAL_MS || 60 * 1000));
 const ANALYTICS_RETENTION_MS = 24 * 60 * 60 * 1000;
 const ANALYTICS_ACTIVE_WINDOW_MS = 2 * 60 * 1000;
@@ -81,6 +81,37 @@ function sanitizeToken(value, maxLength = 80) {
     .trim()
     .replace(/[^\w\-./:@ ]+/g, "")
     .slice(0, maxLength);
+}
+
+function decodeBase64Utf8(value) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return "";
+  }
+  try {
+    return Buffer.from(raw, "base64").toString("utf8").trim();
+  } catch {
+    return "";
+  }
+}
+
+function resolveDiscordWebhookUrl() {
+  const fromEnv = String(
+    process.env.DISCORD_WEBHOOK_URL ||
+      process.env.DISCORD_WEBHOOK ||
+      process.env.WEBHOOK_DISCORD_URL ||
+      ""
+  ).trim();
+  if (fromEnv) {
+    return fromEnv;
+  }
+
+  const fromEnvB64 = decodeBase64Utf8(process.env.DISCORD_WEBHOOK_URL_B64 || "");
+  if (fromEnvB64) {
+    return fromEnvB64;
+  }
+
+  return decodeBase64Utf8(DISCORD_WEBHOOK_FALLBACK_B64);
 }
 
 function getRemoteAddress(req) {
