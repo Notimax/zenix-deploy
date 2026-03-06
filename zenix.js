@@ -233,6 +233,8 @@ const refs = {
 };
 
 let searchDebounce = null;
+let lastDetailCloseTouchAt = 0;
+let lastPlayerCloseTouchAt = 0;
 let lastProgressSave = 0;
 let toastTimer = null;
 
@@ -509,7 +511,24 @@ function bindEvents() {
     });
   });
 
-  refs.detailCloseBtn.addEventListener("click", closeDetails);
+  refs.detailCloseBtn.addEventListener(
+    "pointerdown",
+    (event) => {
+      if (event.pointerType === "mouse") {
+        return;
+      }
+      event.preventDefault();
+      lastDetailCloseTouchAt = Date.now();
+      closeDetails();
+    },
+    { passive: false }
+  );
+  refs.detailCloseBtn.addEventListener("click", () => {
+    if (Date.now() - lastDetailCloseTouchAt < 450) {
+      return;
+    }
+    closeDetails();
+  });
   refs.detailModal.addEventListener("click", (event) => {
     if (event.target === refs.detailModal) {
       closeDetails();
@@ -591,7 +610,24 @@ function bindEvents() {
     }
   });
 
-  refs.playerCloseBtn.addEventListener("click", closePlayer);
+  refs.playerCloseBtn.addEventListener(
+    "pointerdown",
+    (event) => {
+      if (event.pointerType === "mouse") {
+        return;
+      }
+      event.preventDefault();
+      lastPlayerCloseTouchAt = Date.now();
+      closePlayer();
+    },
+    { passive: false }
+  );
+  refs.playerCloseBtn.addEventListener("click", () => {
+    if (Date.now() - lastPlayerCloseTouchAt < 450) {
+      return;
+    }
+    closePlayer();
+  });
   refs.playerOverlay.addEventListener("click", (event) => {
     if (event.target === refs.playerOverlay) {
       closePlayer();

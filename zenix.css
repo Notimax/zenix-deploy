@@ -166,6 +166,7 @@ body {
   font: inherit;
   font-size: 0.84rem;
   padding: 8px 13px;
+  min-height: 40px;
   cursor: pointer;
   white-space: nowrap;
 }
@@ -1142,6 +1143,10 @@ body {
   cursor: pointer;
   font: inherit;
   font-weight: 700;
+  min-height: 40px;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
 }
 
 .btn {
@@ -1156,6 +1161,7 @@ body {
 .btn-compact {
   font-size: 0.78rem;
   padding: 8px 12px;
+  min-height: 40px;
 }
 
 .btn-primary,
@@ -1195,6 +1201,15 @@ body {
 .chip,
 .quick-link {
   transition: transform 140ms ease, filter 140ms ease, background-color 140ms ease, border-color 140ms ease;
+}
+
+.nav-pill,
+.chip,
+.quick-link,
+.modal-close {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
 }
 
 .btn:hover,
@@ -1447,6 +1462,11 @@ body {
 
 .modal-close {
   margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
   border-radius: 999px;
   border: 1px solid rgba(255, 255, 255, 0.2);
   background: rgba(255, 255, 255, 0.09);
@@ -1978,6 +1998,40 @@ body {
   .media-card:hover img {
     transform: none;
     filter: none;
+  }
+
+  .btn:hover,
+  .btn-small:hover,
+  .quick-link:hover,
+  .chip:hover {
+    transform: none;
+    filter: none;
+  }
+
+  .nav-pill:hover {
+    color: var(--muted);
+    border-color: transparent;
+    background: transparent;
+  }
+
+  .quick-link:hover {
+    border-color: rgba(255, 255, 255, 0.16);
+    background: rgba(255, 255, 255, 0.03);
+  }
+
+  .chip:hover {
+    border-color: rgba(255, 255, 255, 0.2);
+    background: rgba(255, 255, 255, 0.05);
+    color: #d7dae4;
+  }
+
+  .btn:active,
+  .btn-small:active,
+  .nav-pill:active,
+  .chip:active,
+  .quick-link:active,
+  .modal-close:active {
+    transform: scale(0.98);
   }
 }
 
