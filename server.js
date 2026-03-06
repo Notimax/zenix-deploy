@@ -30,6 +30,7 @@ let analyticsLastPushAt = 0;
 let discordStatsMessageId = "";
 let discordNextAllowedAt = 0;
 let discordPushInFlight = null;
+let discordRateLimitedStreak = 0;
 let discordLastResult = {
   at: "",
   reason: "startup",
@@ -414,6 +415,13 @@ function setDiscordLastResult(reason, phase, result = {}) {
   };
 }
 
+function getDiscordBackoffMs(retryAfterMs = 0) {
+  const retry = Math.max(0, Number(retryAfterMs || 0));
+  const base = Math.max(15000, DISCORD_PUSH_INTERVAL_MS, retry + 700);
+  const multiplier = Math.max(1, Math.min(6, discordRateLimitedStreak));
+  return Math.min(15 * 60 * 1000, base * multiplier);
+}
+
 async function sendDiscordWebhook(method, payload, options = {}) {
   const messageId = String(options.messageId || "").trim();
   const wait = Boolean(options.wait);
@@ -523,10 +531,15 @@ async function pushDiscordStats(reason = "interval") {
     });
     setDiscordLastResult(reason, "patch", patched);
     if (patched.ok) {
+      discordRateLimitedStreak = 0;
       return;
     }
-    if (patched.status === 429 && patched.retryAfterMs > 0) {
-      discordNextAllowedAt = now + patched.retryAfterMs + 350;
+    if (patched.status === 429) {
+      discordRateLimitedStreak += 1;
+      discordNextAllowedAt = now + getDiscordBackoffMs(patched.retryAfterMs);
+    } else if (patched.status > 0) {
+      discordRateLimitedStreak = 0;
+      discordNextAllowedAt = now + Math.max(DISCORD_PUSH_INTERVAL_MS, 30000);
     }
     if (patched.status === 404 || patched.status === 400) {
       discordStatsMessageId = "";
@@ -536,10 +549,15 @@ async function pushDiscordStats(reason = "interval") {
 
   const created = await sendDiscordWebhookWithRetry("POST", payload, { wait: true });
   setDiscordLastResult(reason, "create", created);
-  if (created.status === 429 && created.retryAfterMs > 0) {
-    discordNextAllowedAt = now + created.retryAfterMs + 350;
+  if (created.status === 429) {
+    discordRateLimitedStreak += 1;
+    discordNextAllowedAt = now + getDiscordBackoffMs(created.retryAfterMs);
+  } else if (created.status > 0) {
+    discordRateLimitedStreak = 0;
+    discordNextAllowedAt = now + Math.max(DISCORD_PUSH_INTERVAL_MS, 30000);
   }
   if (created.ok) {
+    discordRateLimitedStreak = 0;
     const nextId = String(created.body?.id || "").trim();
     if (/^\d{8,30}$/.test(nextId)) {
       discordStatsMessageId = nextId;
