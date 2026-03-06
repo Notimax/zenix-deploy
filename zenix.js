@@ -304,12 +304,22 @@ let searchDebounce = null;
 let lastProgressSave = 0;
 let toastTimer = null;
 
+function replayStartupSplashAnimations() {
+  if (!refs.startupSplash) {
+    return;
+  }
+  refs.startupSplash.classList.add("is-replaying");
+  void refs.startupSplash.offsetWidth;
+  refs.startupSplash.classList.remove("is-replaying");
+}
+
 function startStartupSplash() {
   if (!refs.startupSplash) {
     return performance.now();
   }
   refs.startupSplash.hidden = false;
   refs.startupSplash.classList.remove("is-leaving");
+  replayStartupSplashAnimations();
   document.body.classList.add("startup-lock");
 
   if (state.startupSplashForceTimer) {

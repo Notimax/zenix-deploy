@@ -268,6 +268,22 @@ body.startup-lock {
   animation: startup-logo-out 560ms ease both;
 }
 
+.startup-splash.is-replaying::before,
+.startup-splash.is-replaying::after,
+.startup-splash.is-replaying .startup-grid,
+.startup-splash.is-replaying .startup-beam,
+.startup-splash.is-replaying .startup-radial,
+.startup-splash.is-replaying .startup-splash-glow,
+.startup-splash.is-replaying .startup-logo,
+.startup-splash.is-replaying .startup-logo::before,
+.startup-splash.is-replaying .startup-logo::after,
+.startup-splash.is-replaying .startup-z-top,
+.startup-splash.is-replaying .startup-z-bottom,
+.startup-splash.is-replaying .startup-z-diag,
+.startup-splash.is-replaying .startup-word {
+  animation: none !important;
+}
+
 .app-canvas {
   position: fixed;
   inset: -20vh -10vw;
@@ -3000,23 +3016,6 @@ body.compact-cards .top-meta {
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;
-  }
-
-  .startup-splash::before,
-  .startup-splash::after,
-  .startup-grid,
-  .startup-beam,
-  .startup-radial,
-  .startup-splash-glow,
-  .startup-logo,
-  .startup-logo::before,
-  .startup-logo::after,
-  .startup-z-top,
-  .startup-z-bottom,
-  .startup-z-diag,
-  .startup-word,
-  .startup-splash.is-leaving .startup-logo {
-    animation: none;
   }
 
   .feature-track {
