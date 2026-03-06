@@ -50,6 +50,9 @@ const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
 const HLS_JS_URL = "https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js";
 const HLS_MIME = "application/vnd.apple.mpegurl";
 const DASH_MIME = "application/dash+xml";
+const VIDEO_READY_TIMEOUT_MS = 15000;
+const HLS_READY_TIMEOUT_MS = 28000;
+const HLS_MANIFEST_TIMEOUT_MS = 30000;
 const HEARTBEAT_INTERVAL_MS = 30 * 1000;
 const HEARTBEAT_KEY = "zenix-client-id-v1";
 
@@ -999,6 +1002,17 @@ function setActiveNav(view) {
 
 function isCatalogCategoryView(view) {
   return view === "movie" || view === "tv" || view === "anime";
+}
+
+function resolveCatalogViewForSearch() {
+  const query = String(state.query || "").trim();
+  if (query.length === 0) {
+    return state.view;
+  }
+  if (state.view === "all" || isCatalogCategoryView(state.view)) {
+    return state.view;
+  }
+  return "all";
 }
 
 function setHidden(node, hidden) {
@@ -1975,7 +1989,7 @@ async function refreshCatalogHead() {
       updateSyncText();
     }
   } catch {
-    updateSyncText("Synchronisation auto: echec temporaire, nouvelle tentative plus tard.");
+    updateSyncText();
   }
 }
 
@@ -1999,6 +2013,22 @@ async function loadTopDaily() {
   }
 }
 
+function extractSearchRows(payload) {
+  const candidates = [
+    payload?.data?.items?.movies?.items,
+    payload?.data?.items?.items,
+    payload?.data?.items,
+    payload?.data?.movies?.items,
+    payload?.data?.results,
+  ];
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate)) {
+      return candidate;
+    }
+  }
+  return [];
+}
+
 async function handleRemoteSearch(token, signal) {
   const query = state.query.trim();
   if (query.length < 2) {
@@ -2012,12 +2042,15 @@ async function handleRemoteSearch(token, signal) {
     return;
   }
 
-  const rows = payload?.data?.items?.movies?.items;
-  if (!Array.isArray(rows)) {
+  const rows = extractSearchRows(payload);
+  if (rows.length === 0) {
     return;
   }
 
-  const mapped = rows.map(normalizeCatalogItem);
+  const mapped = rows.map(normalizeCatalogItem).filter(Boolean);
+  if (mapped.length === 0) {
+    return;
+  }
   upsertCatalogItems(mapped, { prepend: true });
   saveCatalogSnapshot();
 }
@@ -2103,12 +2136,12 @@ function renderAll() {
   }
 
   const visible = getVisibleCatalog();
-  const heroItem = getHeroItem(visible);
   const hasQuery = state.query.trim().length > 0;
-  const isInfoView = state.view === "info";
+  const heroItem = getHeroItem(visible);
+  const isInfoView = !hasQuery && state.view === "info";
   const isCalendarView = state.view === "calendar";
-  const isListView = state.view === "list";
-  const isTopView = state.view === "top";
+  const isListView = !hasQuery && state.view === "list";
+  const isTopView = !hasQuery && state.view === "top";
   const showBrowseView = !isInfoView && !isCalendarView && !isTopView && !isListView;
 
   if (showBrowseView) {
@@ -2170,22 +2203,23 @@ function renderAll() {
 }
 
 function getVisibleCatalog() {
+  const activeView = resolveCatalogViewForSearch();
   let list = state.catalog.slice();
-  if (state.view === "top") {
+  if (activeView === "top") {
     list = state.topDaily.slice();
-  } else if (state.view === "list") {
+  } else if (activeView === "list") {
     list = getFavoriteCatalog();
-  } else if (state.view === "latest") {
+  } else if (activeView === "latest") {
     list.sort((a, b) => parseReleaseDate(b.releaseDate) - parseReleaseDate(a.releaseDate));
-  } else if (state.view === "popular") {
+  } else if (activeView === "popular") {
     list = getPopularCatalog();
   }
 
-  if (state.view === "movie") {
+  if (activeView === "movie") {
     list = list.filter((item) => item.type === "movie" && !item.isAnime);
-  } else if (state.view === "tv") {
+  } else if (activeView === "tv") {
     list = list.filter((item) => item.type === "tv" && !item.isAnime);
-  } else if (state.view === "anime") {
+  } else if (activeView === "anime") {
     list = list.filter((item) => item.isAnime);
   }
 
@@ -2265,12 +2299,12 @@ function updateCatalogHeading(hasQuery, resultCount) {
     latest: "Nouveautes",
     popular: "Populaires",
   };
-  refs.catalogTitle.textContent = titleByView[state.view] || "Streaming";
-
   if (hasQuery) {
+    refs.catalogTitle.textContent = "Recherche";
     refs.catalogSubtitle.textContent = `${resultCount} titre(s) trouve(s) pour "${state.query}".`;
     return;
   }
+  refs.catalogTitle.textContent = titleByView[state.view] || "Streaming";
 
   if (state.view === "latest") {
     refs.catalogSubtitle.textContent = "Derniers ajouts detectes automatiquement.";
@@ -2838,13 +2872,20 @@ function renderCatalog(items) {
     Math.min(CATALOG_RENDER_CHUNK_MAX, Math.ceil(total / 9))
   );
   const chunkSize = compact ? Math.max(baseChunk, MOBILE_CATALOG_CHUNK_MIN) : baseChunk;
-  const firstPaintCount = compact ? Math.min(total, Math.max(chunkSize, MOBILE_CATALOG_FIRST_PAINT)) : chunkSize;
+  const firstPaintCount = Math.min(
+    total,
+    compact ? Math.max(chunkSize, MOBILE_CATALOG_FIRST_PAINT) : chunkSize
+  );
   const imageProfile = getCardImageProfile();
   let index = 0;
 
   const firstPaintFragment = document.createDocumentFragment();
   for (; index < firstPaintCount; index += 1) {
-    firstPaintFragment.appendChild(buildMediaCard(items[index], false, null, index, imageProfile));
+    const entry = items[index];
+    if (!entry || Number(entry.id || 0) <= 0) {
+      continue;
+    }
+    firstPaintFragment.appendChild(buildMediaCard(entry, false, null, index, imageProfile));
   }
   refs.catalogGrid.replaceChildren(firstPaintFragment);
 
@@ -2855,7 +2896,11 @@ function renderCatalog(items) {
     const stop = Math.min(total, index + chunkSize);
     const fragment = document.createDocumentFragment();
     for (; index < stop; index += 1) {
-      fragment.appendChild(buildMediaCard(items[index], false, null, index, imageProfile));
+      const entry = items[index];
+      if (!entry || Number(entry.id || 0) <= 0) {
+        continue;
+      }
+      fragment.appendChild(buildMediaCard(entry, false, null, index, imageProfile));
     }
     refs.catalogGrid.appendChild(fragment);
 
@@ -4009,8 +4054,7 @@ function extractSources(payload) {
 
   const normalized = rawSources
     .map((entry, index) => normalizeSourceEntry(entry, index))
-    .filter(Boolean)
-    .sort((left, right) => right.score - left.score);
+    .filter(Boolean);
 
   const seen = new Set();
   return normalized.filter((entry) => {
@@ -4039,7 +4083,7 @@ function shouldIgnoreVideoErrorFallback() {
 }
 
 async function trySwitchToNextSource() {
-  if (state.manualSourceLock && state.manualSourceLockedIndex === state.sourceIndex) {
+  if (state.manualSourceLock) {
     setPlayerStatus("Source selectionnee indisponible. Choisis une autre source.", true);
     return;
   }
@@ -4286,8 +4330,28 @@ function normalizeSourceLanguage(entry) {
   return raw;
 }
 
+function buildPlayableSourceUrl(source) {
+  const raw = String(source?.url || "").trim();
+  if (!raw) {
+    return "";
+  }
+  if (source?.format !== "hls") {
+    return raw;
+  }
+
+  try {
+    const absolute = new URL(raw, window.location.href).href;
+    if (!/^https?:\/\//i.test(absolute)) {
+      return raw;
+    }
+    return `${API_BASE}/hls-proxy?url=${encodeURIComponent(absolute)}`;
+  } catch {
+    return raw;
+  }
+}
+
 async function startPlayerSource(source, resumeTime, token) {
-  const streamUrl = String(source?.url || "").trim();
+  const streamUrl = buildPlayableSourceUrl(source);
   if (!streamUrl) {
     throw new Error("Missing source URL");
   }
@@ -4318,7 +4382,7 @@ async function startPlayerSource(source, resumeTime, token) {
     }
     video.src = streamUrl;
     video.load();
-    await waitVideoReady(video);
+    await waitVideoReady(video, VIDEO_READY_TIMEOUT_MS);
   }
 
   if (token !== state.playToken) {
@@ -4341,7 +4405,7 @@ async function startHlsPlayback(video, streamUrl, token) {
   if (video.canPlayType(HLS_MIME)) {
     video.src = streamUrl;
     video.load();
-    await waitVideoReady(video);
+    await waitVideoReady(video, HLS_READY_TIMEOUT_MS);
     return;
   }
 
@@ -4361,7 +4425,7 @@ async function startHlsPlayback(video, streamUrl, token) {
     const timeoutId = setTimeout(() => {
       cleanup();
       reject(new Error("HLS timeout"));
-    }, 15000);
+    }, HLS_MANIFEST_TIMEOUT_MS);
 
     const onMediaAttached = () => {
       hls.loadSource(streamUrl);
@@ -4412,7 +4476,7 @@ async function startHlsPlayback(video, streamUrl, token) {
     });
   });
 
-  await waitVideoReady(video);
+  await waitVideoReady(video, HLS_READY_TIMEOUT_MS);
 }
 
 function teardownPlayerEngine(video) {
@@ -4465,7 +4529,7 @@ async function loadHlsLibrary() {
   return state.hlsScriptPromise;
 }
 
-function waitVideoReady(video) {
+function waitVideoReady(video, timeoutMs = VIDEO_READY_TIMEOUT_MS) {
   if (video.readyState >= 1) {
     return Promise.resolve();
   }
@@ -4474,7 +4538,7 @@ function waitVideoReady(video) {
     const timeoutId = setTimeout(() => {
       cleanup();
       reject(new Error("Video timeout"));
-    }, 15000);
+    }, Math.max(2000, Number(timeoutMs || VIDEO_READY_TIMEOUT_MS)));
 
     function onReady() {
       cleanup();
@@ -4489,10 +4553,14 @@ function waitVideoReady(video) {
     function cleanup() {
       clearTimeout(timeoutId);
       video.removeEventListener("loadedmetadata", onReady);
+      video.removeEventListener("loadeddata", onReady);
+      video.removeEventListener("canplay", onReady);
       video.removeEventListener("error", onError);
     }
 
     video.addEventListener("loadedmetadata", onReady, { once: true });
+    video.addEventListener("loadeddata", onReady, { once: true });
+    video.addEventListener("canplay", onReady, { once: true });
     video.addEventListener("error", onError, { once: true });
   });
 }

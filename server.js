@@ -184,6 +184,62 @@ function isPublicIpAddress(value) {
   return true;
 }
 
+function isUnsafeTargetHost(hostname) {
+  const raw = String(hostname || "").trim().toLowerCase();
+  if (!raw) {
+    return true;
+  }
+  if (raw === "localhost" || raw === "::1") {
+    return true;
+  }
+  if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(raw)) {
+    const parts = raw.split(".").map((entry) => Number(entry));
+    if (parts.some((entry) => !Number.isInteger(entry) || entry < 0 || entry > 255)) {
+      return true;
+    }
+    const [a, b] = parts;
+    if (a === 10 || a === 127 || a === 0) {
+      return true;
+    }
+    if (a === 169 && b === 254) {
+      return true;
+    }
+    if (a === 192 && b === 168) {
+      return true;
+    }
+    if (a === 172 && b >= 16 && b <= 31) {
+      return true;
+    }
+  }
+  if (raw.includes(":")) {
+    if (raw.startsWith("fe80:") || raw.startsWith("fc") || raw.startsWith("fd")) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function parseSafeRemoteUrl(value) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return null;
+  }
+  let parsed;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return null;
+  }
+  const protocol = String(parsed.protocol || "").toLowerCase();
+  if (protocol !== "http:" && protocol !== "https:") {
+    return null;
+  }
+  if (isUnsafeTargetHost(parsed.hostname)) {
+    return null;
+  }
+  return parsed;
+}
+
 function readJsonBody(req, maxBytes = 8192) {
   return new Promise((resolve, reject) => {
     let size = 0;
@@ -868,6 +924,133 @@ async function fetchRemoteText(target, accept = "text/html") {
   }
 }
 
+function buildHlsProxyPath(targetUrl) {
+  return `/api/hls-proxy?url=${encodeURIComponent(String(targetUrl || "").trim())}`;
+}
+
+function rewriteHlsPlaylistUri(rawUri, baseUrl) {
+  const value = String(rawUri || "").trim();
+  if (!value || value.startsWith("data:")) {
+    return value;
+  }
+
+  try {
+    const absolute = new URL(value, baseUrl).href;
+    const safe = parseSafeRemoteUrl(absolute);
+    if (!safe) {
+      return value;
+    }
+    return buildHlsProxyPath(safe.href);
+  } catch {
+    return value;
+  }
+}
+
+function rewriteHlsPlaylistBody(playlistBody, baseUrl) {
+  const text = String(playlistBody || "");
+  const lines = text.split(/\r?\n/);
+  const rewritten = lines.map((line) => {
+    const rawLine = String(line || "");
+    const trimmed = rawLine.trim();
+    if (!trimmed) {
+      return rawLine;
+    }
+
+    if (trimmed.startsWith("#")) {
+      if (!rawLine.includes("URI=")) {
+        return rawLine;
+      }
+      return rawLine.replace(/URI="([^"]+)"/g, (_match, uriValue) => {
+        const proxied = rewriteHlsPlaylistUri(uriValue, baseUrl);
+        return `URI="${proxied}"`;
+      });
+    }
+
+    return rewriteHlsPlaylistUri(trimmed, baseUrl);
+  });
+  return rewritten.join("\n");
+}
+
+async function handleHlsProxy(req, res, requestUrl) {
+  if (requestUrl.pathname !== "/api/hls-proxy") {
+    return false;
+  }
+  if (req.method !== "GET") {
+    sendJson(res, 405, { error: "Method Not Allowed" });
+    return true;
+  }
+
+  const targetParam = requestUrl.searchParams.get("url");
+  const target = parseSafeRemoteUrl(targetParam);
+  if (!target) {
+    sendJson(res, 400, { error: "Invalid HLS url" });
+    return true;
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), Math.max(22000, PROXY_TIMEOUT_MS + 7000));
+  try {
+    const range = String(req.headers.range || "").trim();
+    const upstreamHeaders = {
+      Accept: "*/*",
+      "User-Agent": "Mozilla/5.0 (ZenixStream/HlsProxy)",
+      Referer: `${target.origin}/`,
+      Origin: target.origin,
+    };
+    if (range) {
+      upstreamHeaders.Range = range;
+    }
+
+    const upstream = await fetch(target.href, {
+      method: "GET",
+      headers: upstreamHeaders,
+      redirect: "follow",
+      signal: controller.signal,
+    });
+
+    const status = Number(upstream.status || 502);
+    const contentType = String(upstream.headers.get("content-type") || "").toLowerCase();
+    const buffer = Buffer.from(await upstream.arrayBuffer());
+    const bodyText = buffer.toString("utf8");
+    const isPlaylist =
+      target.pathname.toLowerCase().endsWith(".m3u8") ||
+      contentType.includes("mpegurl") ||
+      bodyText.startsWith("#EXTM3U");
+
+    if (isPlaylist) {
+      const rewritten = rewriteHlsPlaylistBody(bodyText, target.href);
+      res.writeHead(status, {
+        "Content-Type": "application/vnd.apple.mpegurl; charset=utf-8",
+        "Cache-Control": "no-cache",
+      });
+      res.end(rewritten);
+      return true;
+    }
+
+    const headers = {
+      "Content-Type": String(upstream.headers.get("content-type") || "application/octet-stream"),
+      "Cache-Control": "no-cache",
+    };
+    const contentRange = upstream.headers.get("content-range");
+    if (contentRange) {
+      headers["Content-Range"] = contentRange;
+      headers["Accept-Ranges"] = "bytes";
+    } else if (upstream.headers.get("accept-ranges")) {
+      headers["Accept-Ranges"] = String(upstream.headers.get("accept-ranges"));
+    }
+    headers["Content-Length"] = String(buffer.length);
+    res.writeHead(status, headers);
+    res.end(buffer);
+    return true;
+  } catch (error) {
+    const code = String(error?.name || "").toLowerCase().includes("abort") ? 504 : 502;
+    sendJson(res, code, { error: "HLS proxy failed" });
+    return true;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 async function fetchPurstreamCalendarMonth(month, year) {
   const target = `${PURSTREAM_API_BASE}/calendar/${month}/${year}/days`;
   const upstream = await fetchRemote(target);
@@ -1220,6 +1403,12 @@ const server = http.createServer((req, res) => {
     })
     .then((handledCalendar) => {
       if (handledCalendar) {
+        return true;
+      }
+      return handleHlsProxy(req, res, requestUrl);
+    })
+    .then((handledHlsProxy) => {
+      if (handledHlsProxy) {
         return true;
       }
       return handleApiProxy(req, res, requestUrl);
