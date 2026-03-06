@@ -15,6 +15,10 @@ const DISCORD_WEBHOOK_FALLBACK_B64 =
   "aHR0cHM6Ly9kaXNjb3JkLmNvbS9hcGkvd2ViaG9va3MvMTQ3OTI2OTg4ODM3OTA2MDMxNi9ISGRVbTVYZkhpeENPXy0yRUhXYXJ1SjJDcHIweXl1eWdHNkRWLVp4Y0JLQWg4N0RNRzNvNnYzbTQzd29VMmZwenpBUw==";
 const DISCORD_WEBHOOK_URL = resolveDiscordWebhookUrl();
 const DISCORD_PUSH_INTERVAL_MS = Math.max(10000, Number(process.env.DISCORD_PUSH_INTERVAL_MS || 10 * 1000));
+const DISCORD_CREATE_BACKOFF_MS = Math.max(
+  30000,
+  Number(process.env.DISCORD_CREATE_BACKOFF_MS || 3 * 60 * 1000)
+);
 const FORWARD_CLIENT_IP_TO_UPSTREAM =
   String(process.env.FORWARD_CLIENT_IP_TO_UPSTREAM || "").trim() === "1";
 const ANALYTICS_RETENTION_MS = 24 * 60 * 60 * 1000;
@@ -38,6 +42,9 @@ let discordLastResult = {
   ok: null,
   status: 0,
   retryAfterMs: 0,
+  code: "",
+  message: "",
+  global: false,
 };
 
 const MIME = {
@@ -405,6 +412,9 @@ function isDiscordWebhookConfigured() {
 }
 
 function setDiscordLastResult(reason, phase, result = {}) {
+  const body = result?.body && typeof result.body === "object" ? result.body : null;
+  const code = body ? sanitizeToken(body.code, 32) : "";
+  const message = body ? sanitizeToken(body.message, 200) : "";
   discordLastResult = {
     at: new Date().toISOString(),
     reason: String(reason || ""),
@@ -412,6 +422,9 @@ function setDiscordLastResult(reason, phase, result = {}) {
     ok: typeof result.ok === "boolean" ? result.ok : null,
     status: Number(result.status || 0),
     retryAfterMs: Math.max(0, Number(result.retryAfterMs || 0)),
+    code,
+    message,
+    global: Boolean(body?.global),
   };
 }
 
@@ -438,6 +451,7 @@ async function sendDiscordWebhook(method, payload, options = {}) {
       method,
       headers: {
         "Content-Type": "application/json; charset=utf-8",
+        "User-Agent": "ZenixStream/1.0 (+discord-webhook)",
       },
       body: JSON.stringify(payload),
       signal: controller.signal,
@@ -551,7 +565,7 @@ async function pushDiscordStats(reason = "interval") {
   setDiscordLastResult(reason, "create", created);
   if (created.status === 429) {
     discordRateLimitedStreak += 1;
-    discordNextAllowedAt = now + getDiscordBackoffMs(created.retryAfterMs);
+    discordNextAllowedAt = now + Math.max(getDiscordBackoffMs(created.retryAfterMs), DISCORD_CREATE_BACKOFF_MS);
   } else if (created.status > 0) {
     discordRateLimitedStreak = 0;
     discordNextAllowedAt = now + Math.max(DISCORD_PUSH_INTERVAL_MS, 30000);
@@ -948,6 +962,39 @@ function buildHlsProxyPath(targetUrl) {
   return `/api/hls-proxy?url=${encodeURIComponent(String(targetUrl || "").trim())}`;
 }
 
+function decodeNumericPlaylistBody(rawBody) {
+  const text = String(rawBody || "").trim();
+  if (!text) {
+    return "";
+  }
+  if (text.includes("#EXTM3U")) {
+    return text;
+  }
+
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => String(line || "").trim())
+    .filter(Boolean);
+  if (lines.length < 6 || lines.length > 60000) {
+    return text;
+  }
+  if (!lines.every((line) => /^\d{1,3}$/.test(line))) {
+    return text;
+  }
+
+  const bytes = lines.map((line) => Number(line));
+  if (bytes.some((value) => !Number.isInteger(value) || value < 0 || value > 255)) {
+    return text;
+  }
+
+  try {
+    const decoded = Buffer.from(bytes).toString("utf8").trim();
+    return decoded.includes("#EXTM3U") ? decoded : text;
+  } catch {
+    return text;
+  }
+}
+
 function rewriteHlsPlaylistUri(rawUri, baseUrl) {
   const value = String(rawUri || "").trim();
   if (!value || value.startsWith("data:")) {
@@ -1031,7 +1078,7 @@ async function handleHlsProxy(req, res, requestUrl) {
     const status = Number(upstream.status || 502);
     const contentType = String(upstream.headers.get("content-type") || "").toLowerCase();
     const buffer = Buffer.from(await upstream.arrayBuffer());
-    const bodyText = buffer.toString("utf8");
+    const bodyText = decodeNumericPlaylistBody(buffer.toString("utf8"));
     const isPlaylist =
       target.pathname.toLowerCase().endsWith(".m3u8") ||
       contentType.includes("mpegurl") ||
@@ -1126,8 +1173,10 @@ async function handleAnalyticsWebhookStatus(req, res, requestUrl) {
     type: "success",
     webhookConfigured: isDiscordWebhookConfigured(),
     hasMessageId: /^\d{8,30}$/.test(String(discordStatsMessageId || "")),
+    messageId: sanitizeToken(discordStatsMessageId, 32),
     lastPushAt: analyticsLastPushAt ? new Date(analyticsLastPushAt).toISOString() : "",
     nextAllowedAt: discordNextAllowedAt ? new Date(discordNextAllowedAt).toISOString() : "",
+    nextDelayMs: Math.max(0, Number(discordNextAllowedAt || 0) - Date.now()),
     intervalMs: DISCORD_PUSH_INTERVAL_MS,
     lastResult: discordLastResult,
   });

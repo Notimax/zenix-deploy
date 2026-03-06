@@ -46,9 +46,10 @@ const STREAM_PROXY_PREFETCH_TIMEOUT_MS = 4200;
 const STREAM_DIRECT_TIMEOUT_MS = 5200;
 const STREAM_DIRECT_PREFETCH_TIMEOUT_MS = 3600;
 const EPISODE_SOON_VERIFY_TTL_MS = 3 * 60 * 1000;
-const EPISODE_SOON_VERIFY_LIMIT = 8;
+const EPISODE_SOON_VERIFY_LIMIT = 40;
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
 const HLS_JS_URL = "https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js";
+const HLS_JS_FALLBACK_URLS = ["/hls.min.js", HLS_JS_URL, "https://unpkg.com/hls.js@1.5.17/dist/hls.min.js"];
 const HLS_MIME = "application/vnd.apple.mpegurl";
 const DASH_MIME = "application/dash+xml";
 const VIDEO_READY_TIMEOUT_MS = 15000;
@@ -154,6 +155,8 @@ const state = {
   heartbeatBound: false,
   startupSplashForceTimer: 0,
   activeViewSyncTimer: 0,
+  modalScrollY: 0,
+  modalScrollCaptured: false,
 };
 
 const refs = {
@@ -438,7 +441,7 @@ function bindFastPress(target, callback, options = {}) {
   if (!target || typeof callback !== "function") {
     return;
   }
-  const dedupeMs = Math.max(120, Number(options.dedupeMs || 440));
+  const dedupeMs = Math.max(90, Number(options.dedupeMs || 280));
   let lastTouchLikeAt = 0;
   target.addEventListener(
     "pointerdown",
@@ -474,8 +477,8 @@ function bindSafeTap(target, callback, options = {}) {
   }
 
   const moveThreshold = Math.max(6, Number(options.moveThreshold || 14));
-  const tapTimeoutMs = Math.max(120, Number(options.tapTimeoutMs || 760));
-  const dedupeMs = Math.max(160, Number(options.dedupeMs || 520));
+  const tapTimeoutMs = Math.max(120, Number(options.tapTimeoutMs || 640));
+  const dedupeMs = Math.max(120, Number(options.dedupeMs || 360));
 
   let activePointerId = null;
   let startX = 0;
@@ -1551,7 +1554,7 @@ function renderCalendarSection() {
 
   mergedRows.forEach((entry, index) => {
     const card = document.createElement("article");
-    card.className = "calendar-merged-card";
+    card.className = "calendar-merged-card media-card calendar-media-card";
     const detailId = resolveCalendarDetailId(entry);
     const hasDetails = detailId > 0;
     const linkLabel = hasDetails ? "Voir details" : "Bientot";
@@ -1562,32 +1565,44 @@ function renderCalendarSection() {
         ? `${String(entry.dayNumber || "").padStart(2, "0")}/${String(state.calendarMonth).padStart(2, "0")}`
         : entry.dateLabel || entry.dayName || "Sans date";
     card.innerHTML = `
-      <img
-        src="${escapeHtml(poster)}"
-        alt="${escapeHtml(entry.title || "Affiche")}"
-        loading="${index < 24 ? "eager" : "lazy"}"
-        decoding="async"
-        fetchpriority="${index < 10 ? "high" : "auto"}"
-      />
-      <div class="calendar-merged-body">
-        <p class="calendar-merged-title">${escapeHtml(entry.title || "Sans titre")}</p>
-        <p class="calendar-merged-meta">
-          <span>${escapeHtml(dateLabel)}</span>
-          <span>${escapeHtml(typeLabel)}</span>
-          <span>${escapeHtml(entry.language || "Auto")}</span>
-        </p>
-        <div class="calendar-merged-actions">
+      <div class="media-shell">
+        <div class="media-thumb calendar-media-thumb">
+          <img
+            src="${escapeHtml(poster)}"
+            alt="${escapeHtml(entry.title || "Affiche")}"
+            loading="${index < 24 ? "eager" : "lazy"}"
+            decoding="async"
+            fetchpriority="${index < 10 ? "high" : "auto"}"
+          />
+          <span class="calendar-date-pill">${escapeHtml(dateLabel)}</span>
           ${
             hasDetails
-              ? `<button type="button" class="btn-small btn-info" data-calendar-open="${detailId}">${linkLabel}</button>`
-              : `<span class="btn-small btn-info is-disabled">${linkLabel}</span>`
+              ? `<button type="button" class="media-open" data-calendar-open="${detailId}" aria-label="Voir les details de ${escapeHtml(entry.title || "ce titre")}"></button>`
+              : ""
           }
+        </div>
+        <div class="media-body calendar-merged-body">
+          <button type="button" class="title-link media-title-link" data-calendar-open="${detailId}" ${hasDetails ? "" : "disabled"}>${escapeHtml(entry.title || "Sans titre")}</button>
+          <p class="media-meta calendar-merged-meta">
+            <span class="meta-pill">${escapeHtml(typeLabel)}</span>
+            <span class="meta-dot" aria-hidden="true"></span>
+            <span>${escapeHtml(entry.language || "Auto")}</span>
+            <span class="meta-dot" aria-hidden="true"></span>
+            <span>${escapeHtml(hasDetails ? "Disponible" : "Soon")}</span>
+          </p>
+          <div class="calendar-merged-actions">
+            ${
+              hasDetails
+                ? `<button type="button" class="btn-small btn-info" data-calendar-open="${detailId}">${linkLabel}</button>`
+                : `<span class="btn-small btn-info is-disabled">${linkLabel}</span>`
+            }
+          </div>
         </div>
       </div>
     `;
     const image = card.querySelector("img");
     if (image) {
-      wireImageFallback(image, entry.title || "Affiche", false);
+      wireImageFallback(image, entry.title || "Affiche", true);
     }
 
     if (hasDetails) {
@@ -2166,19 +2181,46 @@ async function loadTopDaily() {
 }
 
 function extractSearchRows(payload) {
-  const candidates = [
-    payload?.data?.items?.movies?.items,
-    payload?.data?.items?.items,
-    payload?.data?.items,
-    payload?.data?.movies?.items,
-    payload?.data?.results,
-  ];
-  for (const candidate of candidates) {
-    if (Array.isArray(candidate)) {
-      return candidate;
+  const blocks = payload?.data?.items;
+  const merged = [];
+  const append = (candidate) => {
+    if (!Array.isArray(candidate) || candidate.length === 0) {
+      return;
     }
+    candidate.forEach((entry) => {
+      if (entry && typeof entry === "object") {
+        merged.push(entry);
+      }
+    });
+  };
+
+  append(payload?.data?.items?.movies?.items);
+  append(payload?.data?.items?.items);
+  append(payload?.data?.movies?.items);
+  append(payload?.data?.results);
+
+  if (blocks && typeof blocks === "object") {
+    Object.values(blocks).forEach((entry) => {
+      append(entry?.items);
+      append(entry);
+    });
   }
-  return [];
+
+  if (merged.length === 0 && Array.isArray(payload?.data?.items)) {
+    append(payload.data.items);
+  }
+
+  const dedupe = new Map();
+  merged.forEach((entry) => {
+    const id = Number(entry?.id || 0);
+    if (!Number.isFinite(id) || id <= 0) {
+      return;
+    }
+    if (!dedupe.has(id)) {
+      dedupe.set(id, entry);
+    }
+  });
+  return Array.from(dedupe.values());
 }
 
 async function handleRemoteSearch(token, signal) {
@@ -3421,7 +3463,9 @@ async function ensureSeasons(id) {
                 name: String(episode?.name || `Episode ${episode?.episode || "?"}`),
                 runtime: Number(episode?.runtime?.minutes || 0),
                 airDate: String(episode?.airDate || episode?.air_date || "").trim(),
-                isSoon: isEpisodeSoon(episode),
+                isSoon:
+                  isEpisodeSoon(episode) ||
+                  isGenericEpisodePlaceholderName(episode?.name, Number(episode?.episode || 0)),
               }))
               .filter((episode) => episode.episode > 0)
           : [],
@@ -3571,9 +3615,10 @@ function populateEpisodeSelect(select, episodes, selectedEpisode) {
   episodes.forEach((entry) => {
     const option = document.createElement("option");
     option.value = String(entry.episode);
-    const soonSuffix = entry?.isSoon ? " | soon" : "";
     const genericPlaceholder = isGenericEpisodePlaceholderName(entry?.name, entry?.episode);
-    if (entry?.isSoon && genericPlaceholder) {
+    const showSoon = Boolean(entry?.isSoon || genericPlaceholder);
+    const soonSuffix = showSoon ? " | soon" : "";
+    if (genericPlaceholder) {
       option.textContent = `EO${Number(entry.episode || 0)} - Episode ${Number(entry.episode || 0)}${soonSuffix}`;
     } else {
       option.textContent = `E${String(entry.episode).padStart(2, "0")} - ${entry.name}${soonSuffix}`;
@@ -3764,6 +3809,7 @@ async function syncDetailLanguageOptions(id, season, episode) {
 }
 
 async function openDetails(id, options = {}) {
+  captureModalScrollPosition();
   state.selectedDetailId = id;
   const detailToken = ++state.detailToken;
   let item = findItemById(id);
@@ -3942,6 +3988,9 @@ function closeDetails(options = {}) {
     setAppRoute({}, { replace: true });
   }
   updateBodyScrollLock();
+  if (refs.playerOverlay.hidden && refs.detailModal.hidden) {
+    restoreModalScrollPosition();
+  }
 }
 
 async function openTrailerFromHero(id) {
@@ -3969,6 +4018,7 @@ async function toggleTrailerInline(id, forceOpen = false) {
 }
 
 async function openPlayer(id, options = {}) {
+  captureModalScrollPosition();
   const item = findItemById(id) || (await buildItemFromDetails(id));
   if (!item) {
     throw new Error("Item not found");
@@ -3985,7 +4035,6 @@ async function openPlayer(id, options = {}) {
       cachedDetails?.posters?.large ||
       ""
   );
-
   refs.playerOverlay.hidden = false;
   refs.playerTitle.textContent = item.title;
   setPlayerPill(refs.playerTypePill, formatPlayerKind(item), true);
@@ -4085,7 +4134,12 @@ async function openPlayer(id, options = {}) {
       options.syncRoute !== false
     );
   } catch (error) {
-    closePlayer({ syncRoute: false });
+    const message =
+      state.sourcePool.length > 0
+        ? "Lecture impossible sur cette source. Essaie une autre source."
+        : "Lecture impossible pour ce titre.";
+    setPlayerStatus(message, true);
+    renderPlayerSourceOptions();
     throw error;
   }
 }
@@ -4104,7 +4158,7 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
   }
   state.sourceIndex = -1;
   renderPlayerSourceOptions();
-  await playFromSourcePool(resumeTime, token, 0);
+  await playFromSourcePool(resumeTime, token, 0, { skipPremiumFallback: true });
   state.nowPlaying = {
     id: item.id,
     type: "movie",
@@ -4152,7 +4206,7 @@ async function loadEpisodeStream(
   }
   state.sourceIndex = -1;
   renderPlayerSourceOptions();
-  await playFromSourcePool(resumeTime, token, 0);
+  await playFromSourcePool(resumeTime, token, 0, { skipPremiumFallback: true });
 
   state.nowPlaying = {
     id: item.id,
@@ -4209,13 +4263,21 @@ function extractSources(payload) {
     .filter(Boolean);
 
   const seen = new Set();
-  return normalized.filter((entry) => {
+  const deduped = normalized.filter((entry) => {
     if (seen.has(entry.url)) {
       return false;
     }
     seen.add(entry.url);
     return true;
   });
+  deduped.sort((left, right) => {
+    const premiumDelta = Number(Boolean(left?.premiumHint)) - Number(Boolean(right?.premiumHint));
+    if (premiumDelta !== 0) {
+      return premiumDelta;
+    }
+    return Number(right?.score || 0) - Number(left?.score || 0);
+  });
+  return deduped;
 }
 
 function clearManualSourceLock() {
@@ -4264,11 +4326,17 @@ async function trySwitchToNextSource() {
 
 async function playFromSourcePool(resumeTime, token, startIndex = 0, options = {}) {
   const strictIndex = Boolean(options?.strictIndex);
+  const skipPremiumFallback = Boolean(options?.skipPremiumFallback);
+  const startSource = state.sourcePool[startIndex] || null;
+  const startIsPremium = Boolean(startSource?.premiumHint);
   let lastError = null;
   for (let index = startIndex; index < state.sourcePool.length; index += 1) {
     state.sourceIndex = index;
     renderPlayerSourceOptions();
     const source = state.sourcePool[index];
+    if (skipPremiumFallback && !startIsPremium && index > startIndex && source?.premiumHint) {
+      break;
+    }
     setPlayerStatus(`Connexion source ${index + 1}/${state.sourcePool.length}...`);
     try {
       await startPlayerSource(source, resumeTime, token);
@@ -4301,6 +4369,12 @@ function normalizeSourceEntry(entry, index) {
   const language = normalizeSourceLanguage(entry);
   const host = getSourceHost(url);
   const score = getSourceScore(format, quality, language, index);
+  const premiumHint = isPremiumLikeSource({
+    url,
+    source_name: entry?.source_name,
+    language,
+    quality,
+  });
 
   return {
     url,
@@ -4309,6 +4383,7 @@ function normalizeSourceEntry(entry, index) {
     language,
     host,
     score,
+    premiumHint,
   };
 }
 
@@ -4394,7 +4469,20 @@ function formatSourceLabel(source, index, total) {
   if (source?.format && source.format !== "unknown") {
     chunks.push(source.format.toUpperCase());
   }
+  if (source?.premiumHint) {
+    chunks.push("Premium");
+  }
   return chunks.join(" - ");
+}
+
+function isPremiumLikeSource(source) {
+  const raw = [source?.url, source?.source_name, source?.language, source?.quality]
+    .map((entry) => String(entry || "").toLowerCase())
+    .join(" ");
+  if (!raw) {
+    return false;
+  }
+  return /premium|vip|payant|abonn|subscrib/i.test(raw) || /\/premium[-_/]/i.test(raw);
 }
 
 function renderPlayerSourceOptions() {
@@ -4439,12 +4527,23 @@ async function switchPlayerSource(index) {
   if (safeIndex === state.sourceIndex) {
     return;
   }
+  const previousIndex = Number(state.sourceIndex);
   state.manualSourceLock = true;
   state.manualSourceLockedIndex = safeIndex;
   const token = ++state.playToken;
   const resumeTime = Number(refs.playerVideo.currentTime || 0);
-  await playFromSourcePool(resumeTime, token, safeIndex, { strictIndex: true });
-  showToast("Source changee.");
+  try {
+    await playFromSourcePool(resumeTime, token, safeIndex, { strictIndex: true });
+    showToast("Source changee.");
+  } catch (error) {
+    state.manualSourceLock = false;
+    state.manualSourceLockedIndex = -1;
+    if (Number.isInteger(previousIndex) && previousIndex >= 0 && previousIndex < state.sourcePool.length) {
+      state.sourceIndex = previousIndex;
+      renderPlayerSourceOptions();
+    }
+    throw error;
+  }
 }
 
 function formatPlayerKind(item) {
@@ -4487,7 +4586,11 @@ function buildPlayableSourceUrl(source) {
   if (!raw) {
     return "";
   }
-  if (source?.format !== "hls") {
+  if (/\/api\/hls-proxy\?url=/i.test(raw)) {
+    return raw;
+  }
+  const looksLikeHls = source?.format === "hls" || /m3u8/i.test(raw);
+  if (!looksLikeHls) {
     return raw;
   }
 
@@ -4660,22 +4763,38 @@ async function loadHlsLibrary() {
   }
 
   state.hlsScriptPromise = new Promise((resolve, reject) => {
-    const script = document.createElement("script");
-    script.src = HLS_JS_URL;
-    script.async = true;
-    script.onload = () => {
-      if (!window.Hls) {
-        state.hlsScriptPromise = null;
-        reject(new Error("hls.js unavailable"));
+    const urls = Array.from(new Set(HLS_JS_FALLBACK_URLS.filter(Boolean)));
+    let cursor = 0;
+
+    const tryNext = () => {
+      if (window.Hls) {
+        resolve(window.Hls);
         return;
       }
-      resolve(window.Hls);
+      if (cursor >= urls.length) {
+        state.hlsScriptPromise = null;
+        reject(new Error("Failed to load hls.js"));
+        return;
+      }
+
+      const script = document.createElement("script");
+      script.src = urls[cursor];
+      script.async = true;
+      cursor += 1;
+      script.onload = () => {
+        if (window.Hls) {
+          resolve(window.Hls);
+          return;
+        }
+        tryNext();
+      };
+      script.onerror = () => {
+        tryNext();
+      };
+      document.head.appendChild(script);
     };
-    script.onerror = () => {
-      state.hlsScriptPromise = null;
-      reject(new Error("Failed to load hls.js"));
-    };
-    document.head.appendChild(script);
+
+    tryNext();
   });
 
   return state.hlsScriptPromise;
@@ -4754,6 +4873,9 @@ function closePlayer(options = {}) {
     setAppRoute({}, { replace: true });
   }
   updateBodyScrollLock();
+  if (refs.playerOverlay.hidden && refs.detailModal.hidden) {
+    restoreModalScrollPosition();
+  }
 }
 
 function saveNowPlayingProgress(options = {}) {
@@ -4870,6 +4992,26 @@ function findItemById(id) {
     state.topDaily.find((item) => item.id === id) ||
     null
   );
+}
+
+function captureModalScrollPosition() {
+  if (state.modalScrollCaptured) {
+    return;
+  }
+  state.modalScrollY = Math.max(0, Number(window.scrollY || 0));
+  state.modalScrollCaptured = true;
+}
+
+function restoreModalScrollPosition() {
+  if (!state.modalScrollCaptured) {
+    return;
+  }
+  const targetY = Math.max(0, Number(state.modalScrollY || 0));
+  state.modalScrollCaptured = false;
+  state.modalScrollY = 0;
+  requestAnimationFrame(() => {
+    window.scrollTo(0, targetY);
+  });
 }
 
 function updateBodyScrollLock() {
