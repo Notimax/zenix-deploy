@@ -27,6 +27,7 @@ let analyticsTotalSeen = 0;
 let analyticsLastPushAt = 0;
 let discordStatsMessageId = "";
 let discordNextAllowedAt = 0;
+let discordPushInFlight = null;
 let discordLastResult = {
   at: "",
   reason: "startup",
@@ -415,7 +416,7 @@ async function sendDiscordWebhookWithRetry(method, payload, options = {}) {
     if (result.ok || result.status !== 429) {
       return result;
     }
-    const waitMs = Math.max(450, Math.min(30000, Number(result.retryAfterMs || 0) + 180));
+    const waitMs = Math.max(450, Math.min(10 * 60 * 1000, Number(result.retryAfterMs || 0) + 180));
     await sleep(waitMs);
   }
 
@@ -423,6 +424,11 @@ async function sendDiscordWebhookWithRetry(method, payload, options = {}) {
 }
 
 async function pushDiscordStats(reason = "interval") {
+  if (discordPushInFlight) {
+    return discordPushInFlight;
+  }
+
+  const task = (async () => {
   if (!isDiscordWebhookConfigured()) {
     return;
   }
@@ -485,6 +491,12 @@ async function pushDiscordStats(reason = "interval") {
   } else {
     console.warn(`[discord] Webhook push failed (network/timeout) during ${reason}/${discordStatsMessageId ? "patch" : "create"}.`);
   }
+  })();
+
+  discordPushInFlight = task.finally(() => {
+    discordPushInFlight = null;
+  });
+  return discordPushInFlight;
 }
 
 function toInt(value, fallback, min, max) {
