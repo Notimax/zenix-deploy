@@ -1690,6 +1690,13 @@ body.startup-lock {
   background: rgba(255, 255, 255, 0.08);
 }
 
+.btn-soft.is-active {
+  color: #fff6f7;
+  border-color: rgba(229, 9, 20, 0.65);
+  background: linear-gradient(135deg, rgba(229, 9, 20, 0.28), rgba(178, 12, 30, 0.22));
+  box-shadow: 0 8px 20px rgba(168, 12, 27, 0.25);
+}
+
 .btn-ghost {
   color: #f0f2f8;
   border: 1px solid rgba(255, 255, 255, 0.2);

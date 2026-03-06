@@ -125,15 +125,27 @@
             <option value="recent">Plus recents</option>
             <option value="title-asc">Titre A-Z</option>
             <option value="title-desc">Titre Z-A</option>
+            <option value="year-desc">Annee recente</option>
+            <option value="year-asc">Annee ancienne</option>
+            <option value="resume-recent">Repris recemment</option>
+            <option value="random">Aleatoire</option>
             <option value="runtime-desc">Duree max</option>
           </select>
         </label>
         <button class="btn btn-soft" id="refreshNowBtn" type="button">Synchroniser maintenant</button>
+        <button class="btn btn-soft" id="resumeLastBtn" type="button">Reprendre dernier</button>
+        <button class="btn btn-soft" id="randomPlayBtn" type="button">Lecture aleatoire</button>
         <button class="btn btn-soft" id="shareBrowseBtn" type="button">Partager cette vue</button>
+        <button class="btn btn-soft" id="exportListBtn" type="button">Exporter ma liste</button>
+        <button class="btn btn-soft" id="importListBtn" type="button">Importer ma liste</button>
         <button class="btn btn-soft" id="clearContinueBtn" type="button">Vider Continuer</button>
         <button class="btn btn-soft" id="clearListBtn" type="button">Vider Ma liste</button>
         <button class="btn btn-soft" id="toggleCompactBtn" type="button">Mode compact: OFF</button>
         <button class="btn btn-soft" id="toggleAutonextBtn" type="button">Auto-episode: ON</button>
+        <button class="btn btn-soft" id="toggleHideWatchedBtn" type="button">Masquer vus: OFF</button>
+        <button class="btn btn-soft" id="toggleNewOnlyBtn" type="button">Nouveautes: OFF</button>
+        <button class="btn btn-soft" id="toggleVfOnlyBtn" type="button">VF: OFF</button>
+        <button class="btn btn-soft" id="toggleVostOnlyBtn" type="button">VOSTFR: OFF</button>
       </div>
     </section>
 
@@ -278,6 +290,7 @@
               <button class="btn btn-soft btn-compact" id="playerRestartBtn" type="button">Recommencer</button>
               <button class="btn btn-soft btn-compact" id="playerRewindBtn" type="button">-10s</button>
               <button class="btn btn-soft btn-compact" id="playerForwardBtn" type="button">+10s</button>
+              <button class="btn btn-soft btn-compact" id="playerRetryBtn" type="button">Reessayer</button>
               <button class="btn btn-soft btn-compact" id="playerSkipIntroBtn" type="button">Passer intro</button>
               <button class="btn btn-soft btn-compact" id="playerFullscreenBtn" type="button">Plein ecran</button>
               <button class="btn btn-soft btn-compact" id="playerPipBtn" type="button">Mode flottant</button>
@@ -332,6 +345,7 @@
   </section>
 
   <div class="toast" id="toast" hidden role="status" aria-live="polite"></div>
+  <input id="importListInput" type="file" accept="application/json,.json" hidden />
   <button class="back-to-top" id="backToTopBtn" type="button" hidden aria-label="Remonter en haut">Haut</button>
 </body>
 </html>

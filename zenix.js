@@ -68,12 +68,17 @@ const UI_PREFS_KEY = "zenix-ui-prefs-v1";
 const RECENT_SEARCHES_KEY = "zenix-recent-searches-v1";
 const BROWSE_STATE_KEY = "zenix-browse-state-v1";
 const VIEW_SCROLL_KEY = "zenix-view-scroll-v1";
+const SOURCE_HOST_HEALTH_KEY = "zenix-source-health-v1";
 const RECENT_SEARCHES_LIMIT = 8;
 const SCROLL_RESTORE_MAX = 8000;
 const SLOW_NET_TYPES = new Set(["slow-2g", "2g", "3g"]);
 const NEW_RELEASE_DAYS = 45;
 const WATCH_HISTORY_MAX = 250;
 const WATCH_HISTORY_MAX_AGE_MS = 120 * 24 * 60 * 60 * 1000;
+const SOURCE_HOST_HEALTH_MAX = 140;
+const SOURCE_FAILURE_PENALTY = 22;
+const SOURCE_SUCCESS_BONUS = 8;
+const SOURCE_RETRY_PER_INDEX = 1;
 
 const FALLBACK_ITEMS = [
   {
@@ -104,6 +109,7 @@ const state = {
   sortBy: "featured",
   query: "",
   calendarQuery: "",
+  randomSortSeed: Date.now(),
   calendarMonth: new Date().getMonth() + 1,
   calendarYear: new Date().getFullYear(),
   calendarLoading: false,
@@ -129,6 +135,8 @@ const state = {
   nowPlaying: null,
   sourcePool: [],
   sourceIndex: -1,
+  sourceRetryAttempts: new Map(),
+  sourceHostHealth: loadSourceHostHealth(),
   sourceLoading: false,
   sourceLoadTicket: 0,
   allEpisodeSources: [],
@@ -228,11 +236,20 @@ const refs = {
   filterChips: document.getElementById("filterChips"),
   sortSelect: document.getElementById("sortSelect"),
   refreshNowBtn: document.getElementById("refreshNowBtn"),
+  resumeLastBtn: document.getElementById("resumeLastBtn"),
+  randomPlayBtn: document.getElementById("randomPlayBtn"),
   shareBrowseBtn: document.getElementById("shareBrowseBtn"),
+  exportListBtn: document.getElementById("exportListBtn"),
+  importListBtn: document.getElementById("importListBtn"),
+  importListInput: document.getElementById("importListInput"),
   clearContinueBtn: document.getElementById("clearContinueBtn"),
   clearListBtn: document.getElementById("clearListBtn"),
   toggleCompactBtn: document.getElementById("toggleCompactBtn"),
   toggleAutonextBtn: document.getElementById("toggleAutonextBtn"),
+  toggleHideWatchedBtn: document.getElementById("toggleHideWatchedBtn"),
+  toggleNewOnlyBtn: document.getElementById("toggleNewOnlyBtn"),
+  toggleVfOnlyBtn: document.getElementById("toggleVfOnlyBtn"),
+  toggleVostOnlyBtn: document.getElementById("toggleVostOnlyBtn"),
   communityStats: document.getElementById("communityStats"),
   latestSection: document.getElementById("latestSection"),
   latestGrid: document.getElementById("latestGrid"),
@@ -291,6 +308,7 @@ const refs = {
   playerRestartBtn: document.getElementById("playerRestartBtn"),
   playerRewindBtn: document.getElementById("playerRewindBtn"),
   playerForwardBtn: document.getElementById("playerForwardBtn"),
+  playerRetryBtn: document.getElementById("playerRetryBtn"),
   playerSkipIntroBtn: document.getElementById("playerSkipIntroBtn"),
   playerFullscreenBtn: document.getElementById("playerFullscreenBtn"),
   playerPipBtn: document.getElementById("playerPipBtn"),
@@ -749,7 +767,11 @@ function bindEvents() {
   }
 
   refs.sortSelect.addEventListener("change", (event) => {
-    state.sortBy = String(event.target.value || "featured");
+    const nextSort = String(event.target.value || "featured");
+    if (nextSort === "random" && state.sortBy !== "random") {
+      state.randomSortSeed = Date.now();
+    }
+    state.sortBy = nextSort;
     renderAll();
   });
 
@@ -780,6 +802,42 @@ function bindEvents() {
   bindFastPress(refs.shareBrowseBtn, () => {
     copyBrowseLink().catch(() => {
       showToast("Impossible de copier le lien de cette vue.", true);
+    });
+  });
+
+  bindFastPress(refs.resumeLastBtn, () => {
+    resumeLastPlayback().catch(() => {
+      showToast("Aucune lecture recente a reprendre.", true);
+    });
+  });
+
+  bindFastPress(refs.randomPlayBtn, () => {
+    const pool = getVisibleCatalog();
+    if (pool.length === 0) {
+      showToast("Aucun titre disponible pour une lecture aleatoire.", true);
+      return;
+    }
+    const pick = pool[Math.floor(Math.random() * pool.length)];
+    openPlayer(pick.id).catch(() => {
+      showToast("Lecture aleatoire indisponible.", true);
+    });
+  });
+
+  bindFastPress(refs.exportListBtn, () => {
+    exportFavoritesAsJson();
+  });
+
+  bindFastPress(refs.importListBtn, () => {
+    if (!refs.importListInput) {
+      return;
+    }
+    refs.importListInput.value = "";
+    refs.importListInput.click();
+  });
+
+  refs.importListInput?.addEventListener("change", () => {
+    importFavoritesFromInput().catch(() => {
+      showToast("Import impossible. Verifie le fichier JSON.", true);
     });
   });
 
@@ -819,6 +877,42 @@ function bindEvents() {
     saveUiPrefs(state.uiPrefs);
     applyUiPrefs({ syncControls: true });
     showToast(isAutoNextEnabled() ? "Auto-episode active." : "Auto-episode desactive.");
+  });
+
+  bindFastPress(refs.toggleHideWatchedBtn, () => {
+    state.uiPrefs.hideWatched = !Boolean(state.uiPrefs.hideWatched);
+    saveUiPrefs(state.uiPrefs);
+    applyUiPrefs({ syncControls: true });
+    renderAll();
+  });
+
+  bindFastPress(refs.toggleNewOnlyBtn, () => {
+    state.uiPrefs.newOnly = !Boolean(state.uiPrefs.newOnly);
+    saveUiPrefs(state.uiPrefs);
+    applyUiPrefs({ syncControls: true });
+    renderAll();
+  });
+
+  bindFastPress(refs.toggleVfOnlyBtn, () => {
+    const next = !Boolean(state.uiPrefs.vfOnly);
+    state.uiPrefs.vfOnly = next;
+    if (next) {
+      state.uiPrefs.vostOnly = false;
+    }
+    saveUiPrefs(state.uiPrefs);
+    applyUiPrefs({ syncControls: true });
+    renderAll();
+  });
+
+  bindFastPress(refs.toggleVostOnlyBtn, () => {
+    const next = !Boolean(state.uiPrefs.vostOnly);
+    state.uiPrefs.vostOnly = next;
+    if (next) {
+      state.uiPrefs.vfOnly = false;
+    }
+    saveUiPrefs(state.uiPrefs);
+    applyUiPrefs({ syncControls: true });
+    renderAll();
   });
 
   bindFastPress(refs.heroPlayBtn, () => {
@@ -1087,7 +1181,7 @@ function bindEvents() {
     if (shouldIgnoreVideoErrorFallback()) {
       return;
     }
-    trySwitchToNextSource().catch(() => {
+    handlePlayerPlaybackError().catch(() => {
       setPlayerStatus("Erreur video detectee. Choisis un autre titre.", true);
     });
   });
@@ -1106,6 +1200,15 @@ function bindEvents() {
     const duration = Number(refs.playerVideo.duration || 0);
     const next = Number(refs.playerVideo.currentTime || 0) + 10;
     refs.playerVideo.currentTime = Number.isFinite(duration) && duration > 0 ? Math.min(duration, next) : next;
+  });
+  bindFastPress(refs.playerRetryBtn, () => {
+    retryCurrentSource({ allowFallback: true })
+      .then(() => {
+        showToast("Source relancee.");
+      })
+      .catch(() => {
+        showToast("Reessai impossible sur ce titre.", true);
+      });
   });
   bindFastPress(refs.playerSkipIntroBtn, () => {
     const duration = Number(refs.playerVideo.duration || 0);
@@ -1227,6 +1330,30 @@ function bindEvents() {
             // no-op
           });
         }
+      }
+    }
+
+    if (refs.playerOverlay.hidden && refs.detailModal.hidden && !typing) {
+      const key = String(event.key || "").toLowerCase();
+      if (key === "r") {
+        event.preventDefault();
+        const pool = getVisibleCatalog();
+        if (pool.length === 0) {
+          return;
+        }
+        const pick = pool[Math.floor(Math.random() * pool.length)];
+        openDetails(pick.id).catch(() => {
+          showToast("Suggestion indisponible.", true);
+        });
+      } else if (key === "s") {
+        event.preventDefault();
+        refs.refreshNowBtn?.click();
+      } else if (key === "l") {
+        event.preventDefault();
+        handleViewSelection("list");
+      } else if (key === "t") {
+        event.preventDefault();
+        handleViewSelection("top");
       }
     }
 
@@ -1464,16 +1591,28 @@ function isAutoNextEnabled() {
   return state.uiPrefs.autoNextEpisode !== false;
 }
 
+function syncToggleControl(button, label, enabled) {
+  if (!button) {
+    return;
+  }
+  button.textContent = `${label}: ${enabled ? "ON" : "OFF"}`;
+  button.classList.toggle("is-active", Boolean(enabled));
+}
+
 function syncUiToggleButtons() {
-  if (refs.toggleCompactBtn) {
-    refs.toggleCompactBtn.textContent = `Mode compact: ${state.uiPrefs.compactCards ? "ON" : "OFF"}`;
-  }
-  if (refs.toggleAutonextBtn) {
-    refs.toggleAutonextBtn.textContent = `Auto-episode: ${isAutoNextEnabled() ? "ON" : "OFF"}`;
-  }
+  syncToggleControl(refs.toggleCompactBtn, "Mode compact", Boolean(state.uiPrefs.compactCards));
+  syncToggleControl(refs.toggleAutonextBtn, "Auto-episode", isAutoNextEnabled());
+  syncToggleControl(refs.toggleHideWatchedBtn, "Masquer vus", Boolean(state.uiPrefs.hideWatched));
+  syncToggleControl(refs.toggleNewOnlyBtn, "Nouveautes", Boolean(state.uiPrefs.newOnly));
+  syncToggleControl(refs.toggleVfOnlyBtn, "VF", Boolean(state.uiPrefs.vfOnly));
+  syncToggleControl(refs.toggleVostOnlyBtn, "VOSTFR", Boolean(state.uiPrefs.vostOnly));
 }
 
 function applyUiPrefs(options = {}) {
+  if (state.uiPrefs.vfOnly && state.uiPrefs.vostOnly) {
+    state.uiPrefs.vostOnly = false;
+    saveUiPrefs(state.uiPrefs);
+  }
   const compact = Boolean(state.uiPrefs.compactCards);
   document.body.classList.toggle("compact-cards", compact);
 
@@ -3032,6 +3171,7 @@ function normalizeCatalogItem(raw) {
   }
 
   const title = String(raw?.title || "Sans titre");
+  const languageHint = normalizeLanguageLabel(raw?.lang || raw?.language || raw?.langue || "");
   return {
     id,
     type,
@@ -3043,6 +3183,7 @@ function normalizeCatalogItem(raw) {
     runtime: typeof raw?.runtime === "number" ? raw.runtime : null,
     releaseDate: raw?.release_date || null,
     endDate: raw?.end_date || null,
+    languageHint,
     isAnime,
   };
 }
@@ -3186,17 +3327,104 @@ function getVisibleCatalog() {
     });
   }
 
+  if (state.uiPrefs.hideWatched) {
+    list = list.filter((item) => !isItemMostlyWatched(item));
+  }
+
+  if (state.uiPrefs.newOnly) {
+    list = list.filter((item) => isRecentlyReleased(item, NEW_RELEASE_DAYS));
+  }
+
+  if (state.uiPrefs.vfOnly || state.uiPrefs.vostOnly) {
+    const targetLanguage = state.uiPrefs.vfOnly ? "VF" : "VOSTFR";
+    list = list.filter((item) => itemMatchesLanguagePreference(item, targetLanguage));
+  }
+
   if (state.sortBy === "recent") {
     list.sort((a, b) => parseReleaseDate(b.releaseDate) - parseReleaseDate(a.releaseDate));
   } else if (state.sortBy === "title-asc") {
     list.sort((a, b) => a.title.localeCompare(b.title, "fr", { sensitivity: "base" }));
   } else if (state.sortBy === "title-desc") {
     list.sort((a, b) => b.title.localeCompare(a.title, "fr", { sensitivity: "base" }));
+  } else if (state.sortBy === "year-desc") {
+    list.sort((a, b) => parseReleaseDate(b.releaseDate) - parseReleaseDate(a.releaseDate));
+  } else if (state.sortBy === "year-asc") {
+    list.sort((a, b) => parseReleaseDate(a.releaseDate) - parseReleaseDate(b.releaseDate));
+  } else if (state.sortBy === "resume-recent") {
+    list.sort((a, b) => {
+      const left = Number(state.progress?.[a.id]?.lastPlayed || 0);
+      const right = Number(state.progress?.[b.id]?.lastPlayed || 0);
+      if (left === right) {
+        return b.id - a.id;
+      }
+      return right - left;
+    });
+  } else if (state.sortBy === "random") {
+    const seed = Number(state.randomSortSeed || Date.now());
+    list.sort((a, b) => seededShuffleValue(a.id, seed) - seededShuffleValue(b.id, seed));
   } else if (state.sortBy === "runtime-desc") {
     list.sort((a, b) => Number(b.runtime || 0) - Number(a.runtime || 0));
   }
 
   return list;
+}
+
+function seededShuffleValue(id, seed) {
+  const safeId = Math.abs(Number(id || 0)) + 1;
+  const safeSeed = Math.abs(Number(seed || 1)) + 1;
+  const value = Math.sin((safeId * 9301 + safeSeed * 49297) % 233280) * 43758.5453;
+  return value - Math.floor(value);
+}
+
+function isItemMostlyWatched(item) {
+  if (!item || Number(item.id || 0) <= 0) {
+    return false;
+  }
+  const progress = state.progress?.[item.id];
+  if (!progress) {
+    return false;
+  }
+  const duration = Number(progress.duration || 0);
+  const time = Number(progress.time || 0);
+  if (duration > 0) {
+    return time / duration >= 0.9;
+  }
+  return time > 12 * 60;
+}
+
+function collectItemLanguageSignals(item) {
+  const signals = new Set();
+  const push = (value) => {
+    const normalized = normalizeLanguageLabel(value);
+    if (normalized) {
+      signals.add(normalized);
+    }
+  };
+
+  push(item?.languageHint || item?.language);
+  push(state.progress?.[Number(item?.id || 0)]?.language || "");
+  if (Number(item?.id || 0) > 0) {
+    push(state.detailLangCache.get(Number(item.id)) || "");
+    push(state.selectedLanguageByMedia.get(Number(item.id)) || "");
+    const details = state.detailsCache.get(Number(item.id));
+    push(details?.lang || "");
+  }
+  return signals;
+}
+
+function itemMatchesLanguagePreference(item, preference) {
+  const target = normalizeLanguageLabel(preference);
+  if (!target) {
+    return true;
+  }
+  const signals = collectItemLanguageSignals(item);
+  if (signals.size === 0) {
+    return true;
+  }
+  if (signals.has(target)) {
+    return true;
+  }
+  return signals.has("MULTI");
 }
 
 function getPopularCatalog() {
@@ -3239,21 +3467,58 @@ function updateCatalogHeading(hasQuery, resultCount) {
   };
   if (hasQuery) {
     refs.catalogTitle.textContent = "Recherche";
-    refs.catalogSubtitle.textContent = `${resultCount} titre(s) trouve(s) pour "${state.query}".`;
+    refs.catalogSubtitle.textContent = appendActiveFilterSummary(
+      `${resultCount} titre(s) trouve(s) pour "${state.query}".`
+    );
     return;
   }
   refs.catalogTitle.textContent = titleByView[state.view] || "Streaming";
 
   if (state.view === "latest") {
-    refs.catalogSubtitle.textContent = "Derniers ajouts detectes automatiquement.";
+    refs.catalogSubtitle.textContent = appendActiveFilterSummary("Derniers ajouts detectes automatiquement.");
     return;
   }
   if (state.view === "popular") {
-    refs.catalogSubtitle.textContent = "Titres les plus regardes par la communaute.";
+    refs.catalogSubtitle.textContent = appendActiveFilterSummary("Titres les plus regardes par la communaute.");
     return;
   }
-  refs.catalogSubtitle.textContent = "Catalogue fusionne films, series et anime.";
+  refs.catalogSubtitle.textContent = appendActiveFilterSummary("Catalogue fusionne films, series et anime.");
 
+}
+
+function getActiveCatalogFilterLabels() {
+  const labels = [];
+  if (state.uiPrefs.hideWatched) {
+    labels.push("sans deja-vu");
+  }
+  if (state.uiPrefs.newOnly) {
+    labels.push("nouveautes");
+  }
+  if (state.uiPrefs.vfOnly) {
+    labels.push("VF");
+  }
+  if (state.uiPrefs.vostOnly) {
+    labels.push("VOSTFR");
+  }
+  if (state.sortBy === "resume-recent") {
+    labels.push("repris recemment");
+  } else if (state.sortBy === "year-desc") {
+    labels.push("annee recente");
+  } else if (state.sortBy === "year-asc") {
+    labels.push("annee ancienne");
+  } else if (state.sortBy === "random") {
+    labels.push("ordre aleatoire");
+  }
+  return labels;
+}
+
+function appendActiveFilterSummary(baseText) {
+  const base = String(baseText || "").trim();
+  const labels = getActiveCatalogFilterLabels();
+  if (labels.length === 0) {
+    return base;
+  }
+  return `${base} Filtres actifs: ${labels.join(", ")}.`;
 }
 
 function normalizeImageUrl(url) {
@@ -5099,6 +5364,7 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
 
   clearManualSourceLock();
   state.sourcePool = extractSources(payload);
+  state.sourceRetryAttempts.clear();
   if (state.sourcePool.length === 0) {
     throw new Error("No movie source");
   }
@@ -5144,6 +5410,7 @@ async function loadEpisodeStream(
   state.availableLanguages = getAvailableLanguages(state.allEpisodeSources);
   let language = resolvePreferredLanguage(item.id, preferredLanguage, state.availableLanguages);
   state.sourcePool = filterSourcesByLanguage(state.allEpisodeSources, language);
+  state.sourceRetryAttempts.clear();
   state.selectedLanguageByMedia.set(item.id, language);
   saveLanguagePrefsMap(state.selectedLanguageByMedia);
 
@@ -5165,6 +5432,7 @@ async function loadEpisodeStream(
   } catch (error) {
     if (state.allEpisodeSources.length > state.sourcePool.length) {
       state.sourcePool = state.allEpisodeSources.slice();
+      state.sourceRetryAttempts.clear();
       state.sourceIndex = -1;
       renderPlayerSourceOptions();
       language = "";
@@ -5255,6 +5523,7 @@ function extractSources(payload) {
 function clearManualSourceLock() {
   state.manualSourceLock = false;
   state.manualSourceLockedIndex = -1;
+  state.sourceRetryAttempts.clear();
 }
 
 function shouldIgnoreVideoErrorFallback() {
@@ -5271,6 +5540,44 @@ function shouldIgnoreVideoErrorFallback() {
   return false;
 }
 
+async function retryCurrentSource(options = {}) {
+  if (!state.sourcePool.length || state.sourceIndex < 0) {
+    throw new Error("No active source");
+  }
+  const source = state.sourcePool[state.sourceIndex] || null;
+  if (!source) {
+    throw new Error("No active source");
+  }
+  const token = ++state.playToken;
+  const resumeTime = Number(refs.playerVideo.currentTime || 0);
+  setPlayerStatus("Nouvel essai sur la source active...");
+  try {
+    await playFromSourcePoolWithRescue(resumeTime, token, {
+      startIndex: state.sourceIndex,
+      strictIndex: true,
+      skipPremiumFallback: false,
+      allowPremiumRescue: false,
+    });
+  } catch (error) {
+    if (options.allowFallback) {
+      await trySwitchToNextSource();
+      return;
+    }
+    throw error;
+  }
+}
+
+async function handlePlayerPlaybackError() {
+  const index = Number(state.sourceIndex);
+  const source = state.sourcePool[index] || null;
+  if (source && canRetryCurrentSourceOnce(index, source)) {
+    markCurrentSourceRetried(index, source);
+    await retryCurrentSource({ allowFallback: true });
+    return;
+  }
+  await trySwitchToNextSource();
+}
+
 async function trySwitchToNextSource() {
   if (state.manualSourceLock) {
     setPlayerStatus("Source selectionnee indisponible. Choisis une autre source.", true);
@@ -5285,6 +5592,7 @@ async function trySwitchToNextSource() {
   if (nextIndex >= state.sourcePool.length) {
     if (state.allEpisodeSources.length > state.sourcePool.length) {
       state.sourcePool = state.allEpisodeSources.slice();
+      state.sourceRetryAttempts.clear();
       state.sourceIndex = -1;
       nextIndex = 0;
       showToast("Bascule automatique vers une autre langue/source.");
@@ -5374,7 +5682,7 @@ function normalizeSourceEntry(entry, index) {
   const quality = String(entry?.quality || entry?.resolution || entry?.label || "").trim();
   const language = normalizeSourceLanguage(entry);
   const host = getSourceHost(url);
-  const score = getSourceScore(format, quality, language, index);
+  const score = getSourceScore(format, quality, language, index, host);
   const premiumHint = isPremiumLikeSource({
     url,
     source_name: entry?.source_name,
@@ -5433,7 +5741,74 @@ function getSourceHost(url) {
   }
 }
 
-function getSourceScore(format, quality, language, index) {
+function getSourceHealthScore(host) {
+  const key = String(host || "").trim().toLowerCase();
+  if (!key) {
+    return 0;
+  }
+  const row = state.sourceHostHealth.get(key);
+  if (!row) {
+    return 0;
+  }
+  const failures = Number(row.failures || 0);
+  const successes = Number(row.successes || 0);
+  return successes * SOURCE_SUCCESS_BONUS - failures * SOURCE_FAILURE_PENALTY;
+}
+
+function markSourceHostResult(host, ok) {
+  const key = String(host || "").trim().toLowerCase();
+  if (!key) {
+    return;
+  }
+  const current = state.sourceHostHealth.get(key) || {
+    failures: 0,
+    successes: 0,
+    updatedAt: 0,
+  };
+  if (ok) {
+    current.successes = Math.min(18, Number(current.successes || 0) + 1);
+    current.failures = Math.max(0, Number(current.failures || 0) - 1);
+  } else {
+    current.failures = Math.min(20, Number(current.failures || 0) + 1);
+    current.successes = Math.max(0, Number(current.successes || 0) - 1);
+  }
+  current.updatedAt = Date.now();
+  state.sourceHostHealth.set(key, current);
+
+  if (state.sourceHostHealth.size > SOURCE_HOST_HEALTH_MAX) {
+    const rows = Array.from(state.sourceHostHealth.entries()).sort(
+      (left, right) => Number(left?.[1]?.updatedAt || 0) - Number(right?.[1]?.updatedAt || 0)
+    );
+    const remove = rows.slice(0, state.sourceHostHealth.size - SOURCE_HOST_HEALTH_MAX);
+    remove.forEach(([entryKey]) => state.sourceHostHealth.delete(entryKey));
+  }
+  saveSourceHostHealth(state.sourceHostHealth);
+}
+
+function getSourceRetryKey(index, source) {
+  const host = String(source?.host || "").trim().toLowerCase();
+  const url = String(source?.url || "").trim();
+  return `${Number(index)}|${host}|${url}`;
+}
+
+function canRetryCurrentSourceOnce(index, source) {
+  const key = getSourceRetryKey(index, source);
+  const attempts = Number(state.sourceRetryAttempts.get(key) || 0);
+  return attempts < SOURCE_RETRY_PER_INDEX;
+}
+
+function markCurrentSourceRetried(index, source) {
+  const key = getSourceRetryKey(index, source);
+  const attempts = Number(state.sourceRetryAttempts.get(key) || 0) + 1;
+  state.sourceRetryAttempts.set(key, attempts);
+}
+
+function markCurrentSourceSuccessful(index, source) {
+  const key = getSourceRetryKey(index, source);
+  state.sourceRetryAttempts.delete(key);
+}
+
+function getSourceScore(format, quality, language, index, host = "") {
   let score = 0;
   if (format === "mp4") {
     score += 300;
@@ -5461,6 +5836,7 @@ function getSourceScore(format, quality, language, index) {
   }
 
   score += Math.max(0, 30 - index);
+  score += getSourceHealthScore(host);
   return score;
 }
 
@@ -5474,6 +5850,9 @@ function formatSourceLabel(source, index, total) {
   }
   if (source?.format && source.format !== "unknown") {
     chunks.push(source.format.toUpperCase());
+  }
+  if (source?.host) {
+    chunks.push(source.host);
   }
   if (source?.premiumHint) {
     chunks.push("Premium");
@@ -5675,6 +6054,7 @@ async function startPlayerSource(source, resumeTime, token) {
   }
 
   let lastError = null;
+  let sourceStarted = false;
   try {
     for (const streamUrl of streamCandidates) {
       const useHls = source?.format === "hls" || /m3u8/i.test(streamUrl);
@@ -5706,6 +6086,9 @@ async function startPlayerSource(source, resumeTime, token) {
         } catch {
           setPlayerStatus("Clique sur Play dans le lecteur pour demarrer.");
         }
+        sourceStarted = true;
+        markSourceHostResult(source?.host, true);
+        markCurrentSourceSuccessful(state.sourceIndex, source);
         return;
       } catch (error) {
         lastError = error;
@@ -5715,6 +6098,10 @@ async function startPlayerSource(source, resumeTime, token) {
     if (loadTicket === state.sourceLoadTicket) {
       state.sourceLoading = false;
     }
+  }
+
+  if (!sourceStarted) {
+    markSourceHostResult(source?.host, false);
   }
 
   throw lastError || new Error("No playable stream candidate");
@@ -6072,6 +6459,7 @@ async function buildItemFromDetails(id) {
     runtime: Number(details?.runtime?.minutes || 0) || null,
     releaseDate: details?.releaseDate || null,
     endDate: null,
+    languageHint: normalizeLanguageLabel(details?.lang || ""),
     isAnime: Boolean(details?.isAnime),
   };
 
@@ -6286,6 +6674,112 @@ async function copyText(value) {
   }
 }
 
+function getLatestProgressEntry() {
+  const rows = Object.values(state.progress || {})
+    .filter((entry) => Number(entry?.id || 0) > 0 && Number(entry?.lastPlayed || 0) > 0)
+    .sort((left, right) => Number(right?.lastPlayed || 0) - Number(left?.lastPlayed || 0));
+  return rows[0] || null;
+}
+
+async function resumeLastPlayback() {
+  const latest = getLatestProgressEntry();
+  if (!latest) {
+    throw new Error("No progress");
+  }
+  const id = Number(latest.id || 0);
+  if (!id) {
+    throw new Error("Invalid progress");
+  }
+  await openPlayer(id, {
+    season: Number(latest.season || 1),
+    episode: Number(latest.episode || 1),
+    resumeTime: Number(latest.time || 0),
+  });
+}
+
+function exportFavoritesAsJson() {
+  const rows = Object.values(state.favorites || {})
+    .filter((entry) => Number(entry?.id || 0) > 0)
+    .sort((left, right) => Number(right?.addedAt || 0) - Number(left?.addedAt || 0));
+
+  const payload = {
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    app: "zenix-stream",
+    items: rows,
+  };
+
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {
+    type: "application/json;charset=utf-8",
+  });
+  const date = new Date();
+  const stamp = `${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, "0")}${String(
+    date.getDate()
+  ).padStart(2, "0")}`;
+  const filename = `zenix-ma-liste-${stamp}.json`;
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+  showToast(`Ma liste exportee (${rows.length} titre${rows.length > 1 ? "s" : ""}).`);
+}
+
+function normalizeImportedFavorite(entry) {
+  if (!entry || typeof entry !== "object") {
+    return null;
+  }
+  const id = Number(entry.id || 0);
+  if (!Number.isInteger(id) || id <= 0) {
+    return null;
+  }
+  const type = entry.type === "tv" ? "tv" : "movie";
+  const title = String(entry.title || "").trim().slice(0, 180);
+  return {
+    id,
+    type,
+    title,
+    isAnime: Boolean(entry.isAnime),
+    addedAt: Number(entry.addedAt || Date.now()) || Date.now(),
+  };
+}
+
+async function importFavoritesFromInput() {
+  const file = refs.importListInput?.files?.[0] || null;
+  if (!file) {
+    return;
+  }
+  const text = await file.text();
+  const parsed = JSON.parse(text);
+  const rows = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.items) ? parsed.items : [];
+  if (!Array.isArray(rows) || rows.length === 0) {
+    throw new Error("Empty import");
+  }
+
+  const next = { ...(state.favorites || {}) };
+  let imported = 0;
+  rows.forEach((row) => {
+    const normalized = normalizeImportedFavorite(row);
+    if (!normalized) {
+      return;
+    }
+    next[normalized.id] = normalized;
+    imported += 1;
+  });
+
+  if (imported === 0) {
+    throw new Error("No valid item");
+  }
+
+  state.favorites = next;
+  saveFavorites(state.favorites);
+  renderAll();
+  showToast(`Import termine: ${imported} titre${imported > 1 ? "s" : ""}.`);
+}
+
 function saveBrowseState() {
   try {
     const payload = {
@@ -6331,7 +6825,17 @@ function applySavedBrowseState() {
 
   const allowedViews = new Set(["all", "calendar", "top", "movie", "tv", "anime", "latest", "popular", "list", "info"]);
   const allowedChips = new Set(["all", "recent", "movie", "tv", "anime"]);
-  const allowedSort = new Set(["featured", "recent", "title-asc", "title-desc", "runtime-desc"]);
+  const allowedSort = new Set([
+    "featured",
+    "recent",
+    "title-asc",
+    "title-desc",
+    "year-desc",
+    "year-asc",
+    "resume-recent",
+    "random",
+    "runtime-desc",
+  ]);
 
   if (allowedViews.has(String(saved.view || ""))) {
     state.view = String(saved.view);
@@ -6341,6 +6845,9 @@ function applySavedBrowseState() {
   }
   if (allowedSort.has(String(saved.sortBy || ""))) {
     state.sortBy = String(saved.sortBy);
+    if (state.sortBy === "random") {
+      state.randomSortSeed = Date.now();
+    }
   }
   state.query = String(saved.query || "").trim();
   state.calendarQuery = String(saved.calendarQuery || "").trim();
@@ -6363,7 +6870,17 @@ function applyBrowseStateFromRoute() {
 
   const allowedViews = new Set(["all", "calendar", "top", "movie", "tv", "anime", "latest", "popular", "list", "info"]);
   const allowedChips = new Set(["all", "recent", "movie", "tv", "anime"]);
-  const allowedSort = new Set(["featured", "recent", "title-asc", "title-desc", "runtime-desc"]);
+  const allowedSort = new Set([
+    "featured",
+    "recent",
+    "title-asc",
+    "title-desc",
+    "year-desc",
+    "year-asc",
+    "resume-recent",
+    "random",
+    "runtime-desc",
+  ]);
 
   if (allowedViews.has(normalizedView)) {
     state.view = normalizedView;
@@ -6373,6 +6890,9 @@ function applyBrowseStateFromRoute() {
   }
   if (allowedSort.has(sort)) {
     state.sortBy = sort;
+    if (state.sortBy === "random") {
+      state.randomSortSeed = Date.now();
+    }
   }
   if (!isCatalogCategoryView(state.view) && state.view !== "all") {
     state.chip = "all";
@@ -6705,10 +7225,57 @@ function escapeHtml(value) {
     .replaceAll("'", "&#39;");
 }
 
+function loadSourceHostHealth() {
+  try {
+    const raw = localStorage.getItem(SOURCE_HOST_HEALTH_KEY);
+    if (!raw) {
+      return new Map();
+    }
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") {
+      return new Map();
+    }
+    const map = new Map();
+    Object.entries(parsed).forEach(([host, value]) => {
+      if (!host || !value || typeof value !== "object") {
+        return;
+      }
+      map.set(String(host).toLowerCase(), {
+        failures: Math.max(0, Number(value.failures || 0)),
+        successes: Math.max(0, Number(value.successes || 0)),
+        updatedAt: Math.max(0, Number(value.updatedAt || 0)),
+      });
+    });
+    return map;
+  } catch {
+    return new Map();
+  }
+}
+
+function saveSourceHostHealth(map) {
+  try {
+    const payload = {};
+    map.forEach((value, host) => {
+      payload[host] = {
+        failures: Math.max(0, Number(value?.failures || 0)),
+        successes: Math.max(0, Number(value?.successes || 0)),
+        updatedAt: Math.max(0, Number(value?.updatedAt || 0)),
+      };
+    });
+    localStorage.setItem(SOURCE_HOST_HEALTH_KEY, JSON.stringify(payload));
+  } catch {
+    // ignore private mode/quota
+  }
+}
+
 function loadUiPrefs() {
   const defaults = {
     compactCards: false,
     autoNextEpisode: true,
+    hideWatched: false,
+    newOnly: false,
+    vfOnly: false,
+    vostOnly: false,
     playbackRate: 1,
     playerVolume: 1,
     playerMuted: false,
@@ -6724,9 +7291,15 @@ function loadUiPrefs() {
     }
     const playbackRate = Number(parsed.playbackRate || 1);
     const playerVolume = Number(parsed.playerVolume);
+    const vfOnly = Boolean(parsed.vfOnly);
+    const vostOnly = Boolean(parsed.vostOnly) && !vfOnly;
     return {
       compactCards: Boolean(parsed.compactCards),
       autoNextEpisode: parsed.autoNextEpisode !== false,
+      hideWatched: Boolean(parsed.hideWatched),
+      newOnly: Boolean(parsed.newOnly),
+      vfOnly,
+      vostOnly,
       playbackRate: Number.isFinite(playbackRate) ? Math.min(2, Math.max(0.75, playbackRate)) : 1,
       playerVolume: Number.isFinite(playerVolume) ? Math.min(1, Math.max(0, playerVolume)) : 1,
       playerMuted: Boolean(parsed.playerMuted),
@@ -6738,9 +7311,15 @@ function loadUiPrefs() {
 
 function saveUiPrefs(value) {
   try {
+    const vfOnly = Boolean(value?.vfOnly);
+    const vostOnly = Boolean(value?.vostOnly) && !vfOnly;
     const payload = {
       compactCards: Boolean(value?.compactCards),
       autoNextEpisode: value?.autoNextEpisode !== false,
+      hideWatched: Boolean(value?.hideWatched),
+      newOnly: Boolean(value?.newOnly),
+      vfOnly,
+      vostOnly,
       playbackRate: Number(value?.playbackRate || 1),
       playerVolume: Number(value?.playerVolume ?? 1),
       playerMuted: Boolean(value?.playerMuted),
