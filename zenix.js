@@ -157,6 +157,7 @@ const state = {
   activeViewSyncTimer: 0,
   modalScrollY: 0,
   modalScrollCaptured: false,
+  postCloseTapGuardUntil: 0,
 };
 
 const refs = {
@@ -747,7 +748,7 @@ function bindEvents() {
 
   bindFastPress(refs.detailCloseBtn, () => {
     closeDetails();
-  });
+  }, { stopPropagation: true });
   refs.detailModal.addEventListener("click", (event) => {
     if (event.target === refs.detailModal) {
       closeDetails();
@@ -845,7 +846,7 @@ function bindEvents() {
 
   bindFastPress(refs.playerCloseBtn, () => {
     closePlayer();
-  });
+  }, { stopPropagation: true });
   refs.playerOverlay.addEventListener("click", (event) => {
     if (event.target === refs.playerOverlay) {
       closePlayer();
@@ -1031,6 +1032,21 @@ function bindEvents() {
     });
   });
 
+  const swallowGhostTap = (event) => {
+    if (!isPostCloseTapGuardActive()) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    if (typeof event.stopImmediatePropagation === "function") {
+      event.stopImmediatePropagation();
+    }
+  };
+
+  window.addEventListener("click", swallowGhostTap, true);
+  window.addEventListener("pointerup", swallowGhostTap, true);
+  window.addEventListener("touchend", swallowGhostTap, { capture: true, passive: false });
+
   const markInteraction = () => {
     bumpInteractionWindow();
   };
@@ -1187,6 +1203,15 @@ function consumePendingCatalogUpdate() {
   }
   state.pendingCatalogUpdate = false;
   renderAll();
+}
+
+function activatePostCloseTapGuard(ms = 420) {
+  const delay = Math.max(220, Number(ms || 420));
+  state.postCloseTapGuardUntil = Date.now() + delay;
+}
+
+function isPostCloseTapGuardActive() {
+  return Date.now() < Number(state.postCloseTapGuardUntil || 0);
 }
 
 function monthLabelFr(monthNumber) {
@@ -3978,6 +4003,7 @@ async function openDetails(id, options = {}) {
 }
 
 function closeDetails(options = {}) {
+  activatePostCloseTapGuard();
   refs.detailModal.hidden = true;
   refs.trailerWrap.hidden = true;
   refs.trailerFrame.src = "";
@@ -4842,6 +4868,7 @@ function setPlayerStatus(message, isError = false) {
 }
 
 function closePlayer(options = {}) {
+  activatePostCloseTapGuard();
   refs.playerOverlay.hidden = true;
   refs.playerSeriesControls.hidden = true;
   saveNowPlayingProgress({ force: true });
