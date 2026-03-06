@@ -2135,7 +2135,6 @@ function renderHero(item) {
     refs.heroMeta.appendChild(span);
   }
 
-  prefetchStreamForItem(item);
   ensureDetails(item.id).catch(() => {
     // keep card data only
   });
