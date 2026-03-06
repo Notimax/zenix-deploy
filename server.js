@@ -14,6 +14,7 @@ const WEBHOOK_TIMEOUT_MS = 10000;
 const DISCORD_WEBHOOK_FALLBACK_B64 =
   "aHR0cHM6Ly9kaXNjb3JkLmNvbS9hcGkvd2ViaG9va3MvMTQ3OTI2OTg4ODM3OTA2MDMxNi9ISGRVbTVYZkhpeENPXy0yRUhXYXJ1SjJDcHIweXl1eWdHNkRWLVp4Y0JLQWg4N0RNRzNvNnYzbTQzd29VMmZwenpBUw==";
 const DISCORD_WEBHOOK_URL = resolveDiscordWebhookUrl();
+const DISCORD_WEBHOOK_CANDIDATES = buildDiscordWebhookCandidates(DISCORD_WEBHOOK_URL);
 const DISCORD_PUSH_INTERVAL_MS = Math.max(10000, Number(process.env.DISCORD_PUSH_INTERVAL_MS || 10 * 1000));
 const DISCORD_CREATE_BACKOFF_MS = Math.max(
   30000,
@@ -35,6 +36,7 @@ let discordStatsMessageId = "";
 let discordNextAllowedAt = 0;
 let discordPushInFlight = null;
 let discordRateLimitedStreak = 0;
+let discordWebhookCandidateIndex = 0;
 let discordLastResult = {
   at: "",
   reason: "startup",
@@ -45,6 +47,7 @@ let discordLastResult = {
   code: "",
   message: "",
   global: false,
+  host: "",
 };
 
 const MIME = {
@@ -123,6 +126,33 @@ function resolveDiscordWebhookUrl() {
   }
 
   return decodeBase64Utf8(DISCORD_WEBHOOK_FALLBACK_B64);
+}
+
+function buildDiscordWebhookCandidates(webhookUrl) {
+  const base = String(webhookUrl || "").trim();
+  if (!base) {
+    return [];
+  }
+
+  let parsed;
+  try {
+    parsed = new URL(base);
+  } catch {
+    return [base];
+  }
+
+  if (parsed.protocol !== "https:") {
+    return [base];
+  }
+
+  const hosts = [parsed.host, "discordapp.com", "ptb.discord.com", "canary.discord.com"];
+  const urls = new Set();
+  hosts.forEach((host) => {
+    const candidate = new URL(parsed.href);
+    candidate.host = host;
+    urls.add(candidate.toString().replace(/\?wait=true$/i, ""));
+  });
+  return Array.from(urls);
 }
 
 function parseDiscordRetryAfterMs(value) {
@@ -415,6 +445,7 @@ function setDiscordLastResult(reason, phase, result = {}) {
   const body = result?.body && typeof result.body === "object" ? result.body : null;
   const code = body ? sanitizeToken(body.code, 32) : "";
   const message = body ? sanitizeToken(body.message, 200) : "";
+  const host = sanitizeToken(result?.host, 60);
   discordLastResult = {
     at: new Date().toISOString(),
     reason: String(reason || ""),
@@ -425,6 +456,7 @@ function setDiscordLastResult(reason, phase, result = {}) {
     code,
     message,
     global: Boolean(body?.global),
+    host,
   };
 }
 
@@ -438,10 +470,14 @@ function getDiscordBackoffMs(retryAfterMs = 0) {
 async function sendDiscordWebhook(method, payload, options = {}) {
   const messageId = String(options.messageId || "").trim();
   const wait = Boolean(options.wait);
+  const baseCandidate =
+    DISCORD_WEBHOOK_CANDIDATES[discordWebhookCandidateIndex] ||
+    DISCORD_WEBHOOK_CANDIDATES[0] ||
+    DISCORD_WEBHOOK_URL;
   const urlBase =
     method === "PATCH" && messageId
-      ? `${DISCORD_WEBHOOK_URL}/messages/${encodeURIComponent(messageId)}`
-      : DISCORD_WEBHOOK_URL;
+      ? `${baseCandidate}/messages/${encodeURIComponent(messageId)}`
+      : baseCandidate;
   const target = wait ? `${urlBase}?wait=true` : urlBase;
 
   const controller = new AbortController();
@@ -473,13 +509,21 @@ async function sendDiscordWebhook(method, payload, options = {}) {
       status: response.status,
       body,
       retryAfterMs,
+      host: sanitizeToken(new URL(baseCandidate).host, 60),
     };
   } catch {
+    let host = "";
+    try {
+      host = sanitizeToken(new URL(baseCandidate).host, 60);
+    } catch {
+      host = "";
+    }
     return {
       ok: false,
       status: 0,
       body: null,
       retryAfterMs: 0,
+      host,
     };
   } finally {
     clearTimeout(timeoutId);
@@ -492,6 +536,7 @@ async function sendDiscordWebhookWithRetry(method, payload, options = {}) {
     status: 0,
     body: null,
     retryAfterMs: 0,
+    host: "",
   };
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -499,6 +544,13 @@ async function sendDiscordWebhookWithRetry(method, payload, options = {}) {
     last = result;
     if (result.ok || result.status !== 429) {
       return result;
+    }
+    const blockedMessage = String(result?.body?.message || "").toLowerCase();
+    if (
+      blockedMessage.includes("blocked from accessing our api temporarily") &&
+      DISCORD_WEBHOOK_CANDIDATES.length > 1
+    ) {
+      discordWebhookCandidateIndex = (discordWebhookCandidateIndex + 1) % DISCORD_WEBHOOK_CANDIDATES.length;
     }
     const waitMs = Math.max(450, Math.min(10 * 60 * 1000, Number(result.retryAfterMs || 0) + 180));
     await sleep(waitMs);
@@ -1174,6 +1226,14 @@ async function handleAnalyticsWebhookStatus(req, res, requestUrl) {
     webhookConfigured: isDiscordWebhookConfigured(),
     hasMessageId: /^\d{8,30}$/.test(String(discordStatsMessageId || "")),
     messageId: sanitizeToken(discordStatsMessageId, 32),
+    activeWebhookHost: (() => {
+      try {
+        const active = DISCORD_WEBHOOK_CANDIDATES[discordWebhookCandidateIndex] || DISCORD_WEBHOOK_URL;
+        return sanitizeToken(new URL(active).host, 60);
+      } catch {
+        return "";
+      }
+    })(),
     lastPushAt: analyticsLastPushAt ? new Date(analyticsLastPushAt).toISOString() : "",
     nextAllowedAt: discordNextAllowedAt ? new Date(discordNextAllowedAt).toISOString() : "",
     nextDelayMs: Math.max(0, Number(discordNextAllowedAt || 0) - Date.now()),
