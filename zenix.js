@@ -2238,6 +2238,15 @@ function resolvePreferredCover(item, details = null) {
   );
 }
 
+function resolveCardCover(item, details = null) {
+  const mediaId = Number(item?.id || 0);
+  const fromCache = mediaId > 0 ? state.detailsCache.get(mediaId) : null;
+  const resolved = details || fromCache || null;
+  return normalizeImageUrl(
+    resolved?.posters?.large || resolved?.posters?.small || resolved?.posters?.wallpaper || item?.poster || item?.backdrop || ""
+  );
+}
+
 function setImageSourceSafely(node, nextSrc, title = "", cover = true) {
   if (!(node instanceof HTMLImageElement)) {
     return;
@@ -2631,26 +2640,44 @@ function renderTopDaily() {
   state.topDaily.forEach((item, index) => {
     const card = document.createElement("article");
     card.className = "top-card";
+    card.dataset.cardId = String(item.id);
+    const details = state.detailsCache.get(item.id) || null;
+    const cover = resolveCardCover(item, details);
+    const runtime = item.runtime ? toHumanRuntime(item.runtime) : item.type === "tv" ? "Episodes" : "Film";
+    const year = getYear(item.releaseDate) || "-";
 
     card.innerHTML = `
+      <span class="top-rank">${index + 1}</span>
+      <div class="top-shell">
       <div class="top-thumb">
         <img
-          src="${escapeHtml(resolvePreferredCover(item))}"
+          src="${escapeHtml(cover)}"
           alt="${escapeHtml(item.title)}"
           loading="${index < 6 ? "eager" : "lazy"}"
           decoding="async"
           fetchpriority="${index < 2 ? "high" : "auto"}"
           data-cover-id="${item.id}"
         />
-        <span class="top-rank">${index + 1}</span>
+        <div class="card-hover-actions" aria-hidden="true">
+          <button type="button" class="card-action-btn" data-top-play="${item.id}" aria-label="Demarrer ${escapeHtml(item.title)}">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"></path></svg>
+          </button>
+          <button type="button" class="card-action-btn" data-top-info="${item.id}" aria-label="Voir les details de ${escapeHtml(item.title)}">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 9h2V7h-2zm0 8h2v-6h-2zm1-15C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z"></path></svg>
+          </button>
+        </div>
+        <button type="button" class="media-open" data-top-open="${item.id}" aria-label="Voir la fiche de ${escapeHtml(item.title)}"></button>
       </div>
       <div class="top-body">
-        <h3 class="top-title">${escapeHtml(item.title)}</h3>
-        <p class="top-meta">${escapeHtml(getItemTypeLabel(item))} - ${escapeHtml(getYear(item.releaseDate) || "-")}</p>
-        <div class="media-actions">
-          <button type="button" class="btn-small btn-play" data-top-play="${item.id}">Demarrer</button>
-          <button type="button" class="btn-small btn-info" data-top-info="${item.id}">Details</button>
-        </div>
+        <button type="button" class="title-link top-title-link" data-top-open="${item.id}">${escapeHtml(item.title)}</button>
+        <p class="top-meta">
+          <span class="meta-pill">${escapeHtml(getItemTypeLabel(item))}</span>
+          <span class="meta-dot" aria-hidden="true"></span>
+          <span>${escapeHtml(runtime)}</span>
+          <span class="meta-dot" aria-hidden="true"></span>
+          <span>${escapeHtml(year)}</span>
+        </p>
+      </div>
       </div>
     `;
 
@@ -2672,7 +2699,7 @@ function renderTopDaily() {
     });
 
     card.addEventListener("click", (event) => {
-      if (event.target instanceof HTMLElement && event.target.tagName.toLowerCase() === "button") {
+      if (event.target instanceof HTMLElement && event.target.closest("button")) {
         return;
       }
       state.activeHeroId = item.id;
@@ -2683,6 +2710,7 @@ function renderTopDaily() {
 
     const play = card.querySelector(`[data-top-play="${item.id}"]`);
     const info = card.querySelector(`[data-top-info="${item.id}"]`);
+    const openButtons = card.querySelectorAll(`[data-top-open="${item.id}"]`);
 
     if (play) {
       bindFastPress(play, () => {
@@ -2698,6 +2726,14 @@ function renderTopDaily() {
         });
       });
     }
+    openButtons.forEach((button) => {
+      bindFastPress(button, () => {
+        state.activeHeroId = item.id;
+        openDetails(item.id).catch(() => {
+          showMessage("Impossible de charger la fiche detaillee.", true);
+        });
+      });
+    });
 
     fragment.appendChild(card);
   });
@@ -2792,22 +2828,23 @@ function buildMediaCard(item, resume = false, progressEntry = null, position = 0
   card.dataset.cardId = String(item.id);
 
   const details = state.detailsCache.get(item.id) || null;
-  const cover = resolvePreferredCover(item, details);
+  const cover = resolveCardCover(item, details);
   const eagerLimit = Number(imageProfile?.eagerLimit || DESKTOP_EAGER_IMAGE_LIMIT);
   const highPriorityLimit = Number(imageProfile?.highPriorityLimit || DESKTOP_HIGH_PRIORITY_IMAGE_LIMIT);
 
   const year = getYear(item.releaseDate) || "-";
   const runtime = item.runtime ? toHumanRuntime(item.runtime) : item.type === "tv" ? "Episodes" : "Film";
-  const typeLabel = getItemTypeLabel(item).toUpperCase();
+  const typeLabel = getItemTypeLabel(item);
+  const languageLabel = resolveDetailLanguageLabel(details, item.id);
   const favorite = isFavorite(item.id);
   const progress = progressEntry || state.progress[item.id] || null;
   const ratioRaw = progress && Number(progress.duration || 0) > 0
     ? (Number(progress.time || 0) / Number(progress.duration || 1)) * 100
     : 0;
   const ratio = Math.max(0, Math.min(100, Math.round(ratioRaw)));
-  const isRecent = parseReleaseDate(item.releaseDate) > Date.now() - 90 * 24 * 60 * 60 * 1000;
 
   card.innerHTML = `
+    <div class="media-shell">
     <div class="media-thumb">
       <img
         src="${escapeHtml(cover)}"
@@ -2817,22 +2854,32 @@ function buildMediaCard(item, resume = false, progressEntry = null, position = 0
         fetchpriority="${position < highPriorityLimit ? "high" : "auto"}"
         data-cover-id="${item.id}"
       />
-      <div class="media-flags">
-        <span class="flag good">FREE</span>
-        <span class="flag">${escapeHtml(typeLabel)}</span>
-        ${isRecent ? '<span class="flag hot">NEW</span>' : ""}
-        ${item.type === "tv" ? '<span class="flag">EPISODES</span>' : ""}
+      <div class="card-hover-actions" aria-hidden="true">
+        <button type="button" class="card-action-btn" data-card-play="${item.id}" aria-label="${resume ? "Reprendre" : "Demarrer"} ${escapeHtml(item.title)}">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"></path></svg>
+        </button>
+        <button type="button" class="card-action-btn" data-card-info="${item.id}" aria-label="Voir les details de ${escapeHtml(item.title)}">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 9h2V7h-2zm0 8h2v-6h-2zm1-15C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z"></path></svg>
+        </button>
+        <button type="button" class="card-action-btn card-action-fav${favorite ? " active" : ""}" data-card-fav="${item.id}" aria-label="${favorite ? "Retirer de ma liste" : "Ajouter a ma liste"}">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5c-1.8-2.1-5-2.4-7.1-.4-2.4 2.2-2.5 6-.2 8.4l7.3 7.5 7.3-7.5c2.3-2.4 2.2-6.2-.2-8.4-2.1-2-5.3-1.7-7.1.4z"></path></svg>
+        </button>
       </div>
+      <button type="button" class="media-open" data-card-open="${item.id}" aria-label="Voir la fiche de ${escapeHtml(item.title)}"></button>
       ${ratio > 0 ? `<div class="progress-track"><span style="width:${ratio}%"></span></div>` : ""}
     </div>
     <div class="media-body">
-      <h3 class="media-title">${escapeHtml(item.title)}</h3>
-      <p class="media-meta">${escapeHtml(year)} - ${escapeHtml(runtime)}</p>
-      <div class="media-actions">
-        <button type="button" class="btn-small btn-play" data-card-play="${item.id}">${resume ? "Reprendre" : "Demarrer"}</button>
-        <button type="button" class="btn-small btn-info" data-card-info="${item.id}">Details</button>
-        <button type="button" class="btn-small btn-fav${favorite ? " active" : ""}" data-card-fav="${item.id}">${favorite ? "Retirer" : "+ Liste"}</button>
-      </div>
+      <button type="button" class="title-link media-title-link" data-card-open="${item.id}">${escapeHtml(item.title)}</button>
+      <p class="media-meta">
+        <span class="meta-pill">${escapeHtml(typeLabel)}</span>
+        <span class="meta-dot" aria-hidden="true"></span>
+        <span>${escapeHtml(runtime)}</span>
+        <span class="meta-dot" aria-hidden="true"></span>
+        <span>${escapeHtml(year)}</span>
+        ${languageLabel ? `<span class="meta-dot" aria-hidden="true"></span><span>${escapeHtml(languageLabel)}</span>` : ""}
+      </p>
+      ${resume ? '<p class="media-resume">Reprendre la lecture</p>' : ""}
+    </div>
     </div>
   `;
 
@@ -2844,6 +2891,7 @@ function buildMediaCard(item, resume = false, progressEntry = null, position = 0
   const play = card.querySelector(`[data-card-play="${item.id}"]`);
   const info = card.querySelector(`[data-card-info="${item.id}"]`);
   const fav = card.querySelector(`[data-card-fav="${item.id}"]`);
+  const openButtons = card.querySelectorAll(`[data-card-open="${item.id}"]`);
 
   if (play) {
     bindFastPress(play, () => {
@@ -2876,9 +2924,16 @@ function buildMediaCard(item, resume = false, progressEntry = null, position = 0
       toggleFavorite(item.id);
       const nowFavorite = isFavorite(item.id);
       fav.classList.toggle("active", nowFavorite);
-      fav.textContent = nowFavorite ? "Retirer" : "+ Liste";
+      fav.setAttribute("aria-label", nowFavorite ? "Retirer de ma liste" : "Ajouter a ma liste");
     });
   }
+  openButtons.forEach((button) => {
+    bindFastPress(button, () => {
+      openDetails(item.id).catch(() => {
+        showMessage("Impossible de charger les details.", true);
+      });
+    });
+  });
 
   card.addEventListener("pointerdown", () => {
     ensureDetails(item.id)
@@ -2903,7 +2958,7 @@ function buildMediaCard(item, resume = false, progressEntry = null, position = 0
 
   card.addEventListener("click", (event) => {
     const target = event.target;
-    if (target instanceof HTMLElement && target.closest("button, a")) {
+    if (target instanceof HTMLElement && target.closest("button")) {
       return;
     }
     openDetails(item.id).catch(() => {
@@ -2919,12 +2974,13 @@ function updateCardCoverFromDetails(id, details) {
     return;
   }
   const item = findItemById(Number(id));
-  const cover = resolvePreferredCover(item, details);
+  const cover = resolveCardCover(item, details);
   if (!cover) {
     return;
   }
 
   if (item) {
+    item.poster = cover;
     item.backdrop = cover;
   }
 
