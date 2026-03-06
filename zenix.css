@@ -930,8 +930,9 @@ body {
   background: linear-gradient(170deg, #14141b 0%, #0e0e13 100%);
   overflow: hidden;
   box-shadow: var(--shadow-md);
-  transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+  transition: transform 200ms cubic-bezier(0.2, 0.75, 0.2, 1), border-color 180ms ease, box-shadow 200ms ease;
   transform: translateZ(0);
+  will-change: transform, box-shadow;
 }
 
 .media-card {
@@ -940,9 +941,15 @@ body {
 
 .top-card:hover,
 .media-card:hover {
-  transform: translateY(-4px) scale(1.01);
+  transform: translateY(-6px) scale(1.015);
   border-color: rgba(255, 90, 58, 0.42);
   box-shadow: 0 20px 52px rgba(0, 0, 0, 0.52);
+}
+
+.media-card:focus-within,
+.top-card:focus-within {
+  border-color: rgba(255, 90, 58, 0.46);
+  box-shadow: 0 16px 42px rgba(0, 0, 0, 0.5);
 }
 
 .top-card {
@@ -961,6 +968,7 @@ body {
 
 .media-thumb {
   aspect-ratio: 16 / 9;
+  background: linear-gradient(160deg, #1f2330, #10131b);
 }
 
 .top-thumb img,
@@ -969,13 +977,14 @@ body {
   height: 100%;
   object-fit: cover;
   display: block;
-  transition: transform 180ms ease;
+  transition: transform 220ms cubic-bezier(0.2, 0.75, 0.2, 1), filter 220ms ease;
   will-change: transform;
 }
 
 .top-card:hover img,
 .media-card:hover img {
-  transform: scale(1.075);
+  transform: scale(1.08);
+  filter: saturate(1.07) contrast(1.03);
 }
 
 .top-thumb::after,
@@ -1089,8 +1098,11 @@ body {
 }
 
 .media-card,
-.media-card * {
+.media-card *,
+.top-card,
+.feature-card {
   touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .media-actions {
@@ -1816,6 +1828,11 @@ body {
     margin-top: 0;
   }
 
+  .media-card,
+  .top-card {
+    box-shadow: 0 10px 22px rgba(0, 0, 0, 0.4);
+  }
+
   .player-head {
     flex-direction: column;
     align-items: flex-start;
@@ -1835,6 +1852,21 @@ body {
     width: 200px;
   }
 
+}
+
+@media (hover: none) {
+  .top-card:hover,
+  .media-card:hover {
+    transform: none;
+    border-color: rgba(255, 255, 255, 0.14);
+    box-shadow: var(--shadow-md);
+  }
+
+  .top-card:hover img,
+  .media-card:hover img {
+    transform: none;
+    filter: none;
+  }
 }
 
 @media (max-width: 520px) {

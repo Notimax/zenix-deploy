@@ -27,6 +27,7 @@ const BACKGROUND_CATALOG_DELAY_MS = 8;
 const BACKGROUND_CATALOG_RENDER_EVERY = 8;
 const CATALOG_RENDER_CHUNK_MIN = 28;
 const CATALOG_RENDER_CHUNK_MAX = 68;
+const LIVE_RENDER_INTERACTION_GRACE_MS = 1200;
 const STREAM_PROXY_TIMEOUT_MS = 6500;
 const STREAM_PROXY_PREFETCH_TIMEOUT_MS = 4200;
 const STREAM_DIRECT_TIMEOUT_MS = 5200;
@@ -120,6 +121,8 @@ const state = {
   refreshFeedTimer: null,
   refreshTopTimer: null,
   pendingCatalogUpdate: false,
+  userInteractingUntil: 0,
+  pendingRenderTimer: 0,
   analyticsClientId: "",
   analyticsDisabled: false,
   analyticsInFlight: false,
@@ -726,6 +729,7 @@ function bindEvents() {
   }
 
   window.addEventListener("keydown", (event) => {
+    bumpInteractionWindow(850);
     if (event.key === "/" && document.activeElement !== refs.searchInput) {
       const target = event.target;
       const typing =
@@ -755,9 +759,17 @@ function bindEvents() {
     });
   });
 
+  const markInteraction = () => {
+    bumpInteractionWindow();
+  };
+  window.addEventListener("pointerdown", markInteraction, { passive: true });
+  window.addEventListener("touchstart", markInteraction, { passive: true });
+  window.addEventListener("wheel", markInteraction, { passive: true });
+
   window.addEventListener(
     "scroll",
     () => {
+      bumpInteractionWindow(520);
       consumePendingCatalogUpdate();
     },
     { passive: true }
@@ -765,6 +777,7 @@ function bindEvents() {
 
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") {
+      bumpInteractionWindow(420);
       consumePendingCatalogUpdate();
     }
   });
@@ -821,11 +834,30 @@ function setHidden(node, hidden) {
   }
 }
 
+function bumpInteractionWindow(ms = LIVE_RENDER_INTERACTION_GRACE_MS) {
+  const delay = Math.max(120, Number(ms || LIVE_RENDER_INTERACTION_GRACE_MS));
+  const until = Date.now() + delay;
+  if (until > state.userInteractingUntil) {
+    state.userInteractingUntil = until;
+  }
+
+  if (state.pendingRenderTimer) {
+    clearTimeout(state.pendingRenderTimer);
+  }
+  state.pendingRenderTimer = window.setTimeout(() => {
+    state.pendingRenderTimer = 0;
+    consumePendingCatalogUpdate();
+  }, delay + 140);
+}
+
 function shouldRenderLiveCatalogUpdates() {
   if (!refs.playerOverlay.hidden || !refs.detailModal.hidden) {
     return false;
   }
   if (document.visibilityState === "hidden") {
+    return false;
+  }
+  if (Date.now() < Number(state.userInteractingUntil || 0)) {
     return false;
   }
   if (state.query.trim().length > 0 || state.view === "calendar" || state.view === "top" || state.view === "list") {
@@ -1938,9 +1970,66 @@ function updateCatalogHeading(hasQuery, resultCount) {
     return;
   }
   refs.catalogSubtitle.textContent = "Catalogue fusionne films, series et anime.";
+
+}
+
+function resolvePreferredCover(item, details = null) {
+  const mediaId = Number(item?.id || 0);
+  const fromCache = mediaId > 0 ? state.detailsCache.get(mediaId) : null;
+  const resolved = details || fromCache || null;
+  return resolved?.posters?.wallpaper || resolved?.posters?.small || resolved?.posters?.large || item?.backdrop || item?.poster || "";
+}
+
+function setImageSourceSafely(node, nextSrc, title = "", cover = true) {
+  if (!(node instanceof HTMLImageElement)) {
+    return;
+  }
+  const url = String(nextSrc || "").trim();
+  if (!url) {
+    wireImageFallback(node, title || "Zenix", cover);
+    return;
+  }
+
+  const currentSrc = String(node.currentSrc || node.src || "").trim();
+  if (currentSrc === url || node.dataset.pendingSrc === url) {
+    wireImageFallback(node, title || "Zenix", cover);
+    return;
+  }
+
+  node.dataset.pendingSrc = url;
+  const preloader = new Image();
+  preloader.decoding = "async";
+  preloader.src = url;
+
+  const apply = () => {
+    if (node.dataset.pendingSrc !== url) {
+      return;
+    }
+    node.src = url;
+    delete node.dataset.pendingSrc;
+    wireImageFallback(node, title || "Zenix", cover);
+  };
+
+  if (preloader.complete) {
+    apply();
+    return;
+  }
+
+  preloader.addEventListener("load", apply, { once: true });
+  preloader.addEventListener(
+    "error",
+    () => {
+      if (node.dataset.pendingSrc === url) {
+        delete node.dataset.pendingSrc;
+      }
+      wireImageFallback(node, title || "Zenix", cover);
+    },
+    { once: true }
+  );
 }
 
 function renderFeatureRail(items) {
+
   if (!refs.featureRailTrack) {
     return;
   }
@@ -1968,11 +2057,12 @@ function renderFeatureRail(items) {
     const topRank = state.topDaily.findIndex((entry) => entry.id === item.id);
     button.innerHTML = `
       <img
-        src="${escapeHtml(item.backdrop || item.poster)}"
+        src="${escapeHtml(resolvePreferredCover(item))}"
         alt="${escapeHtml(item.title)}"
         loading="${index < 10 ? "eager" : "lazy"}"
         decoding="async"
         fetchpriority="${index < 4 ? "high" : "auto"}"
+        data-cover-id="${item.id}"
       />
       <span>${escapeHtml(item.title)}</span>
       ${topRank >= 0 ? `<small>Top ${topRank + 1}</small>` : ""}
@@ -1981,6 +2071,15 @@ function renderFeatureRail(items) {
     if (image) {
       wireImageFallback(image, item.title, true);
     }
+    button.addEventListener("pointerdown", () => {
+      ensureDetails(item.id)
+        .then((entry) => {
+          updateCardCoverFromDetails(item.id, entry);
+        })
+        .catch(() => {
+          // optional warmup only
+        });
+    });
     button.addEventListener("click", () => {
       openDetails(item.id).catch(() => {
         showToast("Impossible d'ouvrir ce titre.", true);
@@ -1989,6 +2088,7 @@ function renderFeatureRail(items) {
     fragment.appendChild(button);
   });
   refs.featureRailTrack.appendChild(fragment);
+  warmVisibleDetailCovers(source, 18);
 }
 
 function renderCommunityStats() {
@@ -2220,7 +2320,7 @@ function renderHero(item) {
 
   refs.heroTitle.textContent = item.title;
   refs.heroDescription.textContent = overview;
-  refs.heroArt.src = details?.posters?.wallpaper || details?.posters?.small || item.backdrop || item.poster;
+  setImageSourceSafely(refs.heroArt, resolvePreferredCover(item, details), item.title, true);
   refs.heroArt.alt = item.title;
   refs.heroArt.decoding = "async";
   refs.heroArt.fetchPriority = "high";
@@ -2277,11 +2377,12 @@ function renderTopDaily() {
     card.innerHTML = `
       <div class="top-thumb">
         <img
-          src="${escapeHtml(item.backdrop || item.poster)}"
+          src="${escapeHtml(resolvePreferredCover(item))}"
           alt="${escapeHtml(item.title)}"
           loading="${index < 6 ? "eager" : "lazy"}"
           decoding="async"
           fetchpriority="${index < 2 ? "high" : "auto"}"
+          data-cover-id="${item.id}"
         />
         <span class="top-rank">${index + 1}</span>
       </div>
@@ -2302,14 +2403,24 @@ function renderTopDaily() {
     card.addEventListener("pointerenter", () => {
       prefetchStreamForItem(item);
     });
+    card.addEventListener("pointerdown", () => {
+      ensureDetails(item.id)
+        .then((entry) => {
+          updateCardCoverFromDetails(item.id, entry);
+        })
+        .catch(() => {
+          // best effort
+        });
+    });
 
     card.addEventListener("click", (event) => {
       if (event.target instanceof HTMLElement && event.target.tagName.toLowerCase() === "button") {
         return;
       }
       state.activeHeroId = item.id;
-      renderAll();
-      window.scrollTo({ top: 0, behavior: "smooth" });
+      openDetails(item.id).catch(() => {
+        showMessage("Impossible de charger la fiche detaillee.", true);
+      });
     });
 
     const play = card.querySelector(`[data-top-play="${item.id}"]`);
@@ -2333,6 +2444,7 @@ function renderTopDaily() {
     fragment.appendChild(card);
   });
   refs.topGrid.appendChild(fragment);
+  warmVisibleDetailCovers(state.topDaily, 20);
 }
 
 function renderCatalog(items) {
@@ -2408,12 +2520,7 @@ function buildMediaCard(item, resume = false, progressEntry = null, position = 0
   card.dataset.cardId = String(item.id);
 
   const details = state.detailsCache.get(item.id) || null;
-  const cover =
-    details?.posters?.wallpaper ||
-    details?.posters?.small ||
-    details?.posters?.large ||
-    item.backdrop ||
-    item.poster;
+  const cover = resolvePreferredCover(item, details);
 
   const year = getYear(item.releaseDate) || "-";
   const runtime = item.runtime ? toHumanRuntime(item.runtime) : item.type === "tv" ? "Episodes" : "Film";
@@ -2511,6 +2618,13 @@ function buildMediaCard(item, resume = false, progressEntry = null, position = 0
 
   card.addEventListener("pointerenter", () => {
     prefetchStreamForItem(item);
+    ensureDetails(item.id)
+      .then((entry) => {
+        updateCardCoverFromDetails(item.id, entry);
+      })
+      .catch(() => {
+        // optional warmup only
+      });
   });
 
   card.addEventListener("click", (event) => {
@@ -2530,40 +2644,49 @@ function updateCardCoverFromDetails(id, details) {
   if (!details || Number(id) <= 0) {
     return;
   }
-  const cover = details?.posters?.wallpaper || details?.posters?.small || details?.posters?.large || "";
+  const item = findItemById(Number(id));
+  const cover = resolvePreferredCover(item, details);
   if (!cover) {
     return;
   }
 
-  const item = findItemById(Number(id));
   if (item) {
     item.backdrop = cover;
   }
 
   document.querySelectorAll(`[data-cover-id="${id}"]`).forEach((node) => {
     if (node instanceof HTMLImageElement) {
-      if (node.src !== cover) {
-        node.src = cover;
-      }
-      wireImageFallback(node, item?.title || details?.title || "Zenix", true);
+      setImageSourceSafely(node, cover, item?.title || details?.title || "Zenix", true);
     }
   });
 }
 
 function warmVisibleDetailCovers(items, limit = 32) {
   const rows = Array.isArray(items) ? items.slice(0, Math.max(0, limit)) : [];
-  rows.forEach((entry) => {
-    if (!entry || Number(entry.id || 0) <= 0) {
-      return;
-    }
-    ensureDetails(entry.id)
-      .then((details) => {
-        updateCardCoverFromDetails(entry.id, details);
-      })
-      .catch(() => {
-        // best effort only
-      });
-  });
+  if (rows.length === 0) {
+    return;
+  }
+
+  const hydrate = () => {
+    rows.forEach((entry) => {
+      if (!entry || Number(entry.id || 0) <= 0) {
+        return;
+      }
+      ensureDetails(entry.id)
+        .then((details) => {
+          updateCardCoverFromDetails(entry.id, details);
+        })
+        .catch(() => {
+          // best effort only
+        });
+    });
+  };
+
+  if (typeof window.requestIdleCallback === "function") {
+    window.requestIdleCallback(hydrate, { timeout: 750 });
+  } else {
+    window.setTimeout(hydrate, 0);
+  }
 }
 
 function updateLoadMoreButton() {
