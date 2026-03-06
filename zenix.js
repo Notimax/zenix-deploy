@@ -2176,9 +2176,6 @@ function renderTopDaily() {
     card.addEventListener("pointerenter", () => {
       prefetchStreamForItem(item);
     });
-    card.addEventListener("focusin", () => {
-      prefetchStreamForItem(item);
-    });
 
     card.addEventListener("click", (event) => {
       if (event.target instanceof HTMLElement && event.target.tagName.toLowerCase() === "button") {
@@ -2366,9 +2363,6 @@ function buildMediaCard(item, resume = false, progressEntry = null, position = 0
     });
   }
   card.addEventListener("pointerenter", () => {
-    prefetchStreamForItem(item);
-  });
-  card.addEventListener("focusin", () => {
     prefetchStreamForItem(item);
   });
 
