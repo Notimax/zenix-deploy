@@ -14,7 +14,7 @@ const WEBHOOK_TIMEOUT_MS = 10000;
 const DISCORD_WEBHOOK_FALLBACK_B64 =
   "aHR0cHM6Ly9kaXNjb3JkLmNvbS9hcGkvd2ViaG9va3MvMTQ3OTI2OTg4ODM3OTA2MDMxNi9ISGRVbTVYZkhpeENPXy0yRUhXYXJ1SjJDcHIweXl1eWdHNkRWLVp4Y0JLQWg4N0RNRzNvNnYzbTQzd29VMmZwenpBUw==";
 const DISCORD_WEBHOOK_URL = resolveDiscordWebhookUrl();
-const DISCORD_PUSH_INTERVAL_MS = Math.max(15000, Number(process.env.DISCORD_PUSH_INTERVAL_MS || 60 * 1000));
+const DISCORD_PUSH_INTERVAL_MS = Math.max(10000, Number(process.env.DISCORD_PUSH_INTERVAL_MS || 10 * 1000));
 const ANALYTICS_RETENTION_MS = 24 * 60 * 60 * 1000;
 const ANALYTICS_ACTIVE_WINDOW_MS = 2 * 60 * 1000;
 const ANALYTICS_MIN_EVENT_MS = 10 * 1000;
@@ -329,7 +329,11 @@ function buildDiscordStatsEmbed(stats, reason) {
       { name: "Heartbeats 24h", value: String(stats.heartbeats24h), inline: true },
       { name: "Total depuis lancement", value: String(stats.totalSeen), inline: true },
       { name: "Uptime serveur", value: stats.uptimeLabel, inline: true },
-      { name: "Rafraichissement", value: "Toutes les 1 min", inline: true },
+      {
+        name: "Rafraichissement",
+        value: `Toutes les ${Math.max(1, Math.round(DISCORD_PUSH_INTERVAL_MS / 1000))} s`,
+        inline: true,
+      },
     ],
     footer: {
       text: reason === "startup" ? "Demarrage service" : "Mise a jour automatique",
