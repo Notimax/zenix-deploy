@@ -16,9 +16,9 @@ const STREAM_CACHE_TTL_MS = 2 * 60 * 1000;
 const STREAM_PREFETCH_COOLDOWN_MS = 15 * 1000;
 const PROGRESS_SAVE_INTERVAL_MS = 2400;
 const HERO_ROTATE_MS = 8000;
-const IMAGE_WARMUP_BATCH = 16;
-const IMAGE_WARMUP_DELAY_MS = 30;
-const INITIAL_IMAGE_WARMUP_LIMIT = 180;
+const IMAGE_WARMUP_BATCH = 28;
+const IMAGE_WARMUP_DELAY_MS = 12;
+const INITIAL_IMAGE_WARMUP_LIMIT = 260;
 const CALENDAR_YEAR_RANGE = 3;
 const CALENDAR_CACHE_KEY = "zenix-calendar-cache-v1";
 const CALENDAR_CACHE_MAX_ENTRIES = 8;
@@ -28,12 +28,15 @@ const BACKGROUND_CATALOG_RENDER_EVERY = 8;
 const CATALOG_RENDER_CHUNK_MIN = 28;
 const CATALOG_RENDER_CHUNK_MAX = 68;
 const MOBILE_VIEWPORT_MAX_WIDTH = 740;
-const MOBILE_CATALOG_FIRST_PAINT = 54;
+const MOBILE_CATALOG_FIRST_PAINT = 66;
 const MOBILE_CATALOG_CHUNK_MIN = 42;
 const MOBILE_EAGER_IMAGE_LIMIT = 120;
-const MOBILE_HIGH_PRIORITY_IMAGE_LIMIT = 28;
-const DESKTOP_EAGER_IMAGE_LIMIT = 58;
-const DESKTOP_HIGH_PRIORITY_IMAGE_LIMIT = 14;
+const MOBILE_HIGH_PRIORITY_IMAGE_LIMIT = 52;
+const DESKTOP_EAGER_IMAGE_LIMIT = 96;
+const DESKTOP_HIGH_PRIORITY_IMAGE_LIMIT = 26;
+const CRITICAL_COVER_PRIME_MOBILE = 140;
+const CRITICAL_COVER_PRIME_DESKTOP = 84;
+const CRITICAL_COVER_PRIME_WAIT_MS = 700;
 const LIVE_RENDER_INTERACTION_GRACE_MS = 1200;
 const STREAM_PROXY_TIMEOUT_MS = 6500;
 const STREAM_PROXY_PREFETCH_TIMEOUT_MS = 4200;
@@ -115,6 +118,7 @@ const state = {
   streamPrefetchAt: new Map(),
   episodePlayableCache: new Map(),
   episodePlayableInFlight: new Map(),
+  coverPreloadInFlight: new Map(),
   detailsInFlight: new Map(),
   trailersInFlight: new Map(),
   seasonsInFlight: new Map(),
@@ -286,6 +290,14 @@ async function init() {
     const first = state.topDaily[0] || state.catalog[0];
     state.activeHeroId = first ? first.id : null;
   }
+
+  await primeCriticalCovers(
+    [...state.topDaily, ...state.catalog],
+    isCompactViewport() ? CRITICAL_COVER_PRIME_MOBILE : CRITICAL_COVER_PRIME_DESKTOP,
+    CRITICAL_COVER_PRIME_WAIT_MS
+  ).catch(() => {
+    // best effort only
+  });
 
   renderAll();
   topTask
@@ -1355,13 +1367,14 @@ function renderCalendarSection() {
     const hasDetails = detailId > 0;
     const linkLabel = hasDetails ? "Voir details" : "Bientot";
     const typeLabel = typeMap[String(entry.type || entry.kind || "").toLowerCase()] || "Titre";
+    const poster = normalizeImageUrl(entry.poster || "");
     const dateLabel =
       entry.source === "purstream"
         ? `${String(entry.dayNumber || "").padStart(2, "0")}/${String(state.calendarMonth).padStart(2, "0")}`
         : entry.dateLabel || entry.dayName || "Sans date";
     card.innerHTML = `
       <img
-        src="${escapeHtml(entry.poster || "")}"
+        src="${escapeHtml(poster)}"
         alt="${escapeHtml(entry.title || "Affiche")}"
         loading="${index < 24 ? "eager" : "lazy"}"
         decoding="async"
@@ -1412,7 +1425,7 @@ function renderCalendarSection() {
   } else {
     refs.calendarMergedGrid.appendChild(mergedFragment);
     warmImageCacheFromPool(
-      mergedRows.map((entry) => ({ poster: entry.poster || "", backdrop: "" })),
+      mergedRows.map((entry) => ({ poster: normalizeImageUrl(entry.poster || ""), backdrop: "" })),
       80
     );
   }
@@ -1438,16 +1451,100 @@ function renderCalendarSection() {
 }
 
 function queueWarmImage(url) {
-  const value = String(url || "").trim();
+  const value = normalizeImageUrl(url);
   if (!value || value.startsWith("data:") || state.warmedImages.has(value)) {
     return;
   }
   state.warmedImages.add(value);
   state.imageWarmQueue.push(value);
-  if (state.imageWarmQueue.length > 600) {
-    state.imageWarmQueue = state.imageWarmQueue.slice(0, 600);
+  if (state.imageWarmQueue.length > 1400) {
+    state.imageWarmQueue = state.imageWarmQueue.slice(0, 1400);
   }
   pumpWarmImageQueue();
+}
+
+function primeImageUrl(url, timeoutMs = 4200) {
+  const value = normalizeImageUrl(url);
+  if (!value || value.startsWith("data:")) {
+    return Promise.resolve(false);
+  }
+  if (state.coverPreloadInFlight.has(value)) {
+    return state.coverPreloadInFlight.get(value);
+  }
+  if (state.warmedImages.has(value)) {
+    return Promise.resolve(true);
+  }
+
+  state.warmedImages.add(value);
+  const task = new Promise((resolve) => {
+    const image = new Image();
+    image.decoding = "async";
+    let settled = false;
+    const finish = (ok) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeoutId);
+      if (!ok) {
+        state.warmedImages.delete(value);
+      }
+      resolve(ok);
+    };
+    const timeoutId = window.setTimeout(() => finish(false), Math.max(1200, Number(timeoutMs || 0)));
+    image.addEventListener("load", () => finish(true), { once: true });
+    image.addEventListener("error", () => finish(false), { once: true });
+    image.src = value;
+    if (image.complete) {
+      finish(true);
+    }
+  }).finally(() => {
+    state.coverPreloadInFlight.delete(value);
+  });
+
+  state.coverPreloadInFlight.set(value, task);
+  return task;
+}
+
+function collectCoverUrls(items, limit = 36) {
+  if (!Array.isArray(items) || items.length === 0 || limit <= 0) {
+    return [];
+  }
+  const seen = new Set();
+  const out = [];
+  for (const item of items) {
+    if (out.length >= limit) {
+      break;
+    }
+    if (!item) {
+      continue;
+    }
+    const backdrop = normalizeImageUrl(item.backdrop || "");
+    const poster = normalizeImageUrl(item.poster || "");
+    const primary = normalizeImageUrl(resolvePreferredCover(item));
+    [primary, backdrop, poster].forEach((url) => {
+      if (!url || seen.has(url) || out.length >= limit) {
+        return;
+      }
+      seen.add(url);
+      out.push(url);
+    });
+  }
+  return out;
+}
+
+async function primeCriticalCovers(items, limit = 36, waitBudgetMs = 0) {
+  const urls = collectCoverUrls(items, Math.max(0, Number(limit || 0)));
+  if (urls.length === 0) {
+    return;
+  }
+  const jobs = urls.map((url) => primeImageUrl(url, waitBudgetMs > 0 ? waitBudgetMs + 1800 : 3600));
+  if (waitBudgetMs > 0) {
+    await Promise.race([
+      Promise.allSettled(jobs),
+      wait(Math.max(140, Number(waitBudgetMs || 0))),
+    ]);
+  }
 }
 
 function warmImageCacheFromPool(items, limit = 60) {
@@ -1494,9 +1591,9 @@ function pumpWarmImageQueue() {
       if (!next) {
         continue;
       }
-      const image = new Image();
-      image.decoding = "async";
-      image.src = next;
+      primeImageUrl(next, compact ? 3600 : 4800).catch(() => {
+        // best effort only
+      });
       count += 1;
     }
 
@@ -1908,8 +2005,8 @@ function normalizeCatalogItem(raw) {
     title,
     titleLower: title.toLowerCase(),
     titleKey: normalizeTitleKey(title),
-    poster: raw?.large_poster_path || raw?.small_poster_path || "",
-    backdrop: raw?.wallpaper_poster_path || raw?.small_poster_path || raw?.large_poster_path || "",
+    poster: normalizeImageUrl(raw?.large_poster_path || raw?.small_poster_path || ""),
+    backdrop: normalizeImageUrl(raw?.wallpaper_poster_path || raw?.small_poster_path || raw?.large_poster_path || ""),
     runtime: typeof raw?.runtime === "number" ? raw.runtime : null,
     releaseDate: raw?.release_date || null,
     endDate: raw?.end_date || null,
@@ -1939,6 +2036,14 @@ function renderAll() {
   const showBrowseView = !isInfoView && !isCalendarView && !isTopView && !isListView;
 
   if (showBrowseView) {
+    const primePool = [heroItem, ...visible].filter(Boolean);
+    primeCriticalCovers(
+      primePool,
+      isCompactViewport() ? CRITICAL_COVER_PRIME_MOBILE : CRITICAL_COVER_PRIME_DESKTOP,
+      0
+    ).catch(() => {
+      // best effort only
+    });
     renderHero(heroItem);
     renderCommunityStats();
     renderCatalog(visible);
@@ -2103,18 +2208,41 @@ function updateCatalogHeading(hasQuery, resultCount) {
 
 }
 
+function normalizeImageUrl(url) {
+  const raw = String(url || "").trim();
+  if (!raw || raw.startsWith("data:")) {
+    return raw;
+  }
+
+  try {
+    const parsed = new URL(raw, window.location.origin);
+    const host = String(parsed.hostname || "").toLowerCase();
+    if (
+      parsed.pathname.startsWith("/t/p/") &&
+      (host === "www.themoviedb.org" || host === "themoviedb.org" || host === "image.tmdb.org")
+    ) {
+      return `https://image.tmdb.org${parsed.pathname}${parsed.search || ""}`;
+    }
+    return parsed.href;
+  } catch {
+    return raw;
+  }
+}
+
 function resolvePreferredCover(item, details = null) {
   const mediaId = Number(item?.id || 0);
   const fromCache = mediaId > 0 ? state.detailsCache.get(mediaId) : null;
   const resolved = details || fromCache || null;
-  return resolved?.posters?.wallpaper || resolved?.posters?.small || resolved?.posters?.large || item?.backdrop || item?.poster || "";
+  return normalizeImageUrl(
+    resolved?.posters?.wallpaper || resolved?.posters?.small || resolved?.posters?.large || item?.backdrop || item?.poster || ""
+  );
 }
 
 function setImageSourceSafely(node, nextSrc, title = "", cover = true) {
   if (!(node instanceof HTMLImageElement)) {
     return;
   }
-  const url = String(nextSrc || "").trim();
+  const url = normalizeImageUrl(nextSrc);
   if (!url) {
     wireImageFallback(node, title || "Zenix", cover);
     return;
@@ -3324,7 +3452,7 @@ async function openDetails(id, options = {}) {
   if (refs.detailPanel) {
     refs.detailPanel.style.setProperty("--detail-backdrop-image", toCssImage(quickBackdrop));
   }
-  refs.detailPoster.src = item.poster || item.backdrop || "";
+  refs.detailPoster.src = normalizeImageUrl(item.poster || item.backdrop || "");
   refs.detailPoster.alt = item.title;
   wireImageFallback(refs.detailPoster, item.title, false);
   refs.detailKicker.textContent = `${getItemTypeLabel(item)} detail`;
@@ -3357,12 +3485,16 @@ async function openDetails(id, options = {}) {
   }
 
   const detailBackdrop =
-    details?.posters?.wallpaper || details?.posters?.small || item.backdrop || details?.posters?.large || item.poster;
+    normalizeImageUrl(
+      details?.posters?.wallpaper || details?.posters?.small || item.backdrop || details?.posters?.large || item.poster
+    );
   if (refs.detailPanel) {
     refs.detailPanel.style.setProperty("--detail-backdrop-image", toCssImage(detailBackdrop));
   }
 
-  refs.detailPoster.src = details?.posters?.large || details?.posters?.small || item.poster || item.backdrop;
+  refs.detailPoster.src = normalizeImageUrl(
+    details?.posters?.large || details?.posters?.small || item.poster || item.backdrop
+  );
   refs.detailPoster.alt = item.title;
   wireImageFallback(refs.detailPoster, item.title, false);
   refs.detailKicker.textContent = `${getItemTypeLabel(item)} detail`;
@@ -3514,13 +3646,14 @@ async function openPlayer(id, options = {}) {
   const token = ++state.playToken;
   const resume = state.progress[id] || null;
   const cachedDetails = state.detailsCache.get(id) || null;
-  const playerBackdrop =
+  const playerBackdrop = normalizeImageUrl(
     cachedDetails?.posters?.wallpaper ||
-    cachedDetails?.posters?.small ||
-    item.backdrop ||
-    item.poster ||
-    cachedDetails?.posters?.large ||
-    "";
+      cachedDetails?.posters?.small ||
+      item.backdrop ||
+      item.poster ||
+      cachedDetails?.posters?.large ||
+      ""
+  );
 
   refs.playerOverlay.hidden = false;
   refs.playerTitle.textContent = item.title;
@@ -4363,8 +4496,8 @@ async function buildItemFromDetails(id) {
     id: Number(details.id || id),
     type: details.type === "tv" ? "tv" : "movie",
     title: String(details.title || "Sans titre"),
-    poster: details?.posters?.large || details?.posters?.small || details?.posters?.wallpaper || "",
-    backdrop: details?.posters?.wallpaper || details?.posters?.small || details?.posters?.large || "",
+    poster: normalizeImageUrl(details?.posters?.large || details?.posters?.small || details?.posters?.wallpaper || ""),
+    backdrop: normalizeImageUrl(details?.posters?.wallpaper || details?.posters?.small || details?.posters?.large || ""),
     runtime: Number(details?.runtime?.minutes || 0) || null,
     releaseDate: details?.releaseDate || null,
     endDate: null,
