@@ -4,6 +4,26 @@ const http = require("node:http");
 
 const ROOT = __dirname;
 const PORT = Number(process.env.PORT || 4173);
+const REMOTE_API_BASE = "https://api.purstream.co/api/v1";
+const PURSTREAM_API_BASE = "https://api.purstream.co/api/v1";
+const PURSTREAM_WEB_BASE = "https://purstream.co";
+const ANIME_PLANNING_URL = "https://anime-sama.tv/planning/";
+const PROXY_TIMEOUT_MS = 16000;
+const CALENDAR_CACHE_MS = 6 * 60 * 1000;
+const WEBHOOK_TIMEOUT_MS = 10000;
+const DISCORD_WEBHOOK_URL = String(process.env.DISCORD_WEBHOOK_URL || "").trim();
+const DISCORD_PUSH_INTERVAL_MS = 60 * 1000;
+const ANALYTICS_RETENTION_MS = 24 * 60 * 60 * 1000;
+const ANALYTICS_ACTIVE_WINDOW_MS = 2 * 60 * 1000;
+const ANALYTICS_MIN_EVENT_MS = 10 * 1000;
+const DISCORD_STATS_STATE_FILE = path.join(ROOT, ".discord-stats-state.json");
+const proxyCache = new Map();
+const calendarCache = new Map();
+const analyticsClients = new Map();
+const analyticsEvents = [];
+let analyticsTotalSeen = 0;
+let analyticsLastPushAt = 0;
+let discordStatsMessageId = "";
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -36,15 +56,880 @@ function send404(res) {
   res.end("Not Found");
 }
 
+function sendJson(res, statusCode, payload) {
+  const body = typeof payload === "string" ? payload : JSON.stringify(payload);
+  res.writeHead(statusCode, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Cache-Control": "no-cache",
+  });
+  res.end(body);
+}
+
+function sanitizeToken(value, maxLength = 80) {
+  return String(value || "")
+    .trim()
+    .replace(/[^\w\-./:@ ]+/g, "")
+    .slice(0, maxLength);
+}
+
+function getRemoteAddress(req) {
+  const forwarded = req.headers["x-forwarded-for"];
+  const firstForwarded = Array.isArray(forwarded)
+    ? String(forwarded[0] || "")
+    : String(forwarded || "");
+  const forwardedIp = firstForwarded.split(",")[0].trim();
+  const raw = forwardedIp || String(req.socket?.remoteAddress || "");
+  const normalized = raw.replace(/^::ffff:/, "");
+  return normalized === "::1" ? "127.0.0.1" : normalized || "0.0.0.0";
+}
+
+function isPublicIpAddress(value) {
+  const raw = String(value || "").trim();
+  if (!raw || raw === "0.0.0.0" || raw === "127.0.0.1" || raw === "::1") {
+    return false;
+  }
+
+  if (raw.includes(":")) {
+    const lower = raw.toLowerCase();
+    if (lower.startsWith("fc") || lower.startsWith("fd") || lower.startsWith("fe80:")) {
+      return false;
+    }
+    return true;
+  }
+
+  const parts = raw.split(".");
+  if (parts.length !== 4) {
+    return false;
+  }
+  const octets = parts.map((entry) => Number(entry));
+  if (octets.some((entry) => !Number.isInteger(entry) || entry < 0 || entry > 255)) {
+    return false;
+  }
+
+  const [a, b] = octets;
+  if (a === 10 || a === 127 || a === 0) {
+    return false;
+  }
+  if (a === 169 && b === 254) {
+    return false;
+  }
+  if (a === 192 && b === 168) {
+    return false;
+  }
+  if (a === 172 && b >= 16 && b <= 31) {
+    return false;
+  }
+  return true;
+}
+
+function readJsonBody(req, maxBytes = 8192) {
+  return new Promise((resolve, reject) => {
+    let size = 0;
+    const chunks = [];
+
+    req.on("data", (chunk) => {
+      size += chunk.length;
+      if (size > maxBytes) {
+        reject(new Error("Payload too large"));
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on("end", () => {
+      if (chunks.length === 0) {
+        resolve({});
+        return;
+      }
+      try {
+        const raw = Buffer.concat(chunks).toString("utf8");
+        resolve(raw ? JSON.parse(raw) : {});
+      } catch {
+        reject(new Error("Invalid JSON body"));
+      }
+    });
+    req.on("error", (error) => reject(error));
+  });
+}
+
+function pruneAnalytics(now = Date.now()) {
+  const threshold = now - ANALYTICS_RETENTION_MS;
+  while (analyticsEvents.length > 0 && analyticsEvents[0] < threshold) {
+    analyticsEvents.shift();
+  }
+  for (const [key, row] of analyticsClients.entries()) {
+    if (Number(row?.lastSeen || 0) < threshold) {
+      analyticsClients.delete(key);
+    }
+  }
+}
+
+function markAnalyticsHeartbeat(req, payload) {
+  const now = Date.now();
+  pruneAnalytics(now);
+
+  const clientId = sanitizeToken(payload?.clientId, 64) || "guest";
+  const page = sanitizeToken(payload?.page, 140);
+  const ip = sanitizeToken(getRemoteAddress(req), 60);
+  const key = `${clientId}@${ip}`;
+
+  let row = analyticsClients.get(key);
+  if (!row) {
+    row = {
+      firstSeen: now,
+      lastSeen: now,
+      lastEventAt: 0,
+      page: "",
+    };
+    analyticsTotalSeen += 1;
+  }
+
+  row.lastSeen = now;
+  if (page) {
+    row.page = page;
+  }
+
+  if (now - Number(row.lastEventAt || 0) >= ANALYTICS_MIN_EVENT_MS) {
+    row.lastEventAt = now;
+    analyticsEvents.push(now);
+  }
+  analyticsClients.set(key, row);
+}
+
+function formatDuration(ms) {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) {
+    return `${hours}h ${minutes}m`;
+  }
+  if (minutes > 0) {
+    return `${minutes}m ${seconds}s`;
+  }
+  return `${seconds}s`;
+}
+
+function buildAnalyticsSnapshot() {
+  const now = Date.now();
+  pruneAnalytics(now);
+  const activeThreshold = now - ANALYTICS_ACTIVE_WINDOW_MS;
+  let activeNow = 0;
+  for (const row of analyticsClients.values()) {
+    if (Number(row?.lastSeen || 0) >= activeThreshold) {
+      activeNow += 1;
+    }
+  }
+  return {
+    generatedAt: new Date(now).toISOString(),
+    activeNow,
+    unique24h: analyticsClients.size,
+    heartbeats24h: analyticsEvents.length,
+    totalSeen: analyticsTotalSeen,
+    uptimeMs: Math.max(0, process.uptime() * 1000),
+    uptimeLabel: formatDuration(process.uptime() * 1000),
+  };
+}
+
+function loadDiscordStatsState() {
+  try {
+    const raw = fs.readFileSync(DISCORD_STATS_STATE_FILE, "utf8");
+    const parsed = JSON.parse(raw);
+    const messageId = String(parsed?.messageId || "").trim();
+    if (/^\d{8,30}$/.test(messageId)) {
+      discordStatsMessageId = messageId;
+      return;
+    }
+  } catch {
+    // no persisted state
+  }
+  discordStatsMessageId = "";
+}
+
+function saveDiscordStatsState() {
+  try {
+    const payload = JSON.stringify({ messageId: discordStatsMessageId || "" });
+    fs.writeFileSync(DISCORD_STATS_STATE_FILE, payload, "utf8");
+  } catch {
+    // best effort only
+  }
+}
+
+function buildDiscordStatsEmbed(stats, reason) {
+  return {
+    title: "Zenix - Statistiques Live",
+    description: "Mise a jour en temps reel (message unique).",
+    color: 0xf11424,
+    timestamp: stats.generatedAt,
+    fields: [
+      { name: "Connectes maintenant", value: String(stats.activeNow), inline: true },
+      { name: "Total 24h (uniques)", value: String(stats.unique24h), inline: true },
+      { name: "Heartbeats 24h", value: String(stats.heartbeats24h), inline: true },
+      { name: "Total depuis lancement", value: String(stats.totalSeen), inline: true },
+      { name: "Uptime serveur", value: stats.uptimeLabel, inline: true },
+      { name: "Rafraichissement", value: "Toutes les 1 min", inline: true },
+    ],
+    footer: {
+      text: reason === "startup" ? "Demarrage service" : "Mise a jour automatique",
+    },
+  };
+}
+
+async function sendDiscordWebhook(method, payload, options = {}) {
+  const messageId = String(options.messageId || "").trim();
+  const wait = Boolean(options.wait);
+  const urlBase =
+    method === "PATCH" && messageId
+      ? `${DISCORD_WEBHOOK_URL}/messages/${encodeURIComponent(messageId)}`
+      : DISCORD_WEBHOOK_URL;
+  const target = wait ? `${urlBase}?wait=true` : urlBase;
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), WEBHOOK_TIMEOUT_MS);
+  try {
+    const response = await fetch(target, {
+      method,
+      headers: {
+        "Content-Type": "application/json; charset=utf-8",
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+
+    let body = null;
+    try {
+      body = await response.json();
+    } catch {
+      body = null;
+    }
+
+    return {
+      ok: response.ok,
+      status: response.status,
+      body,
+    };
+  } catch {
+    return {
+      ok: false,
+      status: 0,
+      body: null,
+    };
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function pushDiscordStats(reason = "interval") {
+  if (!DISCORD_WEBHOOK_URL.startsWith("https://discord.com/api/webhooks/")) {
+    return;
+  }
+
+  const now = Date.now();
+  if (reason === "interval" && now - analyticsLastPushAt < DISCORD_PUSH_INTERVAL_MS - 1000) {
+    return;
+  }
+  analyticsLastPushAt = now;
+
+  const stats = buildAnalyticsSnapshot();
+  const payload = {
+    username: "Zenix Monitor",
+    allowed_mentions: { parse: [] },
+    embeds: [buildDiscordStatsEmbed(stats, reason)],
+  };
+
+  if (!discordStatsMessageId) {
+    loadDiscordStatsState();
+  }
+
+  if (discordStatsMessageId) {
+    const patched = await sendDiscordWebhook("PATCH", payload, {
+      messageId: discordStatsMessageId,
+      wait: false,
+    });
+    if (patched.ok) {
+      return;
+    }
+    if (patched.status === 404 || patched.status === 400) {
+      discordStatsMessageId = "";
+      saveDiscordStatsState();
+    }
+  }
+
+  const created = await sendDiscordWebhook("POST", payload, { wait: true });
+  if (created.ok) {
+    const nextId = String(created.body?.id || "").trim();
+    if (/^\d{8,30}$/.test(nextId)) {
+      discordStatsMessageId = nextId;
+      saveDiscordStatsState();
+    }
+  }
+}
+
+function toInt(value, fallback, min, max) {
+  const asNumber = Number(value);
+  if (!Number.isFinite(asNumber)) {
+    return fallback;
+  }
+  const bounded = Math.max(min, Math.min(max, Math.trunc(asNumber)));
+  return bounded;
+}
+
+function decodeHtmlEntities(value) {
+  const raw = String(value || "");
+  return raw
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, "\"")
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => {
+      const code = Number.parseInt(hex, 16);
+      return Number.isFinite(code) ? String.fromCodePoint(code) : "";
+    })
+    .replace(/&#(\d+);/g, (_, digits) => {
+      const code = Number.parseInt(digits, 10);
+      return Number.isFinite(code) ? String.fromCodePoint(code) : "";
+    });
+}
+
+function stripTags(value) {
+  return decodeHtmlEntities(String(value || "").replace(/<[^>]*>/g, " ")).replace(/\s+/g, " ").trim();
+}
+
+function normalizeTypeFromPurstream(movie) {
+  if (!movie || movie.type !== "tv") {
+    return "film";
+  }
+  const urls = String(movie.urls || "").toLowerCase();
+  if (urls.includes("animes/")) {
+    return "anime";
+  }
+  return "serie";
+}
+
+function parsePurstreamCalendar(payload, month, year) {
+  const days = Array.isArray(payload?.data?.items?.days) ? payload.data.items.days : [];
+  const dedupe = new Set();
+  const items = [];
+
+  for (const entry of days) {
+    const dayNumber = toInt(entry?.number, 0, 0, 31);
+    const movie = entry?.movie;
+    const mediaId = Number(movie?.id || 0);
+    if (!movie || dayNumber <= 0 || mediaId <= 0) {
+      continue;
+    }
+
+    const key = String(movie.calendarId || `${dayNumber}-${mediaId}-${movie.calendarSupplemental || ""}`);
+    if (dedupe.has(key)) {
+      continue;
+    }
+    dedupe.add(key);
+
+    const monthSafe = String(month).padStart(2, "0");
+    const daySafe = String(dayNumber).padStart(2, "0");
+    const dateIso = `${year}-${monthSafe}-${daySafe}`;
+    const posters = movie.posters || {};
+    const type = normalizeTypeFromPurstream(movie);
+    if (type === "anime") {
+      continue;
+    }
+    items.push({
+      source: "purstream",
+      key,
+      dateIso,
+      dayNumber,
+      mediaId,
+      title: String(movie.title || "Sans titre"),
+      type,
+      language: String(movie.lang || "").trim().toUpperCase(),
+      supplemental: String(movie.calendarSupplemental || "").trim(),
+      season: Number(movie.season || 0),
+      episode: Number(movie.episode || 0),
+      poster: String(posters.small || posters.large || posters.wallpaper || ""),
+      url: `${PURSTREAM_WEB_BASE}/calendar`,
+    });
+  }
+
+  items.sort((left, right) => {
+    if (left.dayNumber !== right.dayNumber) {
+      return left.dayNumber - right.dayNumber;
+    }
+    return left.title.localeCompare(right.title, "fr", { sensitivity: "base" });
+  });
+
+  const monthName = String(payload?.data?.items?.name || "");
+  return {
+    month,
+    year,
+    monthName,
+    items,
+  };
+}
+
+function parseAnimeDateLabelToIso(dateLabel, fallbackYear) {
+  const match = String(dateLabel || "").match(/(\d{2})\/(\d{2})/);
+  if (!match) {
+    return "";
+  }
+  const day = toInt(match[1], 0, 1, 31);
+  const month = toInt(match[2], 0, 1, 12);
+  if (day <= 0 || month <= 0) {
+    return "";
+  }
+  return `${fallbackYear}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function parseAnimeCardsFromBlock(block, dayName, dateLabel, fallbackYear, limit = 180) {
+  const rows = [];
+  const cardRegex =
+    /<div class="([^"]*planning-card[^"]*)"[^>]*data-title="([^"]*)"[\s\S]*?<a href="([^"]+)"[\s\S]*?<img[^>]*src="([^"]+)"[^>]*alt="([^"]*)"/gi;
+
+  let match;
+  while ((match = cardRegex.exec(block)) !== null) {
+    if (rows.length >= limit) {
+      break;
+    }
+    const classes = String(match[1] || "").toLowerCase();
+    const dataTitle = decodeHtmlEntities(match[2] || "");
+    const href = String(match[3] || "").trim();
+    const src = String(match[4] || "").trim();
+    const alt = decodeHtmlEntities(match[5] || "").trim();
+    const type = classes.includes("scan") ? "scan" : "anime";
+    const language = classes.includes("vostfr") ? "VOSTFR" : classes.includes("vf") ? "VF" : "";
+    const title = alt || dataTitle || "Sans titre";
+    const absoluteUrl = href.startsWith("http")
+      ? href
+      : `https://anime-sama.tv${href.startsWith("/") ? href : `/${href}`}`;
+
+    rows.push({
+      source: "anime-sama",
+      key: `${dayName}|${dateLabel}|${absoluteUrl}|${title}`,
+      dayName,
+      dateLabel,
+      dateIso: parseAnimeDateLabelToIso(dateLabel, fallbackYear),
+      title,
+      type,
+      language,
+      poster: src,
+      url: absoluteUrl,
+    });
+  }
+
+  return rows;
+}
+
+function parseAnimePlanning(html, fallbackYear) {
+  const source = String(html || "");
+  const dayBlocks = [];
+  const markers = [];
+  const markerRegex = /<div id="(\d+)" class="selectedRow[\s\S]*?>/gi;
+  let markerMatch;
+
+  while ((markerMatch = markerRegex.exec(source)) !== null) {
+    markers.push({ index: markerMatch.index });
+  }
+
+  const fixedAnchor = source.indexOf("Œuvres en cours sans jours fixes");
+
+  for (let idx = 0; idx < markers.length; idx += 1) {
+    const start = markers[idx].index;
+    const nextStart = idx + 1 < markers.length ? markers[idx + 1].index : source.length;
+    const end = fixedAnchor > start ? Math.min(nextStart, fixedAnchor) : nextStart;
+    const block = source.slice(start, end);
+    const dayName = stripTags((block.match(/<h2[^>]*class="[^"]*titreJours[^"]*"[^>]*>([\s\S]*?)<\/h2>/i) || [])[1]);
+    const dateLabel = stripTags((block.match(/<p[^>]*>\s*(\d{2}\/\d{2})\s*<\/p>/i) || [])[1]);
+    if (!dayName) {
+      continue;
+    }
+    const items = parseAnimeCardsFromBlock(block, dayName, dateLabel, fallbackYear, 220);
+    dayBlocks.push({
+      dayName,
+      dateLabel,
+      items,
+    });
+  }
+
+  if (fixedAnchor > 0) {
+    const noDateBlock = source.slice(fixedAnchor);
+    const noDateItems = parseAnimeCardsFromBlock(noDateBlock, "Sans jour fixe", "", fallbackYear, 120);
+    if (noDateItems.length > 0) {
+      dayBlocks.push({
+        dayName: "Sans jour fixe",
+        dateLabel: "",
+        items: noDateItems,
+      });
+    }
+  }
+
+  const dedupe = new Set();
+  const flatItems = [];
+  dayBlocks.forEach((day) => {
+    day.items.forEach((item) => {
+      if (dedupe.has(item.key)) {
+        return;
+      }
+      dedupe.add(item.key);
+      flatItems.push(item);
+    });
+  });
+
+  return {
+    days: dayBlocks,
+    items: flatItems,
+  };
+}
+
+function buildMergedCalendar(purstreamItems, animeItems) {
+  const merged = [];
+  purstreamItems.forEach((entry) => {
+    merged.push({
+      ...entry,
+      kind: entry.type,
+    });
+  });
+  animeItems.forEach((entry) => {
+    merged.push({
+      ...entry,
+      kind: entry.type,
+    });
+  });
+
+  merged.sort((left, right) => {
+    const leftDate = Date.parse(left.dateIso || "");
+    const rightDate = Date.parse(right.dateIso || "");
+    const leftSafe = Number.isFinite(leftDate) ? leftDate : Number.MAX_SAFE_INTEGER;
+    const rightSafe = Number.isFinite(rightDate) ? rightDate : Number.MAX_SAFE_INTEGER;
+    if (leftSafe !== rightSafe) {
+      return leftSafe - rightSafe;
+    }
+    return String(left.title || "").localeCompare(String(right.title || ""), "fr", {
+      sensitivity: "base",
+    });
+  });
+  return merged.slice(0, 420);
+}
+
+function getProxyTTL(pathname) {
+  if (/^\/stream\//i.test(pathname)) {
+    return 0;
+  }
+  if (/^\/catalog\/top-10-for-home$/i.test(pathname)) {
+    return 2 * 60 * 1000;
+  }
+  if (/^\/catalog\/movies$/i.test(pathname)) {
+    return 60 * 1000;
+  }
+  if (/^\/search-bar\//i.test(pathname)) {
+    return 45 * 1000;
+  }
+  if (/^\/media\/\d+\/(sheet|seasons|trailers)$/i.test(pathname)) {
+    return 8 * 60 * 1000;
+  }
+  return 30 * 1000;
+}
+
+function isAllowedProxyPath(pathname) {
+  return (
+    /^\/catalog\//i.test(pathname) ||
+    /^\/search-bar\//i.test(pathname) ||
+    /^\/media\//i.test(pathname) ||
+    /^\/stream\//i.test(pathname)
+  );
+}
+
+async function fetchRemote(target, extraHeaders = {}) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), PROXY_TIMEOUT_MS);
+  try {
+    const response = await fetch(target, {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+        "User-Agent": "Mozilla/5.0 (ZenixStream)",
+        ...extraHeaders,
+      },
+      signal: controller.signal,
+    });
+    const body = await response.text();
+    return {
+      status: response.status,
+      body,
+      contentType: response.headers.get("content-type") || "application/json; charset=utf-8",
+    };
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function fetchRemoteText(target, accept = "text/html") {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), PROXY_TIMEOUT_MS);
+  try {
+    const response = await fetch(target, {
+      method: "GET",
+      headers: {
+        Accept: accept,
+        "User-Agent": "Mozilla/5.0 (ZenixStream)",
+      },
+      signal: controller.signal,
+    });
+    const body = await response.text();
+    return {
+      status: response.status,
+      body,
+      contentType: response.headers.get("content-type") || "text/plain; charset=utf-8",
+    };
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function fetchPurstreamCalendarMonth(month, year) {
+  const target = `${PURSTREAM_API_BASE}/calendar/${month}/${year}/days`;
+  const upstream = await fetchRemote(target);
+  if (upstream.status < 200 || upstream.status >= 300) {
+    throw new Error("Purstream calendar unavailable");
+  }
+  return JSON.parse(upstream.body);
+}
+
+async function handleAnalyticsHeartbeat(req, res, requestUrl) {
+  if (requestUrl.pathname !== "/api/analytics/heartbeat") {
+    return false;
+  }
+
+  if (req.method === "OPTIONS") {
+    res.writeHead(204, {
+      Allow: "POST, OPTIONS",
+      "Cache-Control": "no-cache",
+    });
+    res.end();
+    return true;
+  }
+
+  if (req.method !== "POST") {
+    sendJson(res, 405, { error: "Method Not Allowed" });
+    return true;
+  }
+
+  try {
+    const payload = await readJsonBody(req);
+    markAnalyticsHeartbeat(req, payload || {});
+    sendJson(res, 200, { type: "success" });
+    return true;
+  } catch {
+    sendJson(res, 400, { error: "Invalid heartbeat payload" });
+    return true;
+  }
+}
+
+async function fetchAnimePlanningPage() {
+  const upstream = await fetchRemoteText(ANIME_PLANNING_URL, "text/html");
+  if (upstream.status < 200 || upstream.status >= 300) {
+    throw new Error("Anime planning unavailable");
+  }
+  return upstream.body;
+}
+
+async function handleCalendarOverview(req, res, requestUrl) {
+  if (requestUrl.pathname !== "/api/calendar/overview") {
+    return false;
+  }
+  if (req.method !== "GET") {
+    sendJson(res, 405, { error: "Method Not Allowed" });
+    return true;
+  }
+
+  const now = new Date();
+  const month = toInt(requestUrl.searchParams.get("month"), now.getMonth() + 1, 1, 12);
+  const year = toInt(requestUrl.searchParams.get("year"), now.getFullYear(), 2024, 2099);
+  const cacheKey = `calendar-overview:${year}-${month}`;
+  const current = Date.now();
+  const cached = calendarCache.get(cacheKey);
+
+  if (cached && cached.expiresAt > current) {
+    res.writeHead(200, {
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "no-cache",
+      "X-Zenix-Cache": "HIT",
+    });
+    res.end(cached.body);
+    return true;
+  }
+
+  try {
+    const [purstreamResult, animeResult] = await Promise.allSettled([
+      fetchPurstreamCalendarMonth(month, year),
+      fetchAnimePlanningPage(),
+    ]);
+
+    let purstream = {
+      month,
+      year,
+      monthName: "",
+      items: [],
+    };
+    let anime = {
+      days: [],
+      items: [],
+    };
+
+    if (purstreamResult.status === "fulfilled") {
+      try {
+        purstream = parsePurstreamCalendar(purstreamResult.value, month, year);
+      } catch {
+        purstream = {
+          month,
+          year,
+          monthName: "",
+          items: [],
+        };
+      }
+    }
+
+    if (animeResult.status === "fulfilled") {
+      try {
+        anime = parseAnimePlanning(animeResult.value, year);
+      } catch {
+        anime = {
+          days: [],
+          items: [],
+        };
+      }
+    }
+
+    if (purstream.items.length === 0 && anime.items.length === 0) {
+      sendJson(res, 502, { error: "Calendar providers unavailable" });
+      return true;
+    }
+
+    const merged = buildMergedCalendar(purstream.items, anime.items);
+
+    const payload = {
+      apiVersion: "zenix-calendar-v1",
+      type: "success",
+      data: {
+        generatedAt: new Date().toISOString(),
+        month,
+        year,
+        purstream: {
+          month: purstream.month,
+          year: purstream.year,
+          monthName: purstream.monthName,
+          count: purstream.items.length,
+          items: purstream.items,
+        },
+        animeSama: {
+          count: anime.items.length,
+          days: anime.days,
+          items: anime.items,
+        },
+        mergedCount: merged.length,
+        merged,
+        sourceLinks: {
+          purstream: `${PURSTREAM_WEB_BASE}/calendar`,
+          animeSama: ANIME_PLANNING_URL,
+        },
+        providerStatus: {
+          catalog: purstreamResult.status === "fulfilled",
+          anime: animeResult.status === "fulfilled",
+        },
+      },
+    };
+    const body = JSON.stringify(payload);
+    calendarCache.set(cacheKey, {
+      body,
+      expiresAt: current + CALENDAR_CACHE_MS,
+    });
+
+    res.writeHead(200, {
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "no-cache",
+      "X-Zenix-Cache": "MISS",
+    });
+    res.end(body);
+    return true;
+  } catch {
+    sendJson(res, 502, { error: "Calendar providers unavailable" });
+    return true;
+  }
+}
+
+async function handleApiProxy(req, res, requestUrl) {
+  if (!requestUrl.pathname.startsWith("/api/")) {
+    return false;
+  }
+  if (req.method !== "GET") {
+    sendJson(res, 405, { error: "Method Not Allowed" });
+    return true;
+  }
+
+  const upstreamPath = requestUrl.pathname.slice("/api".length) || "/";
+  if (!isAllowedProxyPath(upstreamPath)) {
+    sendJson(res, 404, { error: "Unknown API route" });
+    return true;
+  }
+
+  const target = `${REMOTE_API_BASE}${upstreamPath}${requestUrl.search || ""}`;
+  const ttl = getProxyTTL(upstreamPath);
+  const cacheKey = target;
+  const now = Date.now();
+  const cached = proxyCache.get(cacheKey);
+  const isStreamPath = /^\/stream\//i.test(upstreamPath);
+  const clientIp = sanitizeToken(getRemoteAddress(req), 64);
+  const upstreamHeaders = {};
+  if (isStreamPath && isPublicIpAddress(clientIp)) {
+    upstreamHeaders["X-Forwarded-For"] = clientIp;
+    upstreamHeaders["X-Real-IP"] = clientIp;
+    upstreamHeaders["CF-Connecting-IP"] = clientIp;
+  }
+
+  if (ttl > 0 && cached && cached.expiresAt > now) {
+    res.writeHead(cached.status, {
+      "Content-Type": cached.contentType,
+      "Cache-Control": "no-cache",
+      "X-Zenix-Cache": "HIT",
+    });
+    res.end(cached.body);
+    return true;
+  }
+
+  try {
+    const upstream = await fetchRemote(target, upstreamHeaders);
+    if (ttl > 0 && upstream.status >= 200 && upstream.status < 300) {
+      proxyCache.set(cacheKey, {
+        status: upstream.status,
+        body: upstream.body,
+        contentType: upstream.contentType,
+        expiresAt: now + ttl,
+      });
+    }
+    res.writeHead(upstream.status, {
+      "Content-Type": upstream.contentType,
+      "Cache-Control": "no-cache",
+      "X-Zenix-Cache": "MISS",
+    });
+    res.end(upstream.body);
+    return true;
+  } catch (error) {
+    const code = String(error?.name || "").toLowerCase().includes("abort") ? 504 : 502;
+    sendJson(res, code, { error: "Upstream request failed" });
+    return true;
+  }
+}
+
 function resolveCacheControl(filePath, ext) {
   const baseName = path.basename(filePath).toLowerCase();
   const noCacheFiles = new Set([
     "index.html",
-    "zenix.js",
-    "zenix.css",
     "sw.js",
     "manifest.webmanifest",
   ]);
+
+  if (baseName === "zenix.js" || baseName === "zenix.css") {
+    return "public, max-age=86400, stale-while-revalidate=604800";
+  }
 
   if (noCacheFiles.has(baseName) || ext === ".html" || ext === ".webmanifest") {
     return "no-cache";
@@ -113,33 +998,77 @@ const server = http.createServer((req, res) => {
   const requestUrl = new URL(req.url, `http://${host}`);
   let pathname = requestUrl.pathname;
 
-  if (pathname === "/") {
-    pathname = "/index.html";
-  }
+  handleAnalyticsHeartbeat(req, res, requestUrl)
+    .then((handledAnalytics) => {
+      if (handledAnalytics) {
+        return true;
+      }
+      return handleCalendarOverview(req, res, requestUrl);
+    })
+    .then((handledCalendar) => {
+      if (handledCalendar) {
+        return true;
+      }
+      return handleApiProxy(req, res, requestUrl);
+    })
+    .then((handled) => {
+      if (handled) {
+        return;
+      }
 
-  const filePath = safeLocalPath(pathname);
-  if (!filePath) {
-    res.writeHead(403, { "Content-Type": "text/plain; charset=utf-8" });
-    res.end("Forbidden");
-    return;
-  }
+      if (pathname === "/") {
+        pathname = "/index.html";
+      }
 
-  fs.stat(filePath, (err, stats) => {
-    if (!err && stats.isFile()) {
-      streamFile(req, res, filePath);
-      return;
-    }
+      const filePath = safeLocalPath(pathname);
+      if (!filePath) {
+        res.writeHead(403, { "Content-Type": "text/plain; charset=utf-8" });
+        res.end("Forbidden");
+        return;
+      }
 
-    const hasExtension = path.extname(pathname) !== "";
-    const acceptsHtml = (req.headers.accept || "").includes("text/html");
-    if (!hasExtension || acceptsHtml) {
-      streamFile(req, res, path.join(ROOT, "index.html"));
-      return;
-    }
+      fs.stat(filePath, (err, stats) => {
+        if (!err && stats.isFile()) {
+          streamFile(req, res, filePath);
+          return;
+        }
 
-    send404(res);
-  });
+        const hasExtension = path.extname(pathname) !== "";
+        const acceptsHtml = (req.headers.accept || "").includes("text/html");
+        if (!hasExtension || acceptsHtml) {
+          streamFile(req, res, path.join(ROOT, "index.html"));
+          return;
+        }
+
+        send404(res);
+      });
+    })
+    .catch(() => {
+      sendJson(res, 500, { error: "Internal server error" });
+    });
 });
+
+if (DISCORD_WEBHOOK_URL.startsWith("https://discord.com/api/webhooks/")) {
+  loadDiscordStatsState();
+
+  const timer = setInterval(() => {
+    pushDiscordStats("interval").catch(() => {
+      // best effort only
+    });
+  }, DISCORD_PUSH_INTERVAL_MS);
+  if (typeof timer.unref === "function") {
+    timer.unref();
+  }
+
+  const startupTimer = setTimeout(() => {
+    pushDiscordStats("startup").catch(() => {
+      // best effort only
+    });
+  }, 12000);
+  if (typeof startupTimer.unref === "function") {
+    startupTimer.unref();
+  }
+}
 
 server.listen(PORT, () => {
   console.log(`Zenix Stream: http://localhost:${PORT}`);
