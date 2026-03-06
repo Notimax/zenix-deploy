@@ -27,6 +27,13 @@ const BACKGROUND_CATALOG_DELAY_MS = 8;
 const BACKGROUND_CATALOG_RENDER_EVERY = 8;
 const CATALOG_RENDER_CHUNK_MIN = 28;
 const CATALOG_RENDER_CHUNK_MAX = 68;
+const MOBILE_VIEWPORT_MAX_WIDTH = 740;
+const MOBILE_CATALOG_FIRST_PAINT = 54;
+const MOBILE_CATALOG_CHUNK_MIN = 42;
+const MOBILE_EAGER_IMAGE_LIMIT = 120;
+const MOBILE_HIGH_PRIORITY_IMAGE_LIMIT = 28;
+const DESKTOP_EAGER_IMAGE_LIMIT = 58;
+const DESKTOP_HIGH_PRIORITY_IMAGE_LIMIT = 14;
 const LIVE_RENDER_INTERACTION_GRACE_MS = 1200;
 const STREAM_PROXY_TIMEOUT_MS = 6500;
 const STREAM_PROXY_PREFETCH_TIMEOUT_MS = 4200;
@@ -870,6 +877,26 @@ function setHidden(node, hidden) {
   }
 }
 
+function isCompactViewport() {
+  if (typeof window.matchMedia === "function") {
+    return window.matchMedia(`(max-width: ${MOBILE_VIEWPORT_MAX_WIDTH}px)`).matches;
+  }
+  return Number(window.innerWidth || 0) <= MOBILE_VIEWPORT_MAX_WIDTH;
+}
+
+function getCardImageProfile() {
+  if (isCompactViewport()) {
+    return {
+      eagerLimit: MOBILE_EAGER_IMAGE_LIMIT,
+      highPriorityLimit: MOBILE_HIGH_PRIORITY_IMAGE_LIMIT,
+    };
+  }
+  return {
+    eagerLimit: DESKTOP_EAGER_IMAGE_LIMIT,
+    highPriorityLimit: DESKTOP_HIGH_PRIORITY_IMAGE_LIMIT,
+  };
+}
+
 function bumpInteractionWindow(ms = LIVE_RENDER_INTERACTION_GRACE_MS) {
   const delay = Math.max(120, Number(ms || LIVE_RENDER_INTERACTION_GRACE_MS));
   const until = Date.now() + delay;
@@ -1416,8 +1443,11 @@ function pumpWarmImageQueue() {
   }
 
   const pump = () => {
+    const compact = isCompactViewport();
+    const batchSize = compact ? IMAGE_WARMUP_BATCH + 12 : IMAGE_WARMUP_BATCH;
+    const delayMs = compact ? Math.max(10, IMAGE_WARMUP_DELAY_MS - 18) : IMAGE_WARMUP_DELAY_MS;
     let count = 0;
-    while (state.imageWarmQueue.length > 0 && count < IMAGE_WARMUP_BATCH) {
+    while (state.imageWarmQueue.length > 0 && count < batchSize) {
       const next = state.imageWarmQueue.shift();
       if (!next) {
         continue;
@@ -1429,7 +1459,7 @@ function pumpWarmImageQueue() {
     }
 
     if (state.imageWarmQueue.length > 0) {
-      state.imageWarmTimer = window.setTimeout(pump, IMAGE_WARMUP_DELAY_MS);
+      state.imageWarmTimer = window.setTimeout(pump, delayMs);
     } else {
       state.imageWarmTimer = null;
     }
@@ -1545,18 +1575,47 @@ function renderFilterChips() {
   }
 }
 
+function applyCatalogSnapshot(snapshot) {
+  if (!snapshot || typeof snapshot !== "object" || !Array.isArray(snapshot.items) || snapshot.items.length === 0) {
+    return false;
+  }
+  const items = snapshot.items.map(normalizeCatalogItem).filter(Boolean);
+  if (items.length === 0) {
+    return false;
+  }
+
+  state.catalog = items;
+  state.page = Math.max(1, Number(snapshot.page || 1));
+  state.totalPages = Math.max(state.page, Number(snapshot.totalPages || state.page || 1));
+  state.catalogSyncPage = Math.max(1, Number(snapshot.catalogSyncPage || state.page || 1));
+  state.hasMore = Boolean(snapshot.hasMore);
+  state.lastSyncAt = new Date(Number(snapshot.savedAt || Date.now()));
+  return true;
+}
+
 async function loadInitialCatalog() {
   state.loadingCatalog = true;
   updateLoadMoreButton();
 
+  const hasSnapshot = applyCatalogSnapshot(loadCatalogSnapshot());
+  if (hasSnapshot) {
+    if (!state.activeHeroId && state.catalog[0]) {
+      state.activeHeroId = state.catalog[0].id;
+    }
+    if (state.topDaily.length === 0) {
+      state.topDaily = buildTopFromCatalog();
+    }
+    renderAll();
+    warmImageCacheFromPool(state.catalog, isCompactViewport() ? 360 : 220);
+  }
+
   try {
+    const firstResult = await fetchCatalogPage(1);
     state.catalog = [];
     state.page = 0;
     state.totalPages = 0;
     state.catalogSyncPage = 0;
     state.hasMore = true;
-
-    const firstResult = await fetchCatalogPage(1);
     upsertCatalogItems(firstResult.items, { prepend: false });
     state.page = firstResult.currentPage;
     state.totalPages = firstResult.lastPage;
@@ -1579,14 +1638,7 @@ async function loadInitialCatalog() {
     }
     saveCatalogSnapshot();
   } catch {
-    const cached = loadCatalogSnapshot();
-    if (cached && Array.isArray(cached.items) && cached.items.length > 0) {
-      state.catalog = cached.items.map(normalizeCatalogItem).filter(Boolean);
-      state.page = Number(cached.page || 1);
-      state.totalPages = Number(cached.totalPages || state.page || 1);
-      state.catalogSyncPage = Number(cached.catalogSyncPage || state.page || 1);
-      state.hasMore = Boolean(cached.hasMore);
-      state.lastSyncAt = new Date(Number(cached.savedAt || Date.now()));
+    if (hasSnapshot) {
       showToast("Mode cache actif: dernier catalogue local charge.");
     } else {
       state.catalog = FALLBACK_ITEMS.slice();
@@ -2496,11 +2548,21 @@ function renderCatalog(items) {
   }
 
   const total = items.length;
-  const chunkSize = Math.max(
+  const compact = isCompactViewport();
+  const baseChunk = Math.max(
     CATALOG_RENDER_CHUNK_MIN,
     Math.min(CATALOG_RENDER_CHUNK_MAX, Math.ceil(total / 9))
   );
+  const chunkSize = compact ? Math.max(baseChunk, MOBILE_CATALOG_CHUNK_MIN) : baseChunk;
+  const firstPaintCount = compact ? Math.min(total, Math.max(chunkSize, MOBILE_CATALOG_FIRST_PAINT)) : chunkSize;
+  const imageProfile = getCardImageProfile();
   let index = 0;
+
+  const firstPaintFragment = document.createDocumentFragment();
+  for (; index < firstPaintCount; index += 1) {
+    firstPaintFragment.appendChild(buildMediaCard(items[index], false, null, index, imageProfile));
+  }
+  refs.catalogGrid.replaceChildren(firstPaintFragment);
 
   const appendChunk = () => {
     if (token !== state.catalogRenderToken) {
@@ -2509,7 +2571,7 @@ function renderCatalog(items) {
     const stop = Math.min(total, index + chunkSize);
     const fragment = document.createDocumentFragment();
     for (; index < stop; index += 1) {
-      fragment.appendChild(buildMediaCard(items[index], false, null, index));
+      fragment.appendChild(buildMediaCard(items[index], false, null, index, imageProfile));
     }
     refs.catalogGrid.appendChild(fragment);
 
@@ -2520,7 +2582,11 @@ function renderCatalog(items) {
     }
   };
 
-  appendChunk();
+  if (index < total) {
+    state.catalogRenderFrame = requestAnimationFrame(appendChunk);
+  } else {
+    state.catalogRenderFrame = 0;
+  }
   warmVisibleDetailCovers(items, 42);
 }
 
@@ -2550,13 +2616,15 @@ function renderContinue() {
   refs.continueGrid.appendChild(fragment);
 }
 
-function buildMediaCard(item, resume = false, progressEntry = null, position = 0) {
+function buildMediaCard(item, resume = false, progressEntry = null, position = 0, imageProfile = null) {
   const card = document.createElement("article");
   card.className = "media-card";
   card.dataset.cardId = String(item.id);
 
   const details = state.detailsCache.get(item.id) || null;
   const cover = resolvePreferredCover(item, details);
+  const eagerLimit = Number(imageProfile?.eagerLimit || DESKTOP_EAGER_IMAGE_LIMIT);
+  const highPriorityLimit = Number(imageProfile?.highPriorityLimit || DESKTOP_HIGH_PRIORITY_IMAGE_LIMIT);
 
   const year = getYear(item.releaseDate) || "-";
   const runtime = item.runtime ? toHumanRuntime(item.runtime) : item.type === "tv" ? "Episodes" : "Film";
@@ -2574,9 +2642,9 @@ function buildMediaCard(item, resume = false, progressEntry = null, position = 0
       <img
         src="${escapeHtml(cover)}"
         alt="${escapeHtml(item.title)}"
-        loading="${position < 58 ? "eager" : "lazy"}"
+        loading="${position < eagerLimit ? "eager" : "lazy"}"
         decoding="async"
-        fetchpriority="${position < 14 ? "high" : "auto"}"
+        fetchpriority="${position < highPriorityLimit ? "high" : "auto"}"
         data-cover-id="${item.id}"
       />
       <div class="media-flags">

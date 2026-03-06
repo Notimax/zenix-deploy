@@ -1804,6 +1804,16 @@ body {
     padding: 14px;
   }
 
+  .catalog-section,
+  .top-section,
+  .catalog-grid,
+  .top-grid,
+  .continue-grid {
+    contain: none;
+    content-visibility: visible;
+    contain-intrinsic-size: auto;
+  }
+
   .hero {
     min-height: clamp(470px, 82svh, 640px);
     border-radius: 18px;
