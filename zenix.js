@@ -62,6 +62,7 @@ const VIDEO_READY_TIMEOUT_MS = 15000;
 const HLS_READY_TIMEOUT_MS = 28000;
 const HLS_MANIFEST_TIMEOUT_MS = 30000;
 const HEARTBEAT_INTERVAL_MS = 30 * 1000;
+const HEARTBEAT_REQUEST_TIMEOUT_MS = 9000;
 const HEARTBEAT_KEY = "zenix-client-id-v1";
 const UI_PREFS_KEY = "zenix-ui-prefs-v1";
 const RECENT_SEARCHES_KEY = "zenix-recent-searches-v1";
@@ -6363,6 +6364,15 @@ function sendAnalyticsHeartbeat(useBeacon = false) {
   }
 
   state.analyticsInFlight = true;
+  const controller =
+    typeof AbortController === "function"
+      ? new AbortController()
+      : null;
+  const timeoutId = setTimeout(() => {
+    if (controller) {
+      controller.abort();
+    }
+  }, HEARTBEAT_REQUEST_TIMEOUT_MS);
   fetch(endpoint, {
     method: "POST",
     credentials: "omit",
@@ -6371,6 +6381,7 @@ function sendAnalyticsHeartbeat(useBeacon = false) {
       "Content-Type": "application/json; charset=utf-8",
     },
     body: JSON.stringify(payload),
+    signal: controller ? controller.signal : undefined,
   })
     .then((response) => {
       if (!response.ok && (response.status === 404 || response.status === 405 || response.status === 501)) {
@@ -6381,6 +6392,7 @@ function sendAnalyticsHeartbeat(useBeacon = false) {
       // best effort only
     })
     .finally(() => {
+      clearTimeout(timeoutId);
       state.analyticsInFlight = false;
     });
 }
