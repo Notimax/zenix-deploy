@@ -129,6 +129,10 @@ function parseDiscordRetryAfterMs(value) {
   return Math.round(raw * 1000);
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(ms) || 0)));
+}
+
 function getRemoteAddress(req) {
   const forwarded = req.headers["x-forwarded-for"];
   const firstForwarded = Array.isArray(forwarded)
@@ -397,6 +401,27 @@ async function sendDiscordWebhook(method, payload, options = {}) {
   }
 }
 
+async function sendDiscordWebhookWithRetry(method, payload, options = {}) {
+  let last = {
+    ok: false,
+    status: 0,
+    body: null,
+    retryAfterMs: 0,
+  };
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const result = await sendDiscordWebhook(method, payload, options);
+    last = result;
+    if (result.ok || result.status !== 429) {
+      return result;
+    }
+    const waitMs = Math.max(450, Math.min(30000, Number(result.retryAfterMs || 0) + 180));
+    await sleep(waitMs);
+  }
+
+  return last;
+}
+
 async function pushDiscordStats(reason = "interval") {
   if (!isDiscordWebhookConfigured()) {
     return;
@@ -424,7 +449,7 @@ async function pushDiscordStats(reason = "interval") {
   }
 
   if (discordStatsMessageId) {
-    const patched = await sendDiscordWebhook("PATCH", payload, {
+    const patched = await sendDiscordWebhookWithRetry("PATCH", payload, {
       messageId: discordStatsMessageId,
       wait: false,
     });
@@ -441,7 +466,7 @@ async function pushDiscordStats(reason = "interval") {
     }
   }
 
-  const created = await sendDiscordWebhook("POST", payload, { wait: true });
+  const created = await sendDiscordWebhookWithRetry("POST", payload, { wait: true });
   setDiscordLastResult(reason, "create", created);
   if (created.status === 429 && created.retryAfterMs > 0) {
     discordNextAllowedAt = now + created.retryAfterMs + 350;
