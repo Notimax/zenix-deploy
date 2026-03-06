@@ -240,8 +240,6 @@ const refs = {
 };
 
 let searchDebounce = null;
-let lastDetailCloseTouchAt = 0;
-let lastPlayerCloseTouchAt = 0;
 let lastProgressSave = 0;
 let toastTimer = null;
 
@@ -336,7 +334,42 @@ async function init() {
   });
 }
 
+function bindFastPress(target, callback, options = {}) {
+  if (!target || typeof callback !== "function") {
+    return;
+  }
+  const dedupeMs = Math.max(120, Number(options.dedupeMs || 440));
+  let lastTouchLikeAt = 0;
+  target.addEventListener(
+    "pointerdown",
+    (event) => {
+      if (event.pointerType === "mouse") {
+        return;
+      }
+      if (Number(event.button || 0) !== 0) {
+        return;
+      }
+      if (options.preventDefault !== false) {
+        event.preventDefault();
+      }
+      if (options.stopPropagation === true) {
+        event.stopPropagation();
+      }
+      lastTouchLikeAt = Date.now();
+      callback(event);
+    },
+    { passive: false }
+  );
+  target.addEventListener("click", (event) => {
+    if (Date.now() - lastTouchLikeAt < dedupeMs) {
+      return;
+    }
+    callback(event);
+  });
+}
+
 function bindEvents() {
+
   refs.navPills.forEach((button) => {
     button.addEventListener("click", () => {
       const view = button.dataset.view || "all";
@@ -345,7 +378,7 @@ function bindEvents() {
   });
 
   refs.quickLinks.forEach((button) => {
-    button.addEventListener("click", () => {
+    bindFastPress(button, () => {
       const view = button.dataset.viewJump || "all";
       handleViewSelection(view);
       const targetId =
@@ -417,7 +450,7 @@ function bindEvents() {
     renderAll();
   });
 
-  refs.refreshNowBtn.addEventListener("click", () => {
+  bindFastPress(refs.refreshNowBtn, () => {
     refs.refreshNowBtn.disabled = true;
     refs.refreshNowBtn.textContent = "Synchronisation...";
     Promise.allSettled([loadTopDaily(), refreshCatalogHead()])
@@ -441,13 +474,13 @@ function bindEvents() {
       });
   });
 
-  refs.shareBrowseBtn.addEventListener("click", () => {
+  bindFastPress(refs.shareBrowseBtn, () => {
     copyBrowseLink().catch(() => {
       showToast("Impossible de copier le lien de cette vue.", true);
     });
   });
 
-  refs.clearContinueBtn.addEventListener("click", () => {
+  bindFastPress(refs.clearContinueBtn, () => {
     if (!window.confirm("Vider tout l'historique Continuer ?")) {
       return;
     }
@@ -457,7 +490,7 @@ function bindEvents() {
     showToast("Historique 'Continuer' vide.");
   });
 
-  refs.clearListBtn.addEventListener("click", () => {
+  bindFastPress(refs.clearListBtn, () => {
     if (!window.confirm("Vider completement Ma liste ?")) {
       return;
     }
@@ -471,7 +504,7 @@ function bindEvents() {
     showToast("Ma liste a ete videe.");
   });
 
-  refs.heroPlayBtn.addEventListener("click", () => {
+  bindFastPress(refs.heroPlayBtn, () => {
     if (!state.activeHeroId) {
       return;
     }
@@ -480,7 +513,7 @@ function bindEvents() {
     });
   });
 
-  refs.heroInfoBtn.addEventListener("click", () => {
+  bindFastPress(refs.heroInfoBtn, () => {
     if (!state.activeHeroId) {
       return;
     }
@@ -489,7 +522,7 @@ function bindEvents() {
     });
   });
 
-  refs.heroTrailerBtn.addEventListener("click", () => {
+  bindFastPress(refs.heroTrailerBtn, () => {
     if (!state.activeHeroId) {
       return;
     }
@@ -498,7 +531,7 @@ function bindEvents() {
     });
   });
 
-  refs.heroRandomBtn.addEventListener("click", () => {
+  bindFastPress(refs.heroRandomBtn, () => {
     const pool = getVisibleCatalog();
     if (pool.length === 0) {
       showToast("Aucun titre disponible pour une suggestion.", true);
@@ -512,28 +545,13 @@ function bindEvents() {
     });
   });
 
-  refs.loadMoreBtn.addEventListener("click", () => {
+  bindFastPress(refs.loadMoreBtn, () => {
     loadMoreCatalog().catch(() => {
       updateLoadMoreButton();
     });
   });
 
-  refs.detailCloseBtn.addEventListener(
-    "pointerdown",
-    (event) => {
-      if (event.pointerType === "mouse") {
-        return;
-      }
-      event.preventDefault();
-      lastDetailCloseTouchAt = Date.now();
-      closeDetails();
-    },
-    { passive: false }
-  );
-  refs.detailCloseBtn.addEventListener("click", () => {
-    if (Date.now() - lastDetailCloseTouchAt < 450) {
-      return;
-    }
+  bindFastPress(refs.detailCloseBtn, () => {
     closeDetails();
   });
   refs.detailModal.addEventListener("click", (event) => {
@@ -542,7 +560,7 @@ function bindEvents() {
     }
   });
 
-  refs.detailPlayBtn.addEventListener("click", () => {
+  bindFastPress(refs.detailPlayBtn, () => {
     if (!state.selectedDetailId) {
       return;
     }
@@ -554,7 +572,7 @@ function bindEvents() {
     });
   });
 
-  refs.detailTrailerBtn.addEventListener("click", () => {
+  bindFastPress(refs.detailTrailerBtn, () => {
     if (!state.selectedDetailId) {
       return;
     }
@@ -563,7 +581,7 @@ function bindEvents() {
     });
   });
 
-  refs.detailFavoriteBtn.addEventListener("click", () => {
+  bindFastPress(refs.detailFavoriteBtn, () => {
     if (!state.selectedDetailId) {
       return;
     }
@@ -571,7 +589,7 @@ function bindEvents() {
     updateDetailFavoriteButton(state.selectedDetailId);
   });
 
-  refs.detailShareBtn.addEventListener("click", () => {
+  bindFastPress(refs.detailShareBtn, () => {
     copyCurrentLink().catch(() => {
       showToast("Impossible de copier le lien.", true);
     });
@@ -617,22 +635,7 @@ function bindEvents() {
     }
   });
 
-  refs.playerCloseBtn.addEventListener(
-    "pointerdown",
-    (event) => {
-      if (event.pointerType === "mouse") {
-        return;
-      }
-      event.preventDefault();
-      lastPlayerCloseTouchAt = Date.now();
-      closePlayer();
-    },
-    { passive: false }
-  );
-  refs.playerCloseBtn.addEventListener("click", () => {
-    if (Date.now() - lastPlayerCloseTouchAt < 450) {
-      return;
-    }
+  bindFastPress(refs.playerCloseBtn, () => {
     closePlayer();
   });
   refs.playerOverlay.addEventListener("click", (event) => {
@@ -694,7 +697,7 @@ function bindEvents() {
     });
   });
 
-  refs.playerSourceApplyBtn?.addEventListener("click", () => {
+  bindFastPress(refs.playerSourceApplyBtn, () => {
     const index = Number(refs.playerSourceSelect?.value || "-1");
     if (!Number.isInteger(index) || index < 0) {
       return;
@@ -717,7 +720,7 @@ function bindEvents() {
       setPlayerStatus("Erreur video detectee. Choisis un autre titre.", true);
     });
   });
-  refs.playerRestartBtn?.addEventListener("click", async () => {
+  bindFastPress(refs.playerRestartBtn, async () => {
     refs.playerVideo.currentTime = 0;
     try {
       await refs.playerVideo.play();
@@ -725,15 +728,15 @@ function bindEvents() {
       // no-op
     }
   });
-  refs.playerRewindBtn?.addEventListener("click", () => {
+  bindFastPress(refs.playerRewindBtn, () => {
     refs.playerVideo.currentTime = Math.max(0, Number(refs.playerVideo.currentTime || 0) - 10);
   });
-  refs.playerForwardBtn?.addEventListener("click", () => {
+  bindFastPress(refs.playerForwardBtn, () => {
     const duration = Number(refs.playerVideo.duration || 0);
     const next = Number(refs.playerVideo.currentTime || 0) + 10;
     refs.playerVideo.currentTime = Number.isFinite(duration) && duration > 0 ? Math.min(duration, next) : next;
   });
-  refs.playerFullscreenBtn?.addEventListener("click", () => {
+  bindFastPress(refs.playerFullscreenBtn, () => {
     if (document.fullscreenElement) {
       document.exitFullscreen().catch(() => {
         // no-op
@@ -748,7 +751,7 @@ function bindEvents() {
     }
     showToast("Plein ecran non supporte sur cet appareil.");
   });
-  refs.playerPipBtn?.addEventListener("click", async () => {
+  bindFastPress(refs.playerPipBtn, async () => {
     const pipAvailable =
       Boolean(document.pictureInPictureEnabled) &&
       typeof refs.playerVideo.requestPictureInPicture === "function";
@@ -987,7 +990,7 @@ function initCalendarControls() {
     });
   });
 
-  refs.calendarRefreshBtn.addEventListener("click", () => {
+  bindFastPress(refs.calendarRefreshBtn, () => {
     ensureCalendarData(true).catch(() => {
       showToast("Calendrier indisponible temporairement.", true);
     });
@@ -1376,7 +1379,7 @@ function renderCalendarSection() {
   }
 
   refs.calendarMergedGrid.querySelectorAll("[data-calendar-open]").forEach((button) => {
-    button.addEventListener("click", () => {
+    bindFastPress(button, () => {
       const id = Number(button.getAttribute("data-calendar-open") || 0);
       if (id > 0) {
         openDetails(id).catch(() => {
@@ -1560,7 +1563,7 @@ function renderFilterChips() {
     button.type = "button";
     button.className = `chip${state.chip === chip.id ? " active" : ""}`;
     button.textContent = chip.label;
-    button.addEventListener("click", () => {
+    bindFastPress(button, () => {
       state.chip = chip.id;
       if (isCatalogCategoryView(chip.id)) {
         state.view = chip.id;
@@ -2168,7 +2171,7 @@ function renderFeatureRail(items) {
           // optional warmup only
         });
     });
-    button.addEventListener("click", () => {
+    bindFastPress(button, () => {
       openDetails(item.id).catch(() => {
         showToast("Impossible d'ouvrir ce titre.", true);
       });
@@ -2515,14 +2518,14 @@ function renderTopDaily() {
     const info = card.querySelector(`[data-top-info="${item.id}"]`);
 
     if (play) {
-      play.addEventListener("click", () => {
+      bindFastPress(play, () => {
         openPlayer(item.id).catch(() => {
           showMessage("Lecture indisponible pour ce titre.", true);
         });
       });
     }
     if (info) {
-      info.addEventListener("click", () => {
+      bindFastPress(info, () => {
         openDetails(item.id).catch(() => {
           showMessage("Impossible de charger la fiche detaillee.", true);
         });
@@ -2676,7 +2679,7 @@ function buildMediaCard(item, resume = false, progressEntry = null, position = 0
   const fav = card.querySelector(`[data-card-fav="${item.id}"]`);
 
   if (play) {
-    play.addEventListener("click", () => {
+    bindFastPress(play, () => {
       if (resume && progressEntry) {
         openPlayer(item.id, {
           season: progressEntry.season || 1,
@@ -2694,7 +2697,7 @@ function buildMediaCard(item, resume = false, progressEntry = null, position = 0
   }
 
   if (info) {
-    info.addEventListener("click", () => {
+    bindFastPress(info, () => {
       openDetails(item.id).catch(() => {
         showMessage("Impossible de charger les details.", true);
       });
@@ -2702,7 +2705,7 @@ function buildMediaCard(item, resume = false, progressEntry = null, position = 0
   }
 
   if (fav) {
-    fav.addEventListener("click", () => {
+    bindFastPress(fav, () => {
       toggleFavorite(item.id);
       const nowFavorite = isFavorite(item.id);
       fav.classList.toggle("active", nowFavorite);
