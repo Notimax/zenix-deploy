@@ -11,7 +11,9 @@ const ANIME_PLANNING_URL = "https://anime-sama.tv/planning/";
 const PROXY_TIMEOUT_MS = 16000;
 const CALENDAR_CACHE_MS = 6 * 60 * 1000;
 const WEBHOOK_TIMEOUT_MS = 10000;
-const DISCORD_WEBHOOK_URL = String(process.env.DISCORD_WEBHOOK_URL || "").trim();
+const DISCORD_WEBHOOK_URL = String(
+  process.env.DISCORD_WEBHOOK_URL || process.env.DISCORD_WEBHOOK || process.env.WEBHOOK_DISCORD_URL || ""
+).trim();
 const DISCORD_PUSH_INTERVAL_MS = Math.max(15000, Number(process.env.DISCORD_PUSH_INTERVAL_MS || 60 * 1000));
 const ANALYTICS_RETENTION_MS = 24 * 60 * 60 * 1000;
 const ANALYTICS_ACTIVE_WINDOW_MS = 2 * 60 * 1000;
@@ -24,6 +26,15 @@ const analyticsEvents = [];
 let analyticsTotalSeen = 0;
 let analyticsLastPushAt = 0;
 let discordStatsMessageId = "";
+let discordNextAllowedAt = 0;
+let discordLastResult = {
+  at: "",
+  reason: "startup",
+  phase: "idle",
+  ok: null,
+  status: 0,
+  retryAfterMs: 0,
+};
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -275,6 +286,21 @@ function buildDiscordStatsEmbed(stats, reason) {
   };
 }
 
+function isDiscordWebhookConfigured() {
+  return DISCORD_WEBHOOK_URL.startsWith("https://discord.com/api/webhooks/");
+}
+
+function setDiscordLastResult(reason, phase, result = {}) {
+  discordLastResult = {
+    at: new Date().toISOString(),
+    reason: String(reason || ""),
+    phase: String(phase || ""),
+    ok: typeof result.ok === "boolean" ? result.ok : null,
+    status: Number(result.status || 0),
+    retryAfterMs: Math.max(0, Number(result.retryAfterMs || 0)),
+  };
+}
+
 async function sendDiscordWebhook(method, payload, options = {}) {
   const messageId = String(options.messageId || "").trim();
   const wait = Boolean(options.wait);
@@ -303,16 +329,30 @@ async function sendDiscordWebhook(method, payload, options = {}) {
       body = null;
     }
 
+    const headerRetryRaw = Number(response.headers.get("retry-after") || 0);
+    const bodyRetryRaw = Number(body?.retry_after || 0);
+    const headerRetryMs =
+      Number.isFinite(headerRetryRaw) && headerRetryRaw > 0
+        ? Math.round(headerRetryRaw > 1000 ? headerRetryRaw : headerRetryRaw * 1000)
+        : 0;
+    const bodyRetryMs =
+      Number.isFinite(bodyRetryRaw) && bodyRetryRaw > 0
+        ? Math.round(bodyRetryRaw > 1000 ? bodyRetryRaw : bodyRetryRaw * 1000)
+        : 0;
+    const retryAfterMs = Math.max(0, headerRetryMs, bodyRetryMs);
+
     return {
       ok: response.ok,
       status: response.status,
       body,
+      retryAfterMs,
     };
   } catch {
     return {
       ok: false,
       status: 0,
       body: null,
+      retryAfterMs: 0,
     };
   } finally {
     clearTimeout(timeoutId);
@@ -320,12 +360,16 @@ async function sendDiscordWebhook(method, payload, options = {}) {
 }
 
 async function pushDiscordStats(reason = "interval") {
-  if (!DISCORD_WEBHOOK_URL.startsWith("https://discord.com/api/webhooks/")) {
+  if (!isDiscordWebhookConfigured()) {
     return;
   }
 
   const now = Date.now();
-  if (reason === "interval" && now - analyticsLastPushAt < DISCORD_PUSH_INTERVAL_MS - 1000) {
+  const forceSend = reason === "startup" || reason === "manual";
+  if (!forceSend && now < discordNextAllowedAt) {
+    return;
+  }
+  if (!forceSend && now - analyticsLastPushAt < DISCORD_PUSH_INTERVAL_MS - 1000) {
     return;
   }
   analyticsLastPushAt = now;
@@ -346,8 +390,12 @@ async function pushDiscordStats(reason = "interval") {
       messageId: discordStatsMessageId,
       wait: false,
     });
+    setDiscordLastResult(reason, "patch", patched);
     if (patched.ok) {
       return;
+    }
+    if (patched.status === 429 && patched.retryAfterMs > 0) {
+      discordNextAllowedAt = now + patched.retryAfterMs + 350;
     }
     if (patched.status === 404 || patched.status === 400) {
       discordStatsMessageId = "";
@@ -356,12 +404,23 @@ async function pushDiscordStats(reason = "interval") {
   }
 
   const created = await sendDiscordWebhook("POST", payload, { wait: true });
+  setDiscordLastResult(reason, "create", created);
+  if (created.status === 429 && created.retryAfterMs > 0) {
+    discordNextAllowedAt = now + created.retryAfterMs + 350;
+  }
   if (created.ok) {
     const nextId = String(created.body?.id || "").trim();
     if (/^\d{8,30}$/.test(nextId)) {
       discordStatsMessageId = nextId;
       saveDiscordStatsState();
     }
+    return;
+  }
+
+  if (created.status > 0) {
+    console.warn(`[discord] Webhook push failed (${created.status}) during ${reason}/${discordStatsMessageId ? "patch" : "create"}.`);
+  } else {
+    console.warn(`[discord] Webhook push failed (network/timeout) during ${reason}/${discordStatsMessageId ? "patch" : "create"}.`);
   }
 }
 
@@ -772,6 +831,27 @@ async function handleAnalyticsHeartbeat(req, res, requestUrl) {
   }
 }
 
+async function handleAnalyticsWebhookStatus(req, res, requestUrl) {
+  if (requestUrl.pathname !== "/api/analytics/webhook-status") {
+    return false;
+  }
+  if (req.method !== "GET") {
+    sendJson(res, 405, { error: "Method Not Allowed" });
+    return true;
+  }
+
+  sendJson(res, 200, {
+    type: "success",
+    webhookConfigured: isDiscordWebhookConfigured(),
+    hasMessageId: /^\d{8,30}$/.test(String(discordStatsMessageId || "")),
+    lastPushAt: analyticsLastPushAt ? new Date(analyticsLastPushAt).toISOString() : "",
+    nextAllowedAt: discordNextAllowedAt ? new Date(discordNextAllowedAt).toISOString() : "",
+    intervalMs: DISCORD_PUSH_INTERVAL_MS,
+    lastResult: discordLastResult,
+  });
+  return true;
+}
+
 async function fetchAnimePlanningPage() {
   const upstream = await fetchRemoteText(ANIME_PLANNING_URL, "text/html");
   if (upstream.status < 200 || upstream.status >= 300) {
@@ -1051,6 +1131,12 @@ const server = http.createServer((req, res) => {
       if (handledAnalytics) {
         return true;
       }
+      return handleAnalyticsWebhookStatus(req, res, requestUrl);
+    })
+    .then((handledWebhookStatus) => {
+      if (handledWebhookStatus) {
+        return true;
+      }
       return handleCalendarOverview(req, res, requestUrl);
     })
     .then((handledCalendar) => {
@@ -1096,7 +1182,8 @@ const server = http.createServer((req, res) => {
     });
 });
 
-if (DISCORD_WEBHOOK_URL.startsWith("https://discord.com/api/webhooks/")) {
+if (isDiscordWebhookConfigured()) {
+  console.log(`[discord] Webhook active (interval ${DISCORD_PUSH_INTERVAL_MS}ms).`);
   loadDiscordStatsState();
 
   const timer = setInterval(() => {
@@ -1116,6 +1203,8 @@ if (DISCORD_WEBHOOK_URL.startsWith("https://discord.com/api/webhooks/")) {
   if (typeof startupTimer.unref === "function") {
     startupTimer.unref();
   }
+} else {
+  console.warn("[discord] Webhook disabled: define DISCORD_WEBHOOK_URL (or DISCORD_WEBHOOK / WEBHOOK_DISCORD_URL).");
 }
 
 server.listen(PORT, () => {

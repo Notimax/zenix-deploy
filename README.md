@@ -31,7 +31,12 @@ Le webhook Discord reste **strictement cote serveur**.
 Variables d'environnement:
 
 - `DISCORD_WEBHOOK_URL` : URL webhook Discord.
+- `DISCORD_WEBHOOK` ou `WEBHOOK_DISCORD_URL` : aliases acceptes si `DISCORD_WEBHOOK_URL` n'est pas defini.
 - `DISCORD_PUSH_INTERVAL_MS` : frequence d'envoi des stats (defaut `60000`).
+
+Diagnostic:
+
+- `GET /api/analytics/webhook-status` renvoie l'etat webhook (configure, dernier envoi, dernier statut HTTP, prochaine tentative).
 
 Stats envoyees:
 
