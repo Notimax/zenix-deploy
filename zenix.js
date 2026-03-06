@@ -1226,6 +1226,16 @@ function bindEvents() {
     });
   });
 
+  window.addEventListener("pageshow", (event) => {
+    if (!event.persisted) {
+      return;
+    }
+    const splashStartedAt = startStartupSplash();
+    completeStartupSplash(splashStartedAt).catch(() => {
+      // no-op
+    });
+  });
+
   const swallowGhostTap = (event) => {
     if (!isPostCloseTapGuardActive()) {
       return;
