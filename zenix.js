@@ -16,6 +16,8 @@ const STREAM_CACHE_TTL_MS = 2 * 60 * 1000;
 const STREAM_PREFETCH_COOLDOWN_MS = 15 * 1000;
 const PROGRESS_SAVE_INTERVAL_MS = 2400;
 const HERO_ROTATE_MS = 8000;
+const STARTUP_SPLASH_MIN_MS = 1650;
+const STARTUP_SPLASH_MAX_MS = 5200;
 const IMAGE_WARMUP_BATCH = 28;
 const IMAGE_WARMUP_DELAY_MS = 12;
 const INITIAL_IMAGE_WARMUP_LIMIT = 260;
@@ -146,9 +148,11 @@ const state = {
   analyticsInFlight: false,
   heartbeatTimer: null,
   heartbeatBound: false,
+  startupSplashForceTimer: 0,
 };
 
 const refs = {
+  startupSplash: document.getElementById("startupSplash"),
   heroSection: document.getElementById("hero"),
   statusStrip: document.getElementById("statusStrip"),
   quickLinksSection: document.getElementById("quickLinksSection"),
@@ -254,9 +258,80 @@ let searchDebounce = null;
 let lastProgressSave = 0;
 let toastTimer = null;
 
+function startStartupSplash() {
+  if (!refs.startupSplash) {
+    return performance.now();
+  }
+  refs.startupSplash.hidden = false;
+  refs.startupSplash.classList.remove("is-leaving");
+  document.body.classList.add("startup-lock");
+
+  if (state.startupSplashForceTimer) {
+    clearTimeout(state.startupSplashForceTimer);
+  }
+  state.startupSplashForceTimer = window.setTimeout(() => {
+    completeStartupSplash(0, { force: true }).catch(() => {
+      // fallback only
+    });
+  }, STARTUP_SPLASH_MAX_MS);
+
+  return performance.now();
+}
+
+async function completeStartupSplash(startedAt = 0, options = {}) {
+  if (!refs.startupSplash) {
+    return;
+  }
+
+  const force = options.force === true;
+  const elapsed = Math.max(0, performance.now() - Number(startedAt || 0));
+  const wait = force ? 0 : Math.max(0, STARTUP_SPLASH_MIN_MS - elapsed);
+  if (wait > 0) {
+    await new Promise((resolve) => setTimeout(resolve, wait));
+  }
+
+  if (state.startupSplashForceTimer) {
+    clearTimeout(state.startupSplashForceTimer);
+    state.startupSplashForceTimer = 0;
+  }
+
+  const splash = refs.startupSplash;
+  if (splash.hidden) {
+    document.body.classList.remove("startup-lock");
+    return;
+  }
+
+  splash.classList.add("is-leaving");
+  await new Promise((resolve) => {
+    let done = false;
+    const finish = () => {
+      if (done) {
+        return;
+      }
+      done = true;
+      resolve();
+    };
+    splash.addEventListener(
+      "transitionend",
+      (event) => {
+        if (event.target === splash) {
+          finish();
+        }
+      },
+      { once: true }
+    );
+    setTimeout(finish, 620);
+  });
+
+  splash.hidden = true;
+  splash.classList.remove("is-leaving");
+  document.body.classList.remove("startup-lock");
+}
+
 init();
 
 async function init() {
+  const splashStartedAt = startStartupSplash();
   cleanupLegacyServiceWorker().catch(() => {
     // cleanup best effort only
   });
@@ -351,6 +426,7 @@ async function init() {
   requestAnimationFrame(() => {
     document.body.classList.add("is-ready");
   });
+  await completeStartupSplash(splashStartedAt);
 }
 
 function bindFastPress(target, callback, options = {}) {
