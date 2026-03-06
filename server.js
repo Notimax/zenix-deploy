@@ -114,6 +114,21 @@ function resolveDiscordWebhookUrl() {
   return decodeBase64Utf8(DISCORD_WEBHOOK_FALLBACK_B64);
 }
 
+function parseDiscordRetryAfterMs(value) {
+  const raw = Number(value);
+  if (!Number.isFinite(raw) || raw <= 0) {
+    return 0;
+  }
+  // Discord may return retry-after in seconds (often fractional) or milliseconds.
+  if (raw >= 1000) {
+    return Math.round(raw);
+  }
+  if (Number.isInteger(raw) && raw >= 100) {
+    return Math.round(raw);
+  }
+  return Math.round(raw * 1000);
+}
+
 function getRemoteAddress(req) {
   const forwarded = req.headers["x-forwarded-for"];
   const firstForwarded = Array.isArray(forwarded)
@@ -360,16 +375,8 @@ async function sendDiscordWebhook(method, payload, options = {}) {
       body = null;
     }
 
-    const headerRetryRaw = Number(response.headers.get("retry-after") || 0);
-    const bodyRetryRaw = Number(body?.retry_after || 0);
-    const headerRetryMs =
-      Number.isFinite(headerRetryRaw) && headerRetryRaw > 0
-        ? Math.round(headerRetryRaw > 1000 ? headerRetryRaw : headerRetryRaw * 1000)
-        : 0;
-    const bodyRetryMs =
-      Number.isFinite(bodyRetryRaw) && bodyRetryRaw > 0
-        ? Math.round(bodyRetryRaw > 1000 ? bodyRetryRaw : bodyRetryRaw * 1000)
-        : 0;
+    const headerRetryMs = parseDiscordRetryAfterMs(response.headers.get("retry-after") || 0);
+    const bodyRetryMs = parseDiscordRetryAfterMs(body?.retry_after || 0);
     const retryAfterMs = Math.max(0, headerRetryMs, bodyRetryMs);
 
     return {
