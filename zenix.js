@@ -148,6 +148,7 @@ const state = {
   detailsInFlight: new Map(),
   trailersInFlight: new Map(),
   seasonsInFlight: new Map(),
+  detailCompatibilityCache: new Map(),
   warmedImages: new Set(),
   imageWarmQueue: [],
   imageWarmTimer: null,
@@ -925,9 +926,18 @@ function bindEvents() {
     const episodes = getEpisodesForSeason(seasons, season);
     const selectedEpisode = getFirstPlayableEpisode(episodes);
     populateEpisodeSelect(refs.detailEpisodeSelect, episodes, selectedEpisode);
-    syncDetailLanguageOptions(id, season, selectedEpisode).catch(() => {
-      // no-op
-    });
+    syncDetailLanguageOptions(id, season, selectedEpisode)
+      .then((result) => {
+        if (!result || state.selectedDetailId !== id) {
+          return;
+        }
+        if (result.compatibility) {
+          setDetailCompatibilityBadge(result.compatibility);
+        }
+      })
+      .catch(() => {
+        // no-op
+      });
     verifySoonEpisodesForSeason(id, season, episodes)
       .then((changed) => {
         if (!changed || state.selectedDetailId !== id) {
@@ -951,9 +961,18 @@ function bindEvents() {
     }
     const season = Number(refs.detailSeasonSelect.value || "1");
     const episode = Number(refs.detailEpisodeSelect.value || "1");
-    syncDetailLanguageOptions(id, season, episode).catch(() => {
-      // no-op
-    });
+    syncDetailLanguageOptions(id, season, episode)
+      .then((result) => {
+        if (!result || state.selectedDetailId !== id) {
+          return;
+        }
+        if (result.compatibility) {
+          setDetailCompatibilityBadge(result.compatibility);
+        }
+      })
+      .catch(() => {
+        // no-op
+      });
   });
 
   refs.detailLanguageSelect?.addEventListener("change", () => {
@@ -3549,6 +3568,9 @@ function normalizeLanguageLabel(value) {
   if (raw === "3" || raw.includes("MULTI")) {
     return "MULTI";
   }
+  if (raw === "4" || raw === "VO" || raw.includes("ORIGINAL")) {
+    return "VO";
+  }
   return raw;
 }
 
@@ -3566,6 +3588,90 @@ function resolveDetailLanguageLabel(details, mediaId = 0) {
     }
   }
   return "";
+}
+
+function buildDetailCompatibilityKey(item, season = 1, episode = 1) {
+  if (!item || Number(item.id || 0) <= 0) {
+    return "";
+  }
+  if (item.type === "tv") {
+    return `${Number(item.id)}:tv:${Math.max(1, Number(season || 1))}:${Math.max(1, Number(episode || 1))}`;
+  }
+  return `${Number(item.id)}:movie`;
+}
+
+function inferCompatibilityLabelFromSources(sources) {
+  const rows = Array.isArray(sources) ? sources.filter(Boolean) : [];
+  if (rows.length === 0) {
+    return "";
+  }
+
+  const hasNonPremium = rows.some((entry) => !entry?.premiumHint);
+  const hasPremium = rows.some((entry) => Boolean(entry?.premiumHint));
+  const hasHls = rows.some((entry) => entry?.format === "hls");
+  const hasMp4 = rows.some((entry) => entry?.format === "mp4");
+  const hasWebm = rows.some((entry) => entry?.format === "webm");
+  const hasDash = rows.some((entry) => entry?.format === "dash");
+
+  const phone = hasHls || hasMp4 || hasDash;
+  const windows = hasMp4 || hasDash || hasWebm || (hasHls && (hasNonPremium || rows.length > 1 || !hasPremium));
+
+  if (windows && phone) {
+    return "Windows/Phone";
+  }
+  if (windows) {
+    return "Windows";
+  }
+  if (phone) {
+    return "Phone";
+  }
+  return "";
+}
+
+function setDetailCompatibilityBadge(label) {
+  if (!refs.detailBadges) {
+    return;
+  }
+  const value = String(label || "").trim();
+  const existing = refs.detailBadges.querySelector('[data-badge-role="compat"]');
+  if (!value) {
+    if (existing) {
+      existing.remove();
+    }
+    return;
+  }
+
+  const target =
+    existing ||
+    (() => {
+      const span = document.createElement("span");
+      span.className = "badge badge-compat";
+      span.setAttribute("data-badge-role", "compat");
+      refs.detailBadges.prepend(span);
+      return span;
+    })();
+  target.textContent = value;
+}
+
+function cacheDetailCompatibilityLabel(item, label, season = 1, episode = 1) {
+  const key = buildDetailCompatibilityKey(item, season, episode);
+  const safeLabel = String(label || "").trim();
+  if (!key) {
+    return;
+  }
+  if (!safeLabel) {
+    state.detailCompatibilityCache.delete(key);
+    return;
+  }
+  state.detailCompatibilityCache.set(key, safeLabel);
+}
+
+function readDetailCompatibilityLabel(item, season = 1, episode = 1) {
+  const key = buildDetailCompatibilityKey(item, season, episode);
+  if (!key) {
+    return "";
+  }
+  return String(state.detailCompatibilityCache.get(key) || "").trim();
 }
 
 function toCssImage(url) {
@@ -4568,6 +4674,12 @@ function resolvePreferredLanguage(mediaId, requestedLanguage, availableLanguages
   if (remembered && availableLanguages.includes(remembered)) {
     return remembered;
   }
+  const fallbackOrder = ["VF", "VOSTFR", "MULTI", "VO"];
+  for (const entry of fallbackOrder) {
+    if (availableLanguages.includes(entry)) {
+      return entry;
+    }
+  }
   return availableLanguages[0] || "";
 }
 
@@ -4586,7 +4698,12 @@ async function syncDetailLanguageOptions(id, season, episode) {
     populateLanguageSelect(refs.detailLanguageSelect, [], "");
     refs.detailLanguageSelect.disabled = true;
     state.detailLangCache.delete(id);
-    return;
+    return {
+      sources: [],
+      languages: [],
+      selected: "",
+      compatibility: "",
+    };
   }
   const payload = await fetchStreamJson(`/stream/${id}/episode?season=${season}&episode=${episode}`);
   const sources = extractSources(payload);
@@ -4599,6 +4716,21 @@ async function syncDetailLanguageOptions(id, season, episode) {
   } else {
     state.detailLangCache.delete(id);
   }
+  const compatibility = inferCompatibilityLabelFromSources(sources);
+  cacheDetailCompatibilityLabel(item, compatibility, season, episode);
+  if (
+    state.selectedDetailId === id &&
+    Number(refs.detailSeasonSelect?.value || season) === season &&
+    Number(refs.detailEpisodeSelect?.value || episode) === episode
+  ) {
+    setDetailCompatibilityBadge(compatibility);
+  }
+  return {
+    sources,
+    languages,
+    selected,
+    compatibility,
+  };
 }
 
 async function openDetails(id, options = {}) {
@@ -4719,6 +4851,7 @@ async function openDetails(id, options = {}) {
     span.textContent = label;
     refs.detailBadges.appendChild(span);
   });
+  setDetailCompatibilityBadge(readDetailCompatibilityLabel(item, 1, 1));
 
   refs.detailTrailerBtn.disabled = trailers.length === 0;
   updateDetailFavoriteButton(id);
@@ -4740,7 +4873,10 @@ async function openDetails(id, options = {}) {
         const defaultEpisode = Number(progress?.episode || fallbackEpisode);
         populateSeasonSelect(refs.detailSeasonSelect, seasons, defaultSeason);
         populateEpisodeSelect(refs.detailEpisodeSelect, episodes, defaultEpisode);
-        await syncDetailLanguageOptions(id, defaultSeason, defaultEpisode);
+        const streamInfo = await syncDetailLanguageOptions(id, defaultSeason, defaultEpisode);
+        if (streamInfo?.compatibility) {
+          setDetailCompatibilityBadge(streamInfo.compatibility);
+        }
         verifySoonEpisodesForSeason(id, defaultSeason, episodes)
           .then((changed) => {
             if (!changed || state.detailToken !== detailToken || state.selectedDetailId !== id) {
@@ -4767,6 +4903,19 @@ async function openDetails(id, options = {}) {
     }
   } else {
     refs.detailSeriesControls.hidden = true;
+    fetchStreamJson(`/stream/${id}`)
+      .then((payload) => {
+        if (state.detailToken !== detailToken || state.selectedDetailId !== id) {
+          return;
+        }
+        const sources = extractSources(payload);
+        const compatibility = inferCompatibilityLabelFromSources(sources);
+        cacheDetailCompatibilityLabel(item, compatibility, 1, 1);
+        setDetailCompatibilityBadge(compatibility);
+      })
+      .catch(() => {
+        // best effort only
+      });
   }
 }
 
@@ -4955,7 +5104,11 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
   }
   state.sourceIndex = -1;
   renderPlayerSourceOptions();
-  await playFromSourcePool(resumeTime, token, 0, { skipPremiumFallback: true });
+  await playFromSourcePoolWithRescue(resumeTime, token, {
+    startIndex: 0,
+    skipPremiumFallback: true,
+    allowPremiumRescue: true,
+  });
   state.nowPlaying = {
     id: item.id,
     type: "movie",
@@ -4989,7 +5142,7 @@ async function loadEpisodeStream(
   clearManualSourceLock();
   state.allEpisodeSources = extractSources(payload);
   state.availableLanguages = getAvailableLanguages(state.allEpisodeSources);
-  const language = resolvePreferredLanguage(item.id, preferredLanguage, state.availableLanguages);
+  let language = resolvePreferredLanguage(item.id, preferredLanguage, state.availableLanguages);
   state.sourcePool = filterSourcesByLanguage(state.allEpisodeSources, language);
   state.selectedLanguageByMedia.set(item.id, language);
   saveLanguagePrefsMap(state.selectedLanguageByMedia);
@@ -5003,7 +5156,29 @@ async function loadEpisodeStream(
   }
   state.sourceIndex = -1;
   renderPlayerSourceOptions();
-  await playFromSourcePool(resumeTime, token, 0, { skipPremiumFallback: true });
+  try {
+    await playFromSourcePoolWithRescue(resumeTime, token, {
+      startIndex: 0,
+      skipPremiumFallback: true,
+      allowPremiumRescue: true,
+    });
+  } catch (error) {
+    if (state.allEpisodeSources.length > state.sourcePool.length) {
+      state.sourcePool = state.allEpisodeSources.slice();
+      state.sourceIndex = -1;
+      renderPlayerSourceOptions();
+      language = "";
+      setPlayerPill(refs.playerLanguagePill, "Auto");
+      await playFromSourcePoolWithRescue(resumeTime, token, {
+        startIndex: 0,
+        skipPremiumFallback: true,
+        allowPremiumRescue: true,
+      });
+      showToast("Bascule auto vers une source plus compatible.");
+    } else {
+      throw error;
+    }
+  }
 
   state.nowPlaying = {
     id: item.id,
@@ -5106,11 +5281,12 @@ async function trySwitchToNextSource() {
     return;
   }
 
-  const nextIndex = state.sourceIndex + 1;
+  let nextIndex = state.sourceIndex + 1;
   if (nextIndex >= state.sourcePool.length) {
     if (state.allEpisodeSources.length > state.sourcePool.length) {
       state.sourcePool = state.allEpisodeSources.slice();
       state.sourceIndex = -1;
+      nextIndex = 0;
       showToast("Bascule automatique vers une autre langue/source.");
     } else {
       setPlayerStatus("Source indisponible. Aucun secours disponible.", true);
@@ -5150,6 +5326,36 @@ async function playFromSourcePool(resumeTime, token, startIndex = 0, options = {
   }
 
   throw lastError || new Error("No playable source");
+}
+
+async function playFromSourcePoolWithRescue(resumeTime, token, options = {}) {
+  const startIndex = Math.max(0, Number(options?.startIndex || 0));
+  const strictIndex = Boolean(options?.strictIndex);
+  const initialSkipPremiumFallback = Boolean(options?.skipPremiumFallback);
+  const allowPremiumRescue = options?.allowPremiumRescue !== false;
+
+  try {
+    await playFromSourcePool(resumeTime, token, startIndex, {
+      strictIndex,
+      skipPremiumFallback: initialSkipPremiumFallback,
+    });
+    return;
+  } catch (firstError) {
+    if (strictIndex || !allowPremiumRescue || !initialSkipPremiumFallback || state.manualSourceLock) {
+      throw firstError;
+    }
+    const hasPremium = state.sourcePool.some((entry) => Boolean(entry?.premiumHint));
+    const hasFree = state.sourcePool.some((entry) => !entry?.premiumHint);
+    if (!hasPremium || !hasFree) {
+      throw firstError;
+    }
+    setPlayerStatus("Essai source de secours...");
+    await playFromSourcePool(resumeTime, token, 0, {
+      strictIndex: false,
+      skipPremiumFallback: false,
+    });
+    showToast("Source de secours active.");
+  }
 }
 
 function normalizeSourceEntry(entry, index) {
@@ -5365,20 +5571,49 @@ function setPlayerPill(target, value, accent = false) {
   target.classList.toggle("accent", Boolean(accent));
 }
 
-function normalizeSourceLanguage(entry) {
-  const raw = String(entry?.source_name || entry?.language || entry?.lang || "")
-    .trim()
-    .toUpperCase();
+function parseLanguageFromSourceName(value) {
+  const raw = String(value || "").trim().toUpperCase();
   if (!raw) {
     return "";
   }
-  if (raw.includes("VOST") || raw.includes("SUB") || raw === "VJ") {
+  if (/\bVOST(?:FR)?\b|\bSUB(?:BED)?\b/.test(raw)) {
     return "VOSTFR";
   }
-  if (raw.includes("VF") || raw.includes("FRENCH") || raw === "FR") {
+  if (/\bVF\b|\bFRENCH\b/.test(raw)) {
     return "VF";
   }
-  return raw;
+  if (/\bMULTI\b|\bDUAL\b/.test(raw)) {
+    return "MULTI";
+  }
+  if (/\bVO\b|\bORIGINAL\b/.test(raw)) {
+    return "VO";
+  }
+  const chunks = raw.split(/[|/\\\-:,]+/).map((entry) => entry.trim()).filter(Boolean);
+  for (const chunk of chunks) {
+    const normalized = normalizeLanguageLabel(chunk);
+    if (normalized === "VF" || normalized === "VOSTFR" || normalized === "MULTI" || normalized === "VO") {
+      return normalized;
+    }
+  }
+  return "";
+}
+
+function normalizeSourceLanguage(entry) {
+  const fromField = normalizeLanguageLabel(entry?.language || entry?.lang || "");
+  if (fromField === "VF" || fromField === "VOSTFR" || fromField === "MULTI" || fromField === "VO") {
+    return fromField;
+  }
+  const fromName = parseLanguageFromSourceName(entry?.source_name || "");
+  if (fromName) {
+    return fromName;
+  }
+  if (typeof entry?.language === "string") {
+    const trimmed = String(entry.language || "").trim().toUpperCase();
+    if (trimmed.length > 0 && trimmed.length <= 12) {
+      return trimmed;
+    }
+  }
+  return "";
 }
 
 function buildPlayableSourceCandidates(source) {
@@ -5485,8 +5720,25 @@ async function startPlayerSource(source, resumeTime, token) {
   throw lastError || new Error("No playable stream candidate");
 }
 
+function shouldUseNativeHls(video) {
+  if (!video || typeof video.canPlayType !== "function") {
+    return false;
+  }
+  if (!video.canPlayType(HLS_MIME)) {
+    return false;
+  }
+
+  const ua = String(navigator.userAgent || "");
+  const isIOS =
+    /iP(hone|od|ad)/i.test(ua) ||
+    (navigator.platform === "MacIntel" && Number(navigator.maxTouchPoints || 0) > 1);
+  const isAppleWebkit = /AppleWebKit/i.test(ua);
+  const isDesktopSafari = /Safari/i.test(ua) && !/Chrome|Chromium|Edg|OPR|Firefox/i.test(ua);
+  return isIOS || (isDesktopSafari && isAppleWebkit);
+}
+
 async function startHlsPlayback(video, streamUrl, token) {
-  if (video.canPlayType(HLS_MIME)) {
+  if (shouldUseNativeHls(video)) {
     video.src = streamUrl;
     video.load();
     await waitVideoReady(video, HLS_READY_TIMEOUT_MS);
@@ -5495,6 +5747,12 @@ async function startHlsPlayback(video, streamUrl, token) {
 
   const Hls = await loadHlsLibrary();
   if (!Hls || !Hls.isSupported()) {
+    if (video.canPlayType(HLS_MIME)) {
+      video.src = streamUrl;
+      video.load();
+      await waitVideoReady(video, HLS_READY_TIMEOUT_MS);
+      return;
+    }
     throw new Error("HLS not supported");
   }
 

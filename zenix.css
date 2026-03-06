@@ -2066,6 +2066,13 @@ body.startup-lock {
   padding: 6px 10px;
 }
 
+.badge-compat {
+  border-color: rgba(71, 179, 255, 0.55);
+  background: linear-gradient(135deg, rgba(55, 137, 255, 0.24), rgba(53, 202, 255, 0.16));
+  color: #d6efff;
+  box-shadow: 0 0 0 1px rgba(69, 173, 255, 0.16) inset;
+}
+
 .detail-actions {
   display: flex;
   flex-wrap: wrap;
