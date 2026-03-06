@@ -8,6 +8,7 @@ const CATALOG_CACHE_KEY = "zenix-catalog-cache-v2";
 const CLEANUP_KEY = "zenix-sw-cleaned-v4";
 const REFRESH_FEED_MS = 10 * 60 * 1000;
 const REFRESH_TOP_MS = 60 * 60 * 1000;
+const ACTIVE_VIEW_SYNC_MS = 2 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = 15000;
 const RETRY_DELAYS_MS = [350, 900];
 const SEARCH_DEBOUNCE_MS = 180;
@@ -16,8 +17,8 @@ const STREAM_CACHE_TTL_MS = 2 * 60 * 1000;
 const STREAM_PREFETCH_COOLDOWN_MS = 15 * 1000;
 const PROGRESS_SAVE_INTERVAL_MS = 2400;
 const HERO_ROTATE_MS = 8000;
-const STARTUP_SPLASH_MIN_MS = 1650;
-const STARTUP_SPLASH_MAX_MS = 5200;
+const STARTUP_SPLASH_MIN_MS = 4650;
+const STARTUP_SPLASH_MAX_MS = 8200;
 const IMAGE_WARMUP_BATCH = 28;
 const IMAGE_WARMUP_DELAY_MS = 12;
 const INITIAL_IMAGE_WARMUP_LIMIT = 260;
@@ -152,6 +153,7 @@ const state = {
   heartbeatTimer: null,
   heartbeatBound: false,
   startupSplashForceTimer: 0,
+  activeViewSyncTimer: 0,
 };
 
 const refs = {
@@ -460,6 +462,97 @@ function bindFastPress(target, callback, options = {}) {
   );
   target.addEventListener("click", (event) => {
     if (Date.now() - lastTouchLikeAt < dedupeMs) {
+      return;
+    }
+    callback(event);
+  });
+}
+
+function bindSafeTap(target, callback, options = {}) {
+  if (!target || typeof callback !== "function") {
+    return;
+  }
+
+  const moveThreshold = Math.max(6, Number(options.moveThreshold || 14));
+  const tapTimeoutMs = Math.max(120, Number(options.tapTimeoutMs || 760));
+  const dedupeMs = Math.max(160, Number(options.dedupeMs || 520));
+
+  let activePointerId = null;
+  let startX = 0;
+  let startY = 0;
+  let startAt = 0;
+  let moved = false;
+  let lastTouchTapAt = 0;
+
+  const clearPointer = () => {
+    activePointerId = null;
+    startX = 0;
+    startY = 0;
+    startAt = 0;
+    moved = false;
+  };
+
+  target.addEventListener(
+    "pointerdown",
+    (event) => {
+      if (event.pointerType === "mouse") {
+        return;
+      }
+      if (Number(event.button || 0) !== 0) {
+        return;
+      }
+      activePointerId = event.pointerId;
+      startX = Number(event.clientX || 0);
+      startY = Number(event.clientY || 0);
+      startAt = Date.now();
+      moved = false;
+    },
+    { passive: true }
+  );
+
+  target.addEventListener(
+    "pointermove",
+    (event) => {
+      if (activePointerId === null || event.pointerId !== activePointerId) {
+        return;
+      }
+      const deltaX = Math.abs(Number(event.clientX || 0) - startX);
+      const deltaY = Math.abs(Number(event.clientY || 0) - startY);
+      if (deltaX > moveThreshold || deltaY > moveThreshold) {
+        moved = true;
+      }
+    },
+    { passive: true }
+  );
+
+  target.addEventListener(
+    "pointercancel",
+    () => {
+      clearPointer();
+    },
+    { passive: true }
+  );
+
+  target.addEventListener(
+    "pointerup",
+    (event) => {
+      if (activePointerId === null || event.pointerId !== activePointerId) {
+        return;
+      }
+      const duration = Date.now() - startAt;
+      const shouldTrigger = !moved && duration <= tapTimeoutMs;
+      clearPointer();
+      if (!shouldTrigger) {
+        return;
+      }
+      lastTouchTapAt = Date.now();
+      callback(event);
+    },
+    { passive: true }
+  );
+
+  target.addEventListener("click", (event) => {
+    if (Date.now() - lastTouchTapAt < dedupeMs) {
       return;
     }
     callback(event);
@@ -973,6 +1066,12 @@ function handleViewSelection(view) {
   setActiveNav(normalizedView);
   renderFilterChips();
   renderAll();
+
+  if (normalizedView !== "calendar") {
+    syncCurrentViewData("manual").catch(() => {
+      // best effort only
+    });
+  }
 
   if (normalizedView === "calendar") {
     if (!state.calendarData) {
@@ -1739,6 +1838,60 @@ function startHeroRotation() {
   }, HERO_ROTATE_MS);
 }
 
+async function syncCurrentViewData(reason = "interval") {
+  if (state.view === "calendar") {
+    await ensureCalendarData().catch(() => {
+      // best effort sync only
+    });
+    return;
+  }
+
+  const activeView = resolveCatalogViewForSearch();
+  const shouldSyncCatalog =
+    activeView === "all" ||
+    isCatalogCategoryView(activeView) ||
+    activeView === "latest" ||
+    activeView === "popular" ||
+    state.view === "top" ||
+    state.view === "list" ||
+    state.view === "info";
+
+  if (shouldSyncCatalog) {
+    await refreshCatalogHead().catch(() => {
+      // retry next interval
+    });
+  }
+
+  if (state.view === "top" || state.view === "all") {
+    await loadTopDaily().catch(() => {
+      // retry next interval
+    });
+  }
+
+  if (state.query.trim().length > 1) {
+    await handleRemoteSearch(state.searchToken).catch(() => {
+      // keep local filtering only
+    });
+  }
+
+  if (!state.backgroundSyncRunning && state.page > 0 && state.page < state.totalPages) {
+    const maxBatch =
+      state.view === "all" || isCatalogCategoryView(state.view) || reason === "manual" ? 6 : 2;
+    const endPage = Math.min(state.totalPages, state.page + maxBatch);
+    if (state.page + 1 <= endPage) {
+      startBackgroundCatalogSync(state.page + 1, endPage);
+    }
+  }
+
+  if (refs.playerOverlay.hidden && refs.detailModal.hidden) {
+    renderAll();
+  } else {
+    renderTopDaily();
+    renderCommunityStats();
+    updateSyncText();
+  }
+}
+
 function startAutoRefresh() {
   if (state.refreshFeedTimer) {
     clearInterval(state.refreshFeedTimer);
@@ -1746,28 +1899,27 @@ function startAutoRefresh() {
   if (state.refreshTopTimer) {
     clearInterval(state.refreshTopTimer);
   }
+  if (state.activeViewSyncTimer) {
+    clearInterval(state.activeViewSyncTimer);
+  }
 
   state.refreshFeedTimer = setInterval(() => {
-    refreshCatalogHead().catch(() => {
+    syncCurrentViewData("feed").catch(() => {
       // retry later
     });
   }, REFRESH_FEED_MS);
 
   state.refreshTopTimer = setInterval(() => {
-    loadTopDaily()
-      .then(() => {
-        if (refs.playerOverlay.hidden) {
-          renderAll();
-        } else {
-          renderTopDaily();
-          renderCommunityStats();
-          updateSyncText();
-        }
-      })
-      .catch(() => {
-        // retry later
-      });
+    syncCurrentViewData("top").catch(() => {
+      // retry later
+    });
   }, REFRESH_TOP_MS);
+
+  state.activeViewSyncTimer = setInterval(() => {
+    syncCurrentViewData("active").catch(() => {
+      // retry next cycle
+    });
+  }, ACTIVE_VIEW_SYNC_MS);
 }
 
 function renderFilterChips() {
@@ -2810,7 +2962,7 @@ function renderTopDaily() {
         });
     });
 
-    card.addEventListener("click", (event) => {
+    bindSafeTap(card, (event) => {
       if (event.target instanceof HTMLElement && event.target.closest("button")) {
         return;
       }
@@ -2839,7 +2991,7 @@ function renderTopDaily() {
       });
     }
     openButtons.forEach((button) => {
-      bindFastPress(button, () => {
+      bindSafeTap(button, () => {
         state.activeHeroId = item.id;
         openDetails(item.id).catch(() => {
           showMessage("Impossible de charger la fiche detaillee.", true);
@@ -3051,7 +3203,7 @@ function buildMediaCard(item, resume = false, progressEntry = null, position = 0
     });
   }
   openButtons.forEach((button) => {
-    bindFastPress(button, () => {
+    bindSafeTap(button, () => {
       openDetails(item.id).catch(() => {
         showMessage("Impossible de charger les details.", true);
       });
@@ -3079,7 +3231,7 @@ function buildMediaCard(item, resume = false, progressEntry = null, position = 0
       });
   });
 
-  card.addEventListener("click", (event) => {
+  bindSafeTap(card, (event) => {
     const target = event.target;
     if (target instanceof HTMLElement && target.closest("button")) {
       return;
@@ -4931,14 +5083,10 @@ function applyBrowseStateFromRoute() {
   refs.sortSelect.value = state.sortBy;
 }
 
-function syncBrowseRoute(options = {}) {
-  const route = readAppRoute();
-  if (route.watch > 0 || route.detail > 0) {
+function applyBrowseParamsToUrl(url) {
+  if (!(url instanceof URL)) {
     return;
   }
-
-  const replace = options.replace !== false;
-  const url = new URL(window.location.href);
 
   if (state.view && state.view !== "all") {
     url.searchParams.set("view", state.view);
@@ -4964,6 +5112,17 @@ function syncBrowseRoute(options = {}) {
   } else {
     url.searchParams.delete("q");
   }
+}
+
+function syncBrowseRoute(options = {}) {
+  const route = readAppRoute();
+  if (route.watch > 0 || route.detail > 0) {
+    return;
+  }
+
+  const replace = options.replace !== false;
+  const url = new URL(window.location.href);
+  applyBrowseParamsToUrl(url);
 
   const next =
     url.pathname + (url.searchParams.toString().length > 0 ? `?${url.searchParams.toString()}` : "");
@@ -4982,6 +5141,7 @@ function syncBrowseRoute(options = {}) {
 function setAppRoute(route, options = {}) {
   const replace = Boolean(options.replace);
   const url = new URL(window.location.href);
+  applyBrowseParamsToUrl(url);
 
   url.searchParams.delete("detail");
   url.searchParams.delete("watch");
