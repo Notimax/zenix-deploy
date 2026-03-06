@@ -2721,11 +2721,12 @@ function renderTopDaily() {
     const cover = resolveCardCover(item, details);
     const runtime = item.runtime ? toHumanRuntime(item.runtime) : item.type === "tv" ? "Episodes" : "Film";
     const year = getYear(item.releaseDate) || "-";
+    const languageLabel = resolveDetailLanguageLabel(details, item.id);
 
     card.innerHTML = `
-      <span class="top-rank">${index + 1}</span>
       <div class="top-shell">
       <div class="top-thumb">
+        <span class="top-rank">#${index + 1}</span>
         <img
           src="${escapeHtml(cover)}"
           alt="${escapeHtml(item.title)}"
@@ -2752,6 +2753,7 @@ function renderTopDaily() {
           <span>${escapeHtml(runtime)}</span>
           <span class="meta-dot" aria-hidden="true"></span>
           <span>${escapeHtml(year)}</span>
+          ${languageLabel ? `<span class="meta-dot" aria-hidden="true"></span><span>${escapeHtml(languageLabel)}</span>` : ""}
         </p>
       </div>
       </div>
