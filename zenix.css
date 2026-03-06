@@ -1211,7 +1211,7 @@ body.startup-lock {
 
 .calendar-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 14px;
 }
 
@@ -1390,8 +1390,8 @@ body.startup-lock {
 }
 
 .top-thumb {
-  aspect-ratio: 16 / 9;
-  border-radius: 12px;
+  aspect-ratio: 2 / 3;
+  border-radius: 14px;
 }
 
 .media-thumb {
@@ -2229,7 +2229,7 @@ body.compact-cards .top-meta {
   }
 
   .calendar-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
 
@@ -2299,7 +2299,7 @@ body.compact-cards .top-meta {
   }
 
   .calendar-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .feature-card {
@@ -2345,14 +2345,16 @@ body.compact-cards .top-meta {
   }
 
   .hero {
-    min-height: clamp(500px, 84svh, 690px);
-    border-radius: 18px;
+    min-height: clamp(540px, 88svh, 760px);
+    border-radius: 20px;
+    border-color: rgba(255, 255, 255, 0.2);
   }
 
   .hero::before {
     background:
-      linear-gradient(180deg, rgba(4, 5, 8, 0.06) 0%, rgba(4, 5, 8, 0.78) 58%, rgba(4, 5, 8, 0.98) 100%),
-      linear-gradient(96deg, rgba(5, 6, 10, 0.88) 0%, rgba(5, 6, 10, 0.22) 54%, rgba(5, 6, 10, 0.92) 100%);
+      linear-gradient(180deg, rgba(4, 5, 8, 0.04) 0%, rgba(4, 5, 8, 0.68) 46%, rgba(4, 5, 8, 0.99) 100%),
+      linear-gradient(104deg, rgba(5, 6, 10, 0.92) 0%, rgba(5, 6, 10, 0.18) 60%, rgba(5, 6, 10, 0.92) 100%),
+      radial-gradient(circle at 74% 28%, rgba(255, 114, 82, 0.2), transparent 48%);
   }
 
   .hero::after {
@@ -2364,7 +2366,7 @@ body.compact-cards .top-meta {
     inset: 0;
     min-height: 100%;
     border: 0;
-    object-position: center 16%;
+    object-position: center 14%;
     animation: none;
     transform: none;
   }
@@ -2380,8 +2382,10 @@ body.compact-cards .top-meta {
     max-width: none;
     gap: 11px;
     padding: 18px 15px calc(15px + env(safe-area-inset-bottom));
-    background: linear-gradient(180deg, rgba(7, 8, 12, 0.01) 0%, rgba(7, 8, 12, 0.7) 26%, rgba(7, 8, 12, 0.98) 100%);
+    background: linear-gradient(180deg, rgba(7, 8, 12, 0.01) 0%, rgba(7, 8, 12, 0.66) 24%, rgba(7, 8, 12, 0.99) 100%);
     backdrop-filter: blur(4px);
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
+    box-shadow: 0 -18px 34px rgba(0, 0, 0, 0.35);
   }
 
   .hero-kicker {
@@ -2393,6 +2397,9 @@ body.compact-cards .top-meta {
     font-size: clamp(2.2rem, 9.9vw, 3.6rem);
     line-height: 0.92;
     text-wrap: balance;
+    text-shadow:
+      0 10px 28px rgba(0, 0, 0, 0.56),
+      0 0 18px rgba(255, 123, 88, 0.24);
   }
 
   .hero p {
@@ -2408,6 +2415,10 @@ body.compact-cards .top-meta {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 9px;
+  }
+
+  .hero-actions .btn-primary {
+    grid-column: 1 / -1;
   }
 
   .hero-actions .btn {
@@ -2485,7 +2496,7 @@ body.compact-cards .top-meta {
   }
 
   .calendar-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .trailer-wrap iframe {
@@ -2596,7 +2607,7 @@ body.compact-cards .top-meta {
   }
 
   .hero {
-    min-height: clamp(460px, 78svh, 610px);
+    min-height: clamp(500px, 82svh, 680px);
     border-radius: 16px;
   }
 
@@ -2617,6 +2628,10 @@ body.compact-cards .top-meta {
   .hero-actions {
     grid-template-columns: 1fr 1fr;
     gap: 7px;
+  }
+
+  .hero-actions .btn-primary {
+    grid-column: 1 / -1;
   }
 
   .hero-actions .btn {
@@ -2640,6 +2655,11 @@ body.compact-cards .top-meta {
   .top-grid,
   .continue-grid,
   .catalog-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .calendar-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 10px;
   }

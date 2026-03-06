@@ -1220,15 +1220,21 @@ function bindEvents() {
     if (!isPostCloseTapGuardActive()) {
       return;
     }
-    event.preventDefault();
+    if (event.cancelable) {
+      event.preventDefault();
+    }
     event.stopPropagation();
     if (typeof event.stopImmediatePropagation === "function") {
       event.stopImmediatePropagation();
     }
   };
 
+  window.addEventListener("pointerdown", swallowGhostTap, true);
   window.addEventListener("click", swallowGhostTap, true);
+  window.addEventListener("mousedown", swallowGhostTap, true);
+  window.addEventListener("mouseup", swallowGhostTap, true);
   window.addEventListener("pointerup", swallowGhostTap, true);
+  window.addEventListener("touchstart", swallowGhostTap, { capture: true, passive: false });
   window.addEventListener("touchend", swallowGhostTap, { capture: true, passive: false });
 
   document.addEventListener("pointerdown", (event) => {
@@ -1847,8 +1853,8 @@ async function ensureSearchCoverage(token, options = {}) {
   }
 }
 
-function activatePostCloseTapGuard(ms = 420) {
-  const delay = Math.max(220, Number(ms || 420));
+function activatePostCloseTapGuard(ms = 820) {
+  const delay = Math.max(420, Number(ms || 820));
   state.postCloseTapGuardUntil = Date.now() + delay;
 }
 
@@ -2269,7 +2275,7 @@ function renderCalendarSection() {
     `;
     const image = card.querySelector("img");
     if (image) {
-      wireImageFallback(image, entry.title || "Affiche", true);
+      wireImageFallback(image, entry.title || "Affiche", false);
     }
 
     if (hasDetails) {
@@ -3690,7 +3696,7 @@ function renderTopDaily() {
 
     const topImg = card.querySelector("img");
     if (topImg) {
-      wireImageFallback(topImg, item.title, true);
+      wireImageFallback(topImg, item.title, false);
     }
     card.addEventListener("pointerenter", () => {
       prefetchStreamForItem(item);
@@ -4742,7 +4748,7 @@ async function openDetails(id, options = {}) {
 }
 
 function closeDetails(options = {}) {
-  activatePostCloseTapGuard();
+  activatePostCloseTapGuard(900);
   refs.detailModal.hidden = true;
   refs.trailerWrap.hidden = true;
   refs.trailerFrame.src = "";
@@ -5610,7 +5616,7 @@ function setPlayerStatus(message, isError = false) {
 }
 
 function closePlayer(options = {}) {
-  activatePostCloseTapGuard();
+  activatePostCloseTapGuard(900);
   refs.playerOverlay.hidden = true;
   refs.playerSeriesControls.hidden = true;
   saveNowPlayingProgress({ force: true });
