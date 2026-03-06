@@ -39,6 +39,8 @@ const STREAM_PROXY_TIMEOUT_MS = 6500;
 const STREAM_PROXY_PREFETCH_TIMEOUT_MS = 4200;
 const STREAM_DIRECT_TIMEOUT_MS = 5200;
 const STREAM_DIRECT_PREFETCH_TIMEOUT_MS = 3600;
+const EPISODE_SOON_VERIFY_TTL_MS = 3 * 60 * 1000;
+const EPISODE_SOON_VERIFY_LIMIT = 8;
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
 const HLS_JS_URL = "https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js";
 const HLS_MIME = "application/vnd.apple.mpegurl";
@@ -111,6 +113,8 @@ const state = {
   streamPayloadCache: new Map(),
   streamInFlight: new Map(),
   streamPrefetchAt: new Map(),
+  episodePlayableCache: new Map(),
+  episodePlayableInFlight: new Map(),
   detailsInFlight: new Map(),
   trailersInFlight: new Map(),
   seasonsInFlight: new Map(),
@@ -611,6 +615,20 @@ function bindEvents() {
     syncDetailLanguageOptions(id, season, selectedEpisode).catch(() => {
       // no-op
     });
+    verifySoonEpisodesForSeason(id, season, episodes)
+      .then((changed) => {
+        if (!changed || state.selectedDetailId !== id) {
+          return;
+        }
+        if (Number(refs.detailSeasonSelect.value || "0") !== season) {
+          return;
+        }
+        const currentEpisode = Number(refs.detailEpisodeSelect.value || selectedEpisode);
+        populateEpisodeSelect(refs.detailEpisodeSelect, episodes, currentEpisode);
+      })
+      .catch(() => {
+        // no-op
+      });
   });
 
   refs.detailEpisodeSelect.addEventListener("change", () => {
@@ -651,12 +669,27 @@ function bindEvents() {
     if (!state.nowPlaying || state.nowPlaying.type !== "tv") {
       return;
     }
+    const mediaId = Number(state.nowPlaying.id || 0);
     const season = Number(refs.playerSeasonSelect.value || "1");
-    const seasons = state.seasonsCache.get(state.nowPlaying.id) || [];
+    const seasons = state.seasonsCache.get(mediaId) || [];
     const episodes = getEpisodesForSeason(seasons, season);
     const episode = getFirstPlayableEpisode(episodes);
     populateEpisodeSelect(refs.playerEpisodeSelect, episodes, episode);
     const language = String(refs.playerLanguageSelect?.value || "").trim();
+    verifySoonEpisodesForSeason(mediaId, season, episodes)
+      .then((changed) => {
+        if (!changed || Number(state.nowPlaying?.id || 0) !== mediaId) {
+          return;
+        }
+        if (Number(refs.playerSeasonSelect.value || "0") !== season) {
+          return;
+        }
+        const currentEpisode = Number(refs.playerEpisodeSelect.value || episode);
+        populateEpisodeSelect(refs.playerEpisodeSelect, episodes, currentEpisode);
+      })
+      .catch(() => {
+        // no-op
+      });
     switchPlayerEpisode(season, episode, { language }).catch(() => {
       showMessage("Impossible de charger cet episode.", true);
     });
@@ -2999,13 +3032,57 @@ function parseEpisodeAirDate(value) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function isGenericEpisodePlaceholderName(value, expectedEpisode = 0) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return false;
+  }
+  const normalized = raw.replace(/\s+/g, " ").trim();
+  const genericEpisode = normalized.match(/^episode\s*0*(\d{1,3})$/i);
+  if (genericEpisode) {
+    const parsed = Number(genericEpisode[1] || 0);
+    return !expectedEpisode || parsed <= 0 || parsed === Number(expectedEpisode || 0);
+  }
+
+  const prefixedEpisode = normalized.match(/^(?:eo?|ep?)\s*0*(\d{1,3})\s*-\s*episode\s*0*(\d{1,3})$/i);
+  if (!prefixedEpisode) {
+    return false;
+  }
+
+  const first = Number(prefixedEpisode[1] || 0);
+  const second = Number(prefixedEpisode[2] || 0);
+  if (!expectedEpisode) {
+    return true;
+  }
+  const expected = Number(expectedEpisode || 0);
+  return first === expected || second === expected;
+}
+
+function hasPlaceholderEpisodeMetadata(rawEpisode) {
+  const overview = String(rawEpisode?.overview || "").trim();
+  const poster = String(rawEpisode?.poster || "").trim();
+  const tmdbCount = Number(rawEpisode?.note?.tmdb?.count || 0);
+  const tmdbAverage = Number(rawEpisode?.note?.tmdb?.average || 0);
+  return !overview && !poster && tmdbCount <= 0 && tmdbAverage <= 0;
+}
+
 function isEpisodeSoon(rawEpisode) {
   const title = String(rawEpisode?.name || rawEpisode?.formattedName || "").toLowerCase();
   if (/soon|bientot|a venir|coming/.test(title)) {
     return true;
   }
+
+  const episodeNumber = Number(rawEpisode?.episode || 0);
+  const placeholderName = isGenericEpisodePlaceholderName(title, episodeNumber);
+  if (placeholderName && hasPlaceholderEpisodeMetadata(rawEpisode)) {
+    return true;
+  }
+
   const airDateTs = parseEpisodeAirDate(rawEpisode?.airDate || rawEpisode?.air_date || "");
   if (airDateTs > Date.now() + 2 * 60 * 60 * 1000) {
+    return true;
+  }
+  if (placeholderName && airDateTs > Date.now() - 2 * 60 * 60 * 1000) {
     return true;
   }
   if (Number(rawEpisode?.runtime?.minutes || 0) <= 0 && airDateTs > 0) {
@@ -3036,7 +3113,12 @@ function populateEpisodeSelect(select, episodes, selectedEpisode) {
     const option = document.createElement("option");
     option.value = String(entry.episode);
     const soonSuffix = entry?.isSoon ? " | soon" : "";
-    option.textContent = `E${String(entry.episode).padStart(2, "0")} - ${entry.name}${soonSuffix}`;
+    const genericPlaceholder = isGenericEpisodePlaceholderName(entry?.name, entry?.episode);
+    if (entry?.isSoon && genericPlaceholder) {
+      option.textContent = `EO${Number(entry.episode || 0)} - Episode ${Number(entry.episode || 0)}${soonSuffix}`;
+    } else {
+      option.textContent = `E${String(entry.episode).padStart(2, "0")} - ${entry.name}${soonSuffix}`;
+    }
     option.selected = entry.episode === selectedEpisode;
     option.disabled = Boolean(entry?.isSoon);
     select.appendChild(option);
@@ -3046,6 +3128,95 @@ function populateEpisodeSelect(select, episodes, selectedEpisode) {
     const fallback = getFirstPlayableEpisode(episodes);
     select.value = String(fallback);
   }
+}
+
+function buildEpisodePlayableKey(id, season, episode) {
+  return `${Number(id || 0)}:${Number(season || 0)}:${Number(episode || 0)}`;
+}
+
+function readEpisodePlayableCache(id, season, episode) {
+  const key = buildEpisodePlayableKey(id, season, episode);
+  const entry = state.episodePlayableCache.get(key);
+  if (!entry) {
+    return null;
+  }
+  if (Date.now() >= Number(entry.expiresAt || 0)) {
+    state.episodePlayableCache.delete(key);
+    return null;
+  }
+  return Boolean(entry.playable);
+}
+
+function writeEpisodePlayableCache(id, season, episode, playable) {
+  const key = buildEpisodePlayableKey(id, season, episode);
+  state.episodePlayableCache.set(key, {
+    playable: Boolean(playable),
+    expiresAt: Date.now() + EPISODE_SOON_VERIFY_TTL_MS,
+  });
+  if (state.episodePlayableCache.size > 800) {
+    const entries = Array.from(state.episodePlayableCache.entries()).sort(
+      (left, right) => Number(left[1]?.expiresAt || 0) - Number(right[1]?.expiresAt || 0)
+    );
+    entries.slice(0, state.episodePlayableCache.size - 800).forEach(([cacheKey]) => {
+      state.episodePlayableCache.delete(cacheKey);
+    });
+  }
+}
+
+async function isEpisodePlayableByStream(id, season, episode) {
+  const cached = readEpisodePlayableCache(id, season, episode);
+  if (cached !== null) {
+    return cached;
+  }
+
+  const key = buildEpisodePlayableKey(id, season, episode);
+  if (state.episodePlayableInFlight.has(key)) {
+    return state.episodePlayableInFlight.get(key);
+  }
+
+  const task = (async () => {
+    try {
+      const payload = await fetchStreamJson(`/stream/${id}/episode?season=${season}&episode=${episode}`, {
+        prefetch: true,
+      });
+      const playable = extractSources(payload).length > 0;
+      writeEpisodePlayableCache(id, season, episode, playable);
+      return playable;
+    } catch {
+      writeEpisodePlayableCache(id, season, episode, false);
+      return false;
+    }
+  })();
+  state.episodePlayableInFlight.set(key, task);
+
+  try {
+    return await task;
+  } finally {
+    state.episodePlayableInFlight.delete(key);
+  }
+}
+
+async function verifySoonEpisodesForSeason(id, season, episodes) {
+  if (!Number.isInteger(Number(id)) || !Number.isInteger(Number(season)) || !Array.isArray(episodes)) {
+    return false;
+  }
+
+  const candidates = episodes
+    .filter((entry) => Boolean(entry?.isSoon) && isGenericEpisodePlaceholderName(entry?.name, entry?.episode))
+    .slice(0, EPISODE_SOON_VERIFY_LIMIT);
+  if (candidates.length === 0) {
+    return false;
+  }
+
+  let changed = false;
+  for (const entry of candidates) {
+    const playable = await isEpisodePlayableByStream(id, season, Number(entry.episode || 0));
+    if (playable && entry.isSoon) {
+      entry.isSoon = false;
+      changed = true;
+    }
+  }
+  return changed;
 }
 
 function populateLanguageSelect(select, languages, selectedLanguage) {
@@ -3268,6 +3439,20 @@ async function openDetails(id, options = {}) {
         populateSeasonSelect(refs.detailSeasonSelect, seasons, defaultSeason);
         populateEpisodeSelect(refs.detailEpisodeSelect, episodes, defaultEpisode);
         await syncDetailLanguageOptions(id, defaultSeason, defaultEpisode);
+        verifySoonEpisodesForSeason(id, defaultSeason, episodes)
+          .then((changed) => {
+            if (!changed || state.detailToken !== detailToken || state.selectedDetailId !== id) {
+              return;
+            }
+            if (Number(refs.detailSeasonSelect.value || "0") !== defaultSeason) {
+              return;
+            }
+            const currentEpisode = Number(refs.detailEpisodeSelect.value || defaultEpisode);
+            populateEpisodeSelect(refs.detailEpisodeSelect, episodes, currentEpisode);
+          })
+          .catch(() => {
+            // no-op
+          });
         if (state.detailToken !== detailToken || state.selectedDetailId !== id) {
           return;
         }
@@ -3381,18 +3566,39 @@ async function openPlayer(id, options = {}) {
         throw new Error("No episode for selected season");
       }
 
-      const firstPlayable = getFirstPlayableEpisode(episodes);
+      let firstPlayable = getFirstPlayableEpisode(episodes);
       let episode = Number(options.episode || resume?.episode || firstPlayable);
       if (!episodes.some((entry) => entry.episode === episode)) {
         episode = firstPlayable;
       }
-      const foundEpisode = episodes.find((entry) => entry.episode === episode);
+      let foundEpisode = episodes.find((entry) => entry.episode === episode);
+      if (foundEpisode?.isSoon && isGenericEpisodePlaceholderName(foundEpisode?.name, foundEpisode?.episode)) {
+        const selectedPlayable = await isEpisodePlayableByStream(id, season, episode);
+        if (selectedPlayable) {
+          foundEpisode.isSoon = false;
+          firstPlayable = getFirstPlayableEpisode(episodes);
+        }
+      }
       if (foundEpisode?.isSoon) {
         episode = firstPlayable;
       }
 
       populateSeasonSelect(refs.playerSeasonSelect, seasons, season);
       populateEpisodeSelect(refs.playerEpisodeSelect, episodes, episode);
+      verifySoonEpisodesForSeason(id, season, episodes)
+        .then((changed) => {
+          if (!changed || token !== state.playToken) {
+            return;
+          }
+          if (Number(refs.playerSeasonSelect.value || "0") !== season) {
+            return;
+          }
+          const currentEpisode = Number(refs.playerEpisodeSelect.value || episode);
+          populateEpisodeSelect(refs.playerEpisodeSelect, episodes, currentEpisode);
+        })
+        .catch(() => {
+          // no-op
+        });
       refs.playerSeriesControls.hidden = false;
 
       await loadEpisodeStream(
