@@ -69,6 +69,7 @@ const state = {
   calendarYear: new Date().getFullYear(),
   calendarLoading: false,
   calendarData: null,
+  calendarOverviewUnavailable: false,
   searchToken: 0,
   page: 0,
   totalPages: 0,
@@ -118,6 +119,8 @@ const state = {
   featureRailSignature: "",
   viewBeforeSearch: "all",
   analyticsClientId: "",
+  analyticsDisabled: false,
+  analyticsInFlight: false,
   heartbeatTimer: null,
   heartbeatBound: false,
 };
@@ -851,20 +854,10 @@ async function ensureCalendarData(force = false) {
     refs.calendarMergedMeta.textContent = "Chargement en cours...";
   }
 
+  let directError = null;
+  let overviewError = null;
+
   try {
-    const payload = await fetchJson(
-      `${API_BASE}/calendar/overview?month=${state.calendarMonth}&year=${state.calendarYear}`,
-      { force }
-    );
-    const data = payload?.data || null;
-    if (!data || typeof data !== "object") {
-      throw new Error("Invalid calendar payload");
-    }
-    state.calendarData = data;
-    saveCalendarSnapshot(state.calendarMonth, state.calendarYear, data);
-    renderCalendarSection();
-    return true;
-  } catch (error) {
     try {
       const direct = await fetchJson(
         `${STREAM_API_BASE}/calendar/${state.calendarMonth}/${state.calendarYear}/days`,
@@ -882,11 +875,34 @@ async function ensureCalendarData(force = false) {
         if (refs.calendarMergedMeta) {
           refs.calendarMergedMeta.textContent = `${rebuilt.mergedCount} sorties detectees (mode direct).`;
         }
-        showToast("Calendrier charge en mode direct.");
         return true;
       }
-    } catch {
-      // continue to cache fallback
+    } catch (error) {
+      directError = error;
+    }
+
+    if (!state.calendarOverviewUnavailable || force) {
+      try {
+        const payload = await fetchJson(
+          `${API_BASE}/calendar/overview?month=${state.calendarMonth}&year=${state.calendarYear}`,
+          { force }
+        );
+        const data = payload?.data || null;
+        if (!data || typeof data !== "object") {
+          throw new Error("Invalid calendar payload");
+        }
+        state.calendarOverviewUnavailable = false;
+        state.calendarData = data;
+        saveCalendarSnapshot(state.calendarMonth, state.calendarYear, data);
+        renderCalendarSection();
+        return true;
+      } catch (error) {
+        overviewError = error;
+        const message = String(error?.message || "").toLowerCase();
+        if (message.includes("404") || message.includes("unknown api route")) {
+          state.calendarOverviewUnavailable = true;
+        }
+      }
     }
 
     const cached = loadCalendarSnapshot(state.calendarMonth, state.calendarYear);
@@ -908,7 +924,7 @@ async function ensureCalendarData(force = false) {
       showToast("Source calendrier temporairement indisponible.");
       return false;
     }
-    throw error;
+    throw overviewError || directError || new Error("Calendar unavailable");
   } finally {
     state.calendarLoading = false;
   }
@@ -3931,7 +3947,18 @@ function getOrCreateAnalyticsClientId() {
   }
 }
 
+function disableAnalyticsHeartbeat() {
+  state.analyticsDisabled = true;
+  if (state.heartbeatTimer) {
+    clearInterval(state.heartbeatTimer);
+    state.heartbeatTimer = null;
+  }
+}
+
 function sendAnalyticsHeartbeat(useBeacon = false) {
+  if (state.analyticsDisabled || state.analyticsInFlight) {
+    return;
+  }
   const clientId = String(state.analyticsClientId || "").trim();
   if (!clientId) {
     return;
@@ -3957,6 +3984,7 @@ function sendAnalyticsHeartbeat(useBeacon = false) {
     }
   }
 
+  state.analyticsInFlight = true;
   fetch(endpoint, {
     method: "POST",
     credentials: "omit",
@@ -3965,12 +3993,24 @@ function sendAnalyticsHeartbeat(useBeacon = false) {
       "Content-Type": "application/json; charset=utf-8",
     },
     body: JSON.stringify(payload),
-  }).catch(() => {
-    // best effort only
-  });
+  })
+    .then((response) => {
+      if (!response.ok && (response.status === 404 || response.status === 405 || response.status === 501)) {
+        disableAnalyticsHeartbeat();
+      }
+    })
+    .catch(() => {
+      // best effort only
+    })
+    .finally(() => {
+      state.analyticsInFlight = false;
+    });
 }
 
 function startAnalyticsHeartbeat() {
+  if (state.analyticsDisabled) {
+    return;
+  }
   if (!state.analyticsClientId) {
     state.analyticsClientId = getOrCreateAnalyticsClientId();
   }
