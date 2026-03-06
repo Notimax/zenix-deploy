@@ -303,6 +303,26 @@ body.startup-lock {
   backdrop-filter: blur(14px);
 }
 
+.scroll-progress {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.scroll-progress span {
+  display: block;
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #f11424 0%, #ff6e42 55%, #ffcb67 100%);
+  box-shadow: 0 0 14px rgba(241, 20, 36, 0.45);
+  transition: width 120ms linear;
+}
+
 .brand {
   display: inline-flex;
   align-items: center;
@@ -405,14 +425,100 @@ body.startup-lock {
   gap: 8px;
 }
 
+.search-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-width: min(340px, 38vw);
+}
+
 .search-input {
-  width: min(340px, 38vw);
+  width: 100%;
   border-radius: 999px;
   border: 1px solid rgba(255, 255, 255, 0.16);
   background: rgba(255, 255, 255, 0.04);
   color: #fff;
   font: inherit;
-  padding: 10px 14px;
+  padding: 10px 106px 10px 14px;
+}
+
+.search-clear-btn {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.06);
+  color: #f0f2f8;
+  font: inherit;
+  font-size: 0.72rem;
+  min-height: 30px;
+  padding: 5px 9px;
+  cursor: pointer;
+}
+
+.search-suggest {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  right: 0;
+  z-index: 72;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(10, 12, 19, 0.94);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.48);
+  padding: 8px;
+  display: grid;
+  gap: 5px;
+}
+
+.search-suggest-item {
+  border: 1px solid transparent;
+  background: rgba(255, 255, 255, 0.04);
+  color: #f5f7fc;
+  font: inherit;
+  text-align: left;
+  border-radius: 10px;
+  min-height: 38px;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+
+.search-suggest-item:hover {
+  border-color: rgba(255, 123, 88, 0.55);
+  background: rgba(255, 112, 82, 0.16);
+}
+
+.search-suggest-title {
+  display: block;
+  font-weight: 600;
+}
+
+.search-suggest-meta {
+  display: block;
+  margin-top: 3px;
+  font-size: 0.72rem;
+  color: #b8becc;
+}
+
+.net-badge {
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  background: rgba(22, 197, 94, 0.16);
+  color: #c7ffd7;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 8px 10px;
+  white-space: nowrap;
+}
+
+.net-badge.offline {
+  background: rgba(255, 107, 107, 0.18);
+  border-color: rgba(255, 107, 107, 0.46);
+  color: #ffd4d4;
 }
 
 .calendar-search-input {
@@ -1464,6 +1570,18 @@ body.startup-lock {
   padding: 2px 7px;
 }
 
+.meta-pill-new {
+  border-color: rgba(255, 200, 97, 0.56);
+  background: rgba(255, 200, 97, 0.2);
+  color: #fff0c7;
+}
+
+.meta-pill-resume {
+  border-color: rgba(142, 208, 255, 0.56);
+  background: rgba(142, 208, 255, 0.18);
+  color: #d9f4ff;
+}
+
 .meta-dot {
   width: 4px;
   height: 4px;
@@ -2063,6 +2181,45 @@ body.startup-lock {
   background: rgba(58, 21, 27, 0.95);
 }
 
+.back-to-top {
+  position: fixed;
+  right: 14px;
+  bottom: 14px;
+  z-index: 115;
+  min-width: 52px;
+  min-height: 42px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(9, 12, 19, 0.86);
+  color: #fff;
+  font: inherit;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.4);
+}
+
+body.compact-cards .catalog-grid,
+body.compact-cards .top-grid,
+body.compact-cards .continue-grid {
+  gap: 10px;
+}
+
+body.compact-cards .media-body,
+body.compact-cards .top-body {
+  padding: 9px 9px 10px;
+}
+
+body.compact-cards .media-title-link,
+body.compact-cards .top-title-link {
+  font-size: 0.88rem;
+}
+
+body.compact-cards .media-meta,
+body.compact-cards .top-meta {
+  font-size: 0.73rem;
+}
+
 @media (max-width: 1240px) {
   .community-stats,
   .top-grid,
@@ -2089,6 +2246,11 @@ body.startup-lock {
 
   .header-tools {
     justify-content: space-between;
+  }
+
+  .search-wrap {
+    min-width: 0;
+    width: 100%;
   }
 
   .search-input {
@@ -2289,6 +2451,10 @@ body.startup-lock {
 
   .field-inline select {
     width: min(240px, 100%);
+  }
+
+  .net-badge {
+    display: none;
   }
 
   .quick-link {
@@ -2521,6 +2687,11 @@ body.startup-lock {
   .player-panel,
   .detail-panel {
     max-height: none;
+  }
+
+  .back-to-top {
+    right: 10px;
+    bottom: calc(10px + env(safe-area-inset-bottom));
   }
 
 }

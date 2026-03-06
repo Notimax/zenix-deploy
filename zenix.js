@@ -63,6 +63,16 @@ const HLS_READY_TIMEOUT_MS = 28000;
 const HLS_MANIFEST_TIMEOUT_MS = 30000;
 const HEARTBEAT_INTERVAL_MS = 30 * 1000;
 const HEARTBEAT_KEY = "zenix-client-id-v1";
+const UI_PREFS_KEY = "zenix-ui-prefs-v1";
+const RECENT_SEARCHES_KEY = "zenix-recent-searches-v1";
+const BROWSE_STATE_KEY = "zenix-browse-state-v1";
+const VIEW_SCROLL_KEY = "zenix-view-scroll-v1";
+const RECENT_SEARCHES_LIMIT = 8;
+const SCROLL_RESTORE_MAX = 8000;
+const SLOW_NET_TYPES = new Set(["slow-2g", "2g", "3g"]);
+const NEW_RELEASE_DAYS = 45;
+const WATCH_HISTORY_MAX = 250;
+const WATCH_HISTORY_MAX_AGE_MS = 120 * 24 * 60 * 60 * 1000;
 
 const FALLBACK_ITEMS = [
   {
@@ -169,6 +179,12 @@ const state = {
   searchAssistInFlight: false,
   searchAssistQuery: "",
   searchAssistAt: 0,
+  uiPrefs: loadUiPrefs(),
+  recentSearches: loadRecentSearches(),
+  viewScrollPositions: loadViewScrollPositions(),
+  pendingScrollRestoreView: "",
+  networkOnline: navigator.onLine !== false,
+  cardViewportObserver: null,
 };
 
 const refs = {
@@ -197,6 +213,12 @@ const refs = {
   topGrid: document.getElementById("topGrid"),
 
   searchInput: document.getElementById("searchInput"),
+  clearSearchBtn: document.getElementById("clearSearchBtn"),
+  searchSuggestPanel: document.getElementById("searchSuggestPanel"),
+  networkBadge: document.getElementById("networkBadge"),
+  scrollProgress: document.getElementById("scrollProgress"),
+  scrollProgressFill: document.getElementById("scrollProgressFill"),
+  backToTopBtn: document.getElementById("backToTopBtn"),
   navPills: Array.from(document.querySelectorAll(".nav-pill[data-view]")),
   quickLinks: Array.from(document.querySelectorAll(".quick-link[data-view-jump]")),
   filterChips: document.getElementById("filterChips"),
@@ -205,6 +227,8 @@ const refs = {
   shareBrowseBtn: document.getElementById("shareBrowseBtn"),
   clearContinueBtn: document.getElementById("clearContinueBtn"),
   clearListBtn: document.getElementById("clearListBtn"),
+  toggleCompactBtn: document.getElementById("toggleCompactBtn"),
+  toggleAutonextBtn: document.getElementById("toggleAutonextBtn"),
   communityStats: document.getElementById("communityStats"),
   latestSection: document.getElementById("latestSection"),
   latestGrid: document.getElementById("latestGrid"),
@@ -263,8 +287,10 @@ const refs = {
   playerRestartBtn: document.getElementById("playerRestartBtn"),
   playerRewindBtn: document.getElementById("playerRewindBtn"),
   playerForwardBtn: document.getElementById("playerForwardBtn"),
+  playerSkipIntroBtn: document.getElementById("playerSkipIntroBtn"),
   playerFullscreenBtn: document.getElementById("playerFullscreenBtn"),
   playerPipBtn: document.getElementById("playerPipBtn"),
+  playerSpeedSelect: document.getElementById("playerSpeedSelect"),
   playerTypePill: document.getElementById("playerTypePill"),
   playerLanguagePill: document.getElementById("playerLanguagePill"),
   playerQualityPill: document.getElementById("playerQualityPill"),
@@ -352,6 +378,9 @@ init();
 
 async function init() {
   const splashStartedAt = startStartupSplash();
+  pruneProgressEntries();
+  applyUiPrefs({ syncControls: true });
+  updateNetworkBadge();
   cleanupLegacyServiceWorker().catch(() => {
     // cleanup best effort only
   });
@@ -363,8 +392,10 @@ async function init() {
   refs.syncInfo.textContent = "Synchronisation initiale en cours...";
   refs.supportInfo.textContent = "Films, series et anime gratuits, lecture directe sans compte.";
   applyBrowseStateFromRoute();
+  applySavedBrowseState();
   renderFilterChips();
   setActiveNav(state.view);
+  state.pendingScrollRestoreView = state.view;
 
   const topTask = loadTopDaily();
   await loadInitialCatalog().catch(() => {
@@ -603,6 +634,8 @@ function bindEvents() {
 
   refs.searchInput.addEventListener("input", (event) => {
     const nextQuery = String(event.target.value || "").trim();
+    updateSearchInputControls(nextQuery);
+    renderSearchSuggestions(nextQuery);
     if (state.view === "calendar") {
       state.calendarQuery = nextQuery;
       if (refs.calendarSearchInput && refs.calendarSearchInput.value !== nextQuery) {
@@ -652,10 +685,54 @@ function bindEvents() {
       }
 
       if (token === state.searchToken) {
+        if (state.query.length > 1) {
+          rememberSearchQuery(state.query);
+        }
         renderAll();
       }
     }, SEARCH_DEBOUNCE_MS);
   });
+
+  refs.searchInput.addEventListener("focus", () => {
+    updateSearchInputControls(refs.searchInput.value || "");
+    renderSearchSuggestions(String(refs.searchInput.value || "").trim());
+  });
+
+  refs.searchInput.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      refs.searchSuggestPanel.hidden = true;
+      return;
+    }
+    if (event.key !== "Enter") {
+      return;
+    }
+    const query = String(refs.searchInput.value || "").trim();
+    if (query.length > 1) {
+      rememberSearchQuery(query);
+    }
+    refs.searchSuggestPanel.hidden = true;
+  });
+
+  if (refs.searchSuggestPanel) {
+    refs.searchSuggestPanel.addEventListener("click", (event) => {
+      const target = event.target instanceof HTMLElement ? event.target.closest("[data-suggest-query]") : null;
+      if (!(target instanceof HTMLElement)) {
+        return;
+      }
+      const query = String(target.dataset.suggestQuery || "").trim();
+      if (!query) {
+        return;
+      }
+      applySearchQuery(query, { persist: true, focus: true });
+    });
+  }
+
+  if (refs.clearSearchBtn) {
+    bindFastPress(refs.clearSearchBtn, () => {
+      applySearchQuery("", { persist: false, focus: true });
+      refs.searchSuggestPanel.hidden = true;
+    });
+  }
 
   refs.sortSelect.addEventListener("change", (event) => {
     state.sortBy = String(event.target.value || "featured");
@@ -716,6 +793,20 @@ function bindEvents() {
     showToast("Ma liste a ete videe.");
   });
 
+  bindFastPress(refs.toggleCompactBtn, () => {
+    state.uiPrefs.compactCards = !Boolean(state.uiPrefs.compactCards);
+    saveUiPrefs(state.uiPrefs);
+    applyUiPrefs({ syncControls: true });
+    renderAll();
+  });
+
+  bindFastPress(refs.toggleAutonextBtn, () => {
+    state.uiPrefs.autoNextEpisode = !isAutoNextEnabled();
+    saveUiPrefs(state.uiPrefs);
+    applyUiPrefs({ syncControls: true });
+    showToast(isAutoNextEnabled() ? "Auto-episode active." : "Auto-episode desactive.");
+  });
+
   bindFastPress(refs.heroPlayBtn, () => {
     if (!state.activeHeroId) {
       return;
@@ -761,6 +852,10 @@ function bindEvents() {
     loadMoreCatalog().catch(() => {
       updateLoadMoreButton();
     });
+  });
+
+  bindFastPress(refs.backToTopBtn, () => {
+    window.scrollTo({ top: 0, behavior: "smooth" });
   });
 
   bindFastPress(refs.detailCloseBtn, () => {
@@ -980,6 +1075,11 @@ function bindEvents() {
     const next = Number(refs.playerVideo.currentTime || 0) + 10;
     refs.playerVideo.currentTime = Number.isFinite(duration) && duration > 0 ? Math.min(duration, next) : next;
   });
+  bindFastPress(refs.playerSkipIntroBtn, () => {
+    const duration = Number(refs.playerVideo.duration || 0);
+    const next = Number(refs.playerVideo.currentTime || 0) + 85;
+    refs.playerVideo.currentTime = Number.isFinite(duration) && duration > 0 ? Math.min(duration, next) : next;
+  });
   bindFastPress(refs.playerFullscreenBtn, () => {
     if (document.fullscreenElement) {
       document.exitFullscreen().catch(() => {
@@ -1018,16 +1118,83 @@ function bindEvents() {
       !document.pictureInPictureEnabled || typeof refs.playerVideo.requestPictureInPicture !== "function";
   }
 
+  refs.playerSpeedSelect?.addEventListener("change", () => {
+    const rate = Number(refs.playerSpeedSelect.value || "1");
+    applyPlayerRate(rate, { save: true });
+  });
+
+  refs.playerVideo.addEventListener("volumechange", () => {
+    state.uiPrefs.playerVolume = Math.max(0, Math.min(1, Number(refs.playerVideo.volume || 0)));
+    state.uiPrefs.playerMuted = Boolean(refs.playerVideo.muted);
+    saveUiPrefs(state.uiPrefs);
+  });
+
+  refs.playerVideo.addEventListener("ratechange", () => {
+    const rate = Number(refs.playerVideo.playbackRate || 1);
+    if (!Number.isFinite(rate)) {
+      return;
+    }
+    state.uiPrefs.playbackRate = Math.min(2, Math.max(0.75, rate));
+    saveUiPrefs(state.uiPrefs);
+    if (refs.playerSpeedSelect) {
+      refs.playerSpeedSelect.value = String(state.uiPrefs.playbackRate);
+    }
+  });
+
+  refs.playerVideo.addEventListener("dblclick", () => {
+    if (typeof refs.playerVideo.requestFullscreen === "function") {
+      refs.playerVideo.requestFullscreen().catch(() => {
+        // no-op
+      });
+    }
+  });
+
   window.addEventListener("keydown", (event) => {
     bumpInteractionWindow(850);
+    const target = event.target;
+    const typing =
+      target instanceof HTMLElement &&
+      (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
     if (event.key === "/" && document.activeElement !== refs.searchInput) {
-      const target = event.target;
-      const typing =
-        target instanceof HTMLElement &&
-        (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
       if (!typing) {
         event.preventDefault();
         refs.searchInput.focus();
+      }
+    }
+
+    if (!refs.playerOverlay.hidden && !typing) {
+      const key = String(event.key || "").toLowerCase();
+      if (key === " " || key === "k") {
+        event.preventDefault();
+        if (refs.playerVideo.paused) {
+          refs.playerVideo.play().catch(() => {
+            // no-op
+          });
+        } else {
+          refs.playerVideo.pause();
+        }
+      } else if (key === "j" || key === "arrowleft") {
+        event.preventDefault();
+        refs.playerVideo.currentTime = Math.max(0, Number(refs.playerVideo.currentTime || 0) - 10);
+      } else if (key === "l" || key === "arrowright") {
+        event.preventDefault();
+        const duration = Number(refs.playerVideo.duration || 0);
+        const next = Number(refs.playerVideo.currentTime || 0) + 10;
+        refs.playerVideo.currentTime = Number.isFinite(duration) && duration > 0 ? Math.min(duration, next) : next;
+      } else if (key === "m") {
+        event.preventDefault();
+        refs.playerVideo.muted = !refs.playerVideo.muted;
+      } else if (key === "f") {
+        event.preventDefault();
+        if (document.fullscreenElement) {
+          document.exitFullscreen().catch(() => {
+            // no-op
+          });
+        } else if (typeof refs.playerVideo.requestFullscreen === "function") {
+          refs.playerVideo.requestFullscreen().catch(() => {
+            // no-op
+          });
+        }
       }
     }
 
@@ -1064,6 +1231,18 @@ function bindEvents() {
   window.addEventListener("pointerup", swallowGhostTap, true);
   window.addEventListener("touchend", swallowGhostTap, { capture: true, passive: false });
 
+  document.addEventListener("pointerdown", (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) {
+      refs.searchSuggestPanel.hidden = true;
+      return;
+    }
+    if (target.closest(".search-wrap")) {
+      return;
+    }
+    refs.searchSuggestPanel.hidden = true;
+  });
+
   const markInteraction = () => {
     bumpInteractionWindow();
   };
@@ -1075,6 +1254,7 @@ function bindEvents() {
     "scroll",
     () => {
       bumpInteractionWindow(520);
+      updateScrollUI();
       consumePendingCatalogUpdate();
       scheduleScrollDrivenCatalogSync();
     },
@@ -1084,13 +1264,35 @@ function bindEvents() {
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") {
       bumpInteractionWindow(420);
+      updateNetworkBadge();
+      updateScrollUI();
       consumePendingCatalogUpdate();
       scheduleScrollDrivenCatalogSync({ immediate: true });
     }
   });
+
+  window.addEventListener("online", () => {
+    state.networkOnline = true;
+    updateNetworkBadge();
+    showToast("Connexion retablie. Sync en cours.");
+    syncCurrentViewData("online").catch(() => {
+      // best effort
+    });
+  });
+
+  window.addEventListener("offline", () => {
+    state.networkOnline = false;
+    updateNetworkBadge();
+    showToast("Mode hors ligne actif.", true);
+  });
+
+  syncUiToggleButtons();
+  updateSearchInputControls(refs.searchInput?.value || "");
+  updateScrollUI();
 }
 
 function handleViewSelection(view) {
+  rememberCurrentViewScroll();
   const normalizedView = view === "catalog" || view === "search" ? "all" : view;
   state.view = normalizedView;
   if (isCatalogCategoryView(normalizedView)) {
@@ -1100,9 +1302,12 @@ function handleViewSelection(view) {
   }
   if (refs.searchInput) {
     refs.searchInput.value = normalizedView === "calendar" ? state.calendarQuery : state.query;
+    updateSearchInputControls(refs.searchInput.value || "");
   }
+  refs.searchSuggestPanel.hidden = true;
   setActiveNav(normalizedView);
   renderFilterChips();
+  state.pendingScrollRestoreView = normalizedView;
   renderAll();
 
   if (normalizedView !== "calendar") {
@@ -1147,21 +1352,37 @@ function isCatalogBrowseView(view) {
 
 function getCatalogSyncProfile(view = resolveCatalogViewForSearch()) {
   const compact = isCompactViewport();
+  const slow = isSlowConnection();
+  const tune = (profile) => {
+    if (!slow) {
+      return profile;
+    }
+    return {
+      initialPages: Math.max(2, Math.floor(Number(profile.initialPages || 2) * 0.7)),
+      activeBatch: Math.max(2, Math.floor(Number(profile.activeBatch || 2) * 0.65)),
+      manualBatch: Math.max(3, Math.floor(Number(profile.manualBatch || 3) * 0.7)),
+      scrollBatch: Math.max(2, Math.floor(Number(profile.scrollBatch || 2) * 0.65)),
+    };
+  };
   const defaults = compact
     ? { initialPages: 4, activeBatch: 5, manualBatch: 8, scrollBatch: 6 }
     : { initialPages: 3, activeBatch: 4, manualBatch: 7, scrollBatch: 5 };
 
   if (view === "movie" || view === "tv" || view === "anime") {
-    return compact
+    return tune(
+      compact
       ? { initialPages: 6, activeBatch: 7, manualBatch: 10, scrollBatch: 9 }
-      : { initialPages: 5, activeBatch: 6, manualBatch: 9, scrollBatch: 8 };
+      : { initialPages: 5, activeBatch: 6, manualBatch: 9, scrollBatch: 8 }
+    );
   }
   if (view === "latest" || view === "popular") {
-    return compact
+    return tune(
+      compact
       ? { initialPages: 5, activeBatch: 6, manualBatch: 9, scrollBatch: 8 }
-      : { initialPages: 4, activeBatch: 5, manualBatch: 8, scrollBatch: 7 };
+      : { initialPages: 4, activeBatch: 5, manualBatch: 8, scrollBatch: 7 }
+    );
   }
-  return defaults;
+  return tune(defaults);
 }
 
 function getLoadedCatalogPage() {
@@ -1179,6 +1400,218 @@ function resolveCatalogViewForSearch() {
   return "all";
 }
 
+function isSlowConnection() {
+  const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+  if (!connection) {
+    return false;
+  }
+  if (connection.saveData === true) {
+    return true;
+  }
+  const effectiveType = String(connection.effectiveType || "").toLowerCase();
+  return SLOW_NET_TYPES.has(effectiveType);
+}
+
+function isAutoNextEnabled() {
+  return state.uiPrefs.autoNextEpisode !== false;
+}
+
+function syncUiToggleButtons() {
+  if (refs.toggleCompactBtn) {
+    refs.toggleCompactBtn.textContent = `Mode compact: ${state.uiPrefs.compactCards ? "ON" : "OFF"}`;
+  }
+  if (refs.toggleAutonextBtn) {
+    refs.toggleAutonextBtn.textContent = `Auto-episode: ${isAutoNextEnabled() ? "ON" : "OFF"}`;
+  }
+}
+
+function applyUiPrefs(options = {}) {
+  const compact = Boolean(state.uiPrefs.compactCards);
+  document.body.classList.toggle("compact-cards", compact);
+
+  const rate = Number(state.uiPrefs.playbackRate || 1);
+  if (refs.playerSpeedSelect) {
+    const normalized = Number.isFinite(rate) && rate >= 0.5 && rate <= 3 ? rate : 1;
+    refs.playerSpeedSelect.value = String(normalized);
+  }
+
+  if (options.syncControls !== false) {
+    syncUiToggleButtons();
+  }
+}
+
+function applyPlayerRate(rate, options = {}) {
+  const normalized = Number.isFinite(rate) ? Math.min(2, Math.max(0.75, rate)) : 1;
+  refs.playerVideo.playbackRate = normalized;
+  if (refs.playerSpeedSelect) {
+    refs.playerSpeedSelect.value = String(normalized);
+  }
+  if (options.save !== false) {
+    state.uiPrefs.playbackRate = normalized;
+    saveUiPrefs(state.uiPrefs);
+  }
+}
+
+function updateNetworkBadge() {
+  if (!refs.networkBadge) {
+    return;
+  }
+  const online = navigator.onLine !== false;
+  state.networkOnline = online;
+  refs.networkBadge.textContent = online ? "En ligne" : "Hors ligne";
+  refs.networkBadge.classList.toggle("offline", !online);
+}
+
+function updateScrollUI() {
+  const y = Math.max(0, Number(window.scrollY || 0));
+  const viewport = Math.max(1, Number(window.innerHeight || 1));
+  const total = Math.max(0, Number(document.documentElement?.scrollHeight || 0) - viewport);
+  const progress = total > 0 ? Math.max(0, Math.min(1, y / total)) : 0;
+  if (refs.scrollProgressFill) {
+    refs.scrollProgressFill.style.width = `${(progress * 100).toFixed(2)}%`;
+  }
+  if (refs.backToTopBtn) {
+    refs.backToTopBtn.hidden = y < 420;
+  }
+}
+
+function updateSearchInputControls(value = "") {
+  const hasValue = String(value || "").trim().length > 0;
+  if (refs.clearSearchBtn) {
+    refs.clearSearchBtn.hidden = !hasValue;
+  }
+}
+
+function rememberSearchQuery(value) {
+  const query = String(value || "").trim();
+  if (query.length < 2) {
+    return;
+  }
+  const next = [query, ...state.recentSearches.filter((entry) => entry.toLowerCase() !== query.toLowerCase())].slice(
+    0,
+    RECENT_SEARCHES_LIMIT
+  );
+  state.recentSearches = next;
+  saveRecentSearches(next);
+}
+
+function renderSearchSuggestions(value = "") {
+  if (!refs.searchSuggestPanel) {
+    return;
+  }
+  const query = String(value || "").trim();
+  const rows = [];
+
+  if (!query) {
+    state.recentSearches.slice(0, RECENT_SEARCHES_LIMIT).forEach((entry) => {
+      rows.push({ title: entry, meta: "Recherche recente", query: entry });
+    });
+  } else {
+    const queryKey = normalizeTitleKey(query);
+    const candidates = getVisibleCatalog()
+      .filter((item) => normalizeTitleKey(item?.title || "").includes(queryKey))
+      .slice(0, 6);
+    candidates.forEach((item) => {
+      rows.push({
+        title: item.title,
+        meta: `${getItemTypeLabel(item)}${item?.isAnime ? " - Anime" : ""}`,
+        query: item.title,
+      });
+    });
+  }
+
+  refs.searchSuggestPanel.innerHTML = "";
+  if (rows.length === 0) {
+    refs.searchSuggestPanel.hidden = true;
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+  rows.forEach((row) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "search-suggest-item";
+    button.dataset.suggestQuery = row.query;
+    button.innerHTML = `
+      <span class="search-suggest-title">${escapeHtml(row.title)}</span>
+      <span class="search-suggest-meta">${escapeHtml(row.meta)}</span>
+    `;
+    fragment.appendChild(button);
+  });
+  refs.searchSuggestPanel.appendChild(fragment);
+  refs.searchSuggestPanel.hidden = false;
+}
+
+function applySearchQuery(query, options = {}) {
+  const next = String(query || "").trim();
+  refs.searchInput.value = next;
+  updateSearchInputControls(next);
+  if (state.view === "calendar") {
+    state.calendarQuery = next;
+    if (refs.calendarSearchInput) {
+      refs.calendarSearchInput.value = next;
+    }
+    if (options.persist !== false) {
+      rememberSearchQuery(next);
+    }
+    renderCalendarSection();
+    syncBrowseRoute({ replace: true });
+    if (options.focus !== false) {
+      refs.searchInput.focus();
+    }
+    return;
+  }
+
+  state.query = next;
+  if (options.persist !== false) {
+    rememberSearchQuery(next);
+  }
+  if (searchDebounce) {
+    clearTimeout(searchDebounce);
+    searchDebounce = null;
+  }
+  if (state.searchAbortController) {
+    state.searchAbortController.abort();
+    state.searchAbortController = null;
+  }
+  state.searchToken += 1;
+  renderAll();
+  if (next.length > 1) {
+    const token = state.searchToken;
+    handleRemoteSearch(token)
+      .then(() => ensureSearchCoverage(token, { force: true }))
+      .catch(() => {
+        // best effort
+      })
+      .finally(() => {
+        if (token === state.searchToken) {
+          renderAll();
+        }
+      });
+  }
+  if (options.focus !== false) {
+    refs.searchInput.focus();
+  }
+}
+
+function rememberCurrentViewScroll() {
+  if (!refs.playerOverlay.hidden || !refs.detailModal.hidden) {
+    return;
+  }
+  const safeView = String(state.view || "all");
+  state.viewScrollPositions[safeView] = Math.max(0, Number(window.scrollY || 0));
+  saveViewScrollPositions(state.viewScrollPositions);
+}
+
+function restoreScrollForView(view) {
+  const y = Number(state.viewScrollPositions[String(view || "all")] || 0);
+  const safeY = Math.max(0, Math.min(SCROLL_RESTORE_MAX, y));
+  requestAnimationFrame(() => {
+    window.scrollTo(0, safeY);
+    updateScrollUI();
+  });
+}
+
 function setHidden(node, hidden) {
   if (node) {
     node.hidden = Boolean(hidden);
@@ -1193,15 +1626,20 @@ function isCompactViewport() {
 }
 
 function getCardImageProfile() {
+  const slow = isSlowConnection();
   if (isCompactViewport()) {
     return {
-      eagerLimit: MOBILE_EAGER_IMAGE_LIMIT,
-      highPriorityLimit: MOBILE_HIGH_PRIORITY_IMAGE_LIMIT,
+      eagerLimit: slow ? Math.max(34, Math.floor(MOBILE_EAGER_IMAGE_LIMIT * 0.55)) : MOBILE_EAGER_IMAGE_LIMIT,
+      highPriorityLimit: slow
+        ? Math.max(16, Math.floor(MOBILE_HIGH_PRIORITY_IMAGE_LIMIT * 0.6))
+        : MOBILE_HIGH_PRIORITY_IMAGE_LIMIT,
     };
   }
   return {
-    eagerLimit: DESKTOP_EAGER_IMAGE_LIMIT,
-    highPriorityLimit: DESKTOP_HIGH_PRIORITY_IMAGE_LIMIT,
+    eagerLimit: slow ? Math.max(32, Math.floor(DESKTOP_EAGER_IMAGE_LIMIT * 0.58)) : DESKTOP_EAGER_IMAGE_LIMIT,
+    highPriorityLimit: slow
+      ? Math.max(12, Math.floor(DESKTOP_HIGH_PRIORITY_IMAGE_LIMIT * 0.62))
+      : DESKTOP_HIGH_PRIORITY_IMAGE_LIMIT,
   };
 }
 
@@ -2190,6 +2628,7 @@ function renderFilterChips() {
     button.className = `chip${state.chip === chip.id ? " active" : ""}`;
     button.textContent = chip.label;
     bindFastPress(button, () => {
+      rememberCurrentViewScroll();
       state.chip = chip.id;
       if (isCatalogCategoryView(chip.id)) {
         state.view = chip.id;
@@ -2198,6 +2637,7 @@ function renderFilterChips() {
       }
       setActiveNav(state.view);
       renderFilterChips();
+      state.pendingScrollRestoreView = state.view;
       renderAll();
     });
     refs.filterChips.appendChild(button);
@@ -2592,6 +3032,9 @@ function renderAll() {
     renderHero(heroItem);
     renderCommunityStats();
     renderCatalog(visible);
+    if (!hasQuery) {
+      renderContinue();
+    }
     warmImageCacheFromPool(visible, 260);
   }
 
@@ -2630,12 +3073,20 @@ function renderAll() {
   setHidden(refs.listSection, !(isListView && refs.listGrid.children.length > 0));
   setHidden(refs.latestSection, true);
   setHidden(refs.popularSection, true);
-  setHidden(refs.continueSection, true);
+  const showContinue = showBrowseView && !hasQuery && refs.continueGrid.children.length > 0;
+  setHidden(refs.continueSection, !showContinue);
 
   state.pendingCatalogUpdate = false;
+  updateSearchInputControls(refs.searchInput?.value || "");
+  saveBrowseState();
   syncBrowseRoute();
   updateLoadMoreButton();
   updateSyncText();
+  if (state.pendingScrollRestoreView) {
+    const pending = state.pendingScrollRestoreView;
+    state.pendingScrollRestoreView = "";
+    restoreScrollForView(pending);
+  }
   if (showBrowseView && state.hasMore) {
     scheduleScrollDrivenCatalogSync();
   }
@@ -3011,6 +3462,7 @@ function renderMyList() {
   const fragment = document.createDocumentFragment();
   items.forEach((item, index) => fragment.appendChild(buildMediaCard(item, false, null, index)));
   refs.listGrid.appendChild(fragment);
+  observeMediaCards(refs.listGrid);
   refs.listSection.hidden = items.length === 0;
 }
 
@@ -3195,6 +3647,8 @@ function renderTopDaily() {
     const runtime = item.runtime ? toHumanRuntime(item.runtime) : item.type === "tv" ? "Episodes" : "Film";
     const year = getYear(item.releaseDate) || "-";
     const languageLabel = resolveDetailLanguageLabel(details, item.id);
+    const isNewRelease = isRecentlyReleased(item, NEW_RELEASE_DAYS);
+    const hasResume = Number(state.progress?.[item.id]?.time || 0) > 45;
 
     card.innerHTML = `
       <div class="top-shell">
@@ -3222,6 +3676,8 @@ function renderTopDaily() {
         <button type="button" class="title-link top-title-link" data-top-open="${item.id}">${escapeHtml(item.title)}</button>
         <p class="top-meta">
           <span class="meta-pill">${escapeHtml(getItemTypeLabel(item))}</span>
+          ${isNewRelease ? '<span class="meta-pill meta-pill-new">Nouveau</span>' : ""}
+          ${hasResume ? '<span class="meta-pill meta-pill-resume">Reprise</span>' : ""}
           <span class="meta-dot" aria-hidden="true"></span>
           <span>${escapeHtml(runtime)}</span>
           <span class="meta-dot" aria-hidden="true"></span>
@@ -3290,6 +3746,7 @@ function renderTopDaily() {
   });
   refs.topGrid.appendChild(fragment);
   warmVisibleDetailCovers(state.topDaily, 20);
+  observeMediaCards(refs.topGrid);
 }
 
 function renderCatalog(items) {
@@ -3342,6 +3799,7 @@ function renderCatalog(items) {
       fragment.appendChild(buildMediaCard(entry, false, null, index, imageProfile));
     }
     refs.catalogGrid.appendChild(fragment);
+    observeMediaCards(refs.catalogGrid);
 
     if (index < total) {
       state.catalogRenderFrame = requestAnimationFrame(appendChunk);
@@ -3356,6 +3814,7 @@ function renderCatalog(items) {
     state.catalogRenderFrame = 0;
   }
   warmVisibleDetailCovers(items, 42);
+  observeMediaCards(refs.catalogGrid);
 }
 
 function renderContinue() {
@@ -3382,6 +3841,7 @@ function renderContinue() {
     fragment.appendChild(buildMediaCard(item, true, entry, index));
   });
   refs.continueGrid.appendChild(fragment);
+  observeMediaCards(refs.continueGrid);
 }
 
 function buildMediaCard(item, resume = false, progressEntry = null, position = 0, imageProfile = null) {
@@ -3400,6 +3860,8 @@ function buildMediaCard(item, resume = false, progressEntry = null, position = 0
   const languageLabel = resolveDetailLanguageLabel(details, item.id);
   const favorite = isFavorite(item.id);
   const progress = progressEntry || state.progress[item.id] || null;
+  const isNewRelease = isRecentlyReleased(item, NEW_RELEASE_DAYS);
+  const hasResume = Number(progress?.time || 0) > 45;
   const ratioRaw = progress && Number(progress.duration || 0) > 0
     ? (Number(progress.time || 0) / Number(progress.duration || 1)) * 100
     : 0;
@@ -3434,6 +3896,8 @@ function buildMediaCard(item, resume = false, progressEntry = null, position = 0
       <button type="button" class="title-link media-title-link" data-card-open="${item.id}">${escapeHtml(item.title)}</button>
       <p class="media-meta">
         <span class="meta-pill">${escapeHtml(typeLabel)}</span>
+        ${isNewRelease ? '<span class="meta-pill meta-pill-new">Nouveau</span>' : ""}
+        ${hasResume ? '<span class="meta-pill meta-pill-resume">Reprise</span>' : ""}
         <span class="meta-dot" aria-hidden="true"></span>
         <span>${escapeHtml(runtime)}</span>
         <span class="meta-dot" aria-hidden="true"></span>
@@ -3579,6 +4043,61 @@ function warmVisibleDetailCovers(items, limit = 32) {
   } else {
     window.setTimeout(hydrate, 0);
   }
+}
+
+function ensureCardViewportObserver() {
+  if (state.cardViewportObserver || typeof IntersectionObserver !== "function") {
+    return;
+  }
+  state.cardViewportObserver = new IntersectionObserver(
+    (entries, observer) => {
+      entries.forEach((entry) => {
+        if (!entry.isIntersecting) {
+          return;
+        }
+        const target = entry.target;
+        if (!(target instanceof HTMLElement)) {
+          return;
+        }
+        observer.unobserve(target);
+        const mediaId = Number(target.dataset.cardId || 0);
+        if (!Number.isInteger(mediaId) || mediaId <= 0) {
+          return;
+        }
+        const item = findItemById(mediaId);
+        if (item) {
+          prefetchStreamForItem(item);
+        }
+        ensureDetails(mediaId)
+          .then((details) => {
+            updateCardCoverFromDetails(mediaId, details);
+          })
+          .catch(() => {
+            // optional warmup only
+          });
+      });
+    },
+    {
+      root: null,
+      rootMargin: "320px 0px 320px 0px",
+      threshold: 0.01,
+    }
+  );
+}
+
+function observeMediaCards(container) {
+  if (!(container instanceof HTMLElement)) {
+    return;
+  }
+  ensureCardViewportObserver();
+  if (!state.cardViewportObserver) {
+    return;
+  }
+  container.querySelectorAll("[data-card-id]").forEach((card) => {
+    if (card instanceof HTMLElement) {
+      state.cardViewportObserver.observe(card);
+    }
+  });
 }
 
 function updateLoadMoreButton() {
@@ -4286,6 +4805,9 @@ async function openPlayer(id, options = {}) {
   setPlayerPill(refs.playerTypePill, formatPlayerKind(item), true);
   setPlayerPill(refs.playerLanguagePill, item.type === "tv" ? "Langue auto" : "Auto");
   setPlayerPill(refs.playerQualityPill, "Qualite auto");
+  refs.playerVideo.volume = Math.max(0, Math.min(1, Number(state.uiPrefs.playerVolume ?? 1)));
+  refs.playerVideo.muted = Boolean(state.uiPrefs.playerMuted);
+  applyPlayerRate(Number(state.uiPrefs.playbackRate || 1), { save: false });
   if (refs.playerPanel) {
     refs.playerPanel.style.setProperty("--player-backdrop-image", toCssImage(playerBackdrop));
     refs.playerPanel.setAttribute("data-player-type", item.type === "tv" ? "series" : "movie");
@@ -5120,6 +5642,7 @@ function closePlayer(options = {}) {
     setAppRoute({}, { replace: true });
   }
   updateBodyScrollLock();
+  renderContinue();
   if (refs.playerOverlay.hidden && refs.detailModal.hidden) {
     restoreModalScrollPosition();
   }
@@ -5173,6 +5696,11 @@ function onPlayerEnded() {
   }
 
   if (ended.type === "tv") {
+    if (!isAutoNextEnabled()) {
+      showToast("Fin d'episode. Auto-episode desactive.");
+      renderContinue();
+      return;
+    }
     autoAdvanceEpisode(ended).catch(() => {
       showToast("Fin d'episode. Selectionne le suivant.", false);
     });
@@ -5272,6 +5800,15 @@ function parseReleaseDate(value) {
   }
   const parsed = Date.parse(String(value));
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function isRecentlyReleased(item, days = NEW_RELEASE_DAYS) {
+  const ts = parseReleaseDate(item?.releaseDate || "");
+  if (!ts) {
+    return false;
+  }
+  const limit = Math.max(1, Number(days || NEW_RELEASE_DAYS)) * 24 * 60 * 60 * 1000;
+  return Date.now() - ts <= limit;
 }
 
 function toHumanRuntime(minutes) {
@@ -5429,6 +5966,72 @@ async function copyText(value) {
   }
 }
 
+function saveBrowseState() {
+  try {
+    const payload = {
+      view: state.view,
+      chip: state.chip,
+      sortBy: state.sortBy,
+      query: state.query,
+      calendarQuery: state.calendarQuery,
+      savedAt: Date.now(),
+    };
+    localStorage.setItem(BROWSE_STATE_KEY, JSON.stringify(payload));
+  } catch {
+    // ignore private mode/quota
+  }
+}
+
+function loadBrowseState() {
+  try {
+    const raw = localStorage.getItem(BROWSE_STATE_KEY);
+    if (!raw) {
+      return null;
+    }
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function applySavedBrowseState() {
+  const url = new URL(window.location.href);
+  const hasExplicitBrowseParams =
+    url.searchParams.has("view") || url.searchParams.has("chip") || url.searchParams.has("sort") || url.searchParams.has("q");
+  const hasRoute = url.searchParams.has("watch") || url.searchParams.has("detail");
+  if (hasExplicitBrowseParams || hasRoute) {
+    return;
+  }
+
+  const saved = loadBrowseState();
+  if (!saved) {
+    return;
+  }
+
+  const allowedViews = new Set(["all", "calendar", "top", "movie", "tv", "anime", "latest", "popular", "list", "info"]);
+  const allowedChips = new Set(["all", "recent", "movie", "tv", "anime"]);
+  const allowedSort = new Set(["featured", "recent", "title-asc", "title-desc", "runtime-desc"]);
+
+  if (allowedViews.has(String(saved.view || ""))) {
+    state.view = String(saved.view);
+  }
+  if (allowedChips.has(String(saved.chip || ""))) {
+    state.chip = String(saved.chip);
+  }
+  if (allowedSort.has(String(saved.sortBy || ""))) {
+    state.sortBy = String(saved.sortBy);
+  }
+  state.query = String(saved.query || "").trim();
+  state.calendarQuery = String(saved.calendarQuery || "").trim();
+
+  refs.searchInput.value = state.view === "calendar" ? state.calendarQuery : state.query;
+  if (refs.calendarSearchInput) {
+    refs.calendarSearchInput.value = state.calendarQuery;
+  }
+  refs.sortSelect.value = state.sortBy;
+}
+
 function applyBrowseStateFromRoute() {
   const url = new URL(window.location.href);
 
@@ -5470,6 +6073,7 @@ function applyBrowseStateFromRoute() {
     }
   }
   refs.sortSelect.value = state.sortBy;
+  updateSearchInputControls(refs.searchInput.value || "");
 }
 
 function applyBrowseParamsToUrl(url) {
@@ -5605,8 +6209,10 @@ async function applyInitialRoute() {
 
 async function handlePopState() {
   applyBrowseStateFromRoute();
+  refs.searchSuggestPanel.hidden = true;
   renderFilterChips();
   setActiveNav(state.view);
+  state.pendingScrollRestoreView = state.view;
   renderAll();
   if (state.view === "calendar") {
     ensureCalendarData().catch(() => {
@@ -5739,15 +6345,21 @@ function startAnalyticsHeartbeat() {
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "hidden") {
         saveNowPlayingProgress({ force: true });
+        rememberCurrentViewScroll();
+        saveBrowseState();
       }
       sendAnalyticsHeartbeat(false);
     });
     window.addEventListener("pagehide", () => {
       saveNowPlayingProgress({ force: true });
+      rememberCurrentViewScroll();
+      saveBrowseState();
       sendAnalyticsHeartbeat(true);
     });
     window.addEventListener("beforeunload", () => {
       saveNowPlayingProgress({ force: true });
+      rememberCurrentViewScroll();
+      saveBrowseState();
     });
     state.heartbeatBound = true;
   }
@@ -5760,6 +6372,128 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+function loadUiPrefs() {
+  const defaults = {
+    compactCards: false,
+    autoNextEpisode: true,
+    playbackRate: 1,
+    playerVolume: 1,
+    playerMuted: false,
+  };
+  try {
+    const raw = localStorage.getItem(UI_PREFS_KEY);
+    if (!raw) {
+      return defaults;
+    }
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") {
+      return defaults;
+    }
+    const playbackRate = Number(parsed.playbackRate || 1);
+    const playerVolume = Number(parsed.playerVolume);
+    return {
+      compactCards: Boolean(parsed.compactCards),
+      autoNextEpisode: parsed.autoNextEpisode !== false,
+      playbackRate: Number.isFinite(playbackRate) ? Math.min(2, Math.max(0.75, playbackRate)) : 1,
+      playerVolume: Number.isFinite(playerVolume) ? Math.min(1, Math.max(0, playerVolume)) : 1,
+      playerMuted: Boolean(parsed.playerMuted),
+    };
+  } catch {
+    return defaults;
+  }
+}
+
+function saveUiPrefs(value) {
+  try {
+    const payload = {
+      compactCards: Boolean(value?.compactCards),
+      autoNextEpisode: value?.autoNextEpisode !== false,
+      playbackRate: Number(value?.playbackRate || 1),
+      playerVolume: Number(value?.playerVolume ?? 1),
+      playerMuted: Boolean(value?.playerMuted),
+    };
+    localStorage.setItem(UI_PREFS_KEY, JSON.stringify(payload));
+  } catch {
+    // ignore
+  }
+}
+
+function loadRecentSearches() {
+  try {
+    const raw = localStorage.getItem(RECENT_SEARCHES_KEY);
+    if (!raw) {
+      return [];
+    }
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed
+      .map((entry) => String(entry || "").trim())
+      .filter((entry) => entry.length >= 2)
+      .slice(0, RECENT_SEARCHES_LIMIT);
+  } catch {
+    return [];
+  }
+}
+
+function saveRecentSearches(values) {
+  try {
+    const safe = Array.isArray(values)
+      ? values
+          .map((entry) => String(entry || "").trim())
+          .filter((entry) => entry.length >= 2)
+          .slice(0, RECENT_SEARCHES_LIMIT)
+      : [];
+    localStorage.setItem(RECENT_SEARCHES_KEY, JSON.stringify(safe));
+  } catch {
+    // ignore
+  }
+}
+
+function loadViewScrollPositions() {
+  try {
+    const raw = localStorage.getItem(VIEW_SCROLL_KEY);
+    if (!raw) {
+      return {};
+    }
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveViewScrollPositions(value) {
+  try {
+    const safe = value && typeof value === "object" ? value : {};
+    localStorage.setItem(VIEW_SCROLL_KEY, JSON.stringify(safe));
+  } catch {
+    // ignore
+  }
+}
+
+function pruneProgressEntries() {
+  const now = Date.now();
+  const rows = Object.entries(state.progress || {}).sort(
+    (left, right) => Number(right?.[1]?.lastPlayed || 0) - Number(left?.[1]?.lastPlayed || 0)
+  );
+  const next = {};
+  rows.forEach(([id, entry], index) => {
+    const lastPlayed = Number(entry?.lastPlayed || 0);
+    const isFresh = lastPlayed <= 0 || now - lastPlayed <= WATCH_HISTORY_MAX_AGE_MS;
+    if (!isFresh || index >= WATCH_HISTORY_MAX) {
+      return;
+    }
+    next[id] = entry;
+  });
+  const changed = Object.keys(next).length !== Object.keys(state.progress || {}).length;
+  if (changed) {
+    state.progress = next;
+    saveProgress(state.progress);
+  }
 }
 
 function loadProgress() {

@@ -22,8 +22,8 @@
   <link rel="dns-prefetch" href="//image.tmdb.org" />
   <link rel="dns-prefetch" href="//cdn.jsdelivr.net" />
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Instrument+Serif:ital@0;1&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/zenix.css?v=20260306-c47" />
-    <script defer src="/zenix.js?v=20260306-c47"></script>
+    <link rel="stylesheet" href="/zenix.css?v=20260306-c48" />
+    <script defer src="/zenix.js?v=20260306-c48"></script>
 </head>
 <body>
   <div class="startup-splash" id="startupSplash" aria-hidden="true">
@@ -44,6 +44,9 @@
   <div class="app-grain" aria-hidden="true"></div>
 
   <header class="topbar">
+    <div class="scroll-progress" id="scrollProgress" aria-hidden="true">
+      <span id="scrollProgressFill"></span>
+    </div>
     <a class="brand" href="/" aria-label="Accueil Zenix">
       <span class="brand-mark" aria-hidden="true">
         <span class="brand-mark-letter">Z</span>
@@ -65,7 +68,12 @@
     </nav>
 
     <div class="header-tools">
-      <input id="searchInput" class="search-input" type="search" placeholder="Rechercher un titre..." autocomplete="off" />
+      <div class="search-wrap">
+        <input id="searchInput" class="search-input" type="search" placeholder="Rechercher un titre..." autocomplete="off" />
+        <button id="clearSearchBtn" class="search-clear-btn" type="button" aria-label="Effacer la recherche" hidden>Effacer</button>
+        <div class="search-suggest" id="searchSuggestPanel" hidden></div>
+      </div>
+      <span class="net-badge" id="networkBadge" aria-live="polite">En ligne</span>
       <span class="free-chip">FREE</span>
     </div>
   </header>
@@ -123,6 +131,8 @@
         <button class="btn btn-soft" id="shareBrowseBtn" type="button">Partager cette vue</button>
         <button class="btn btn-soft" id="clearContinueBtn" type="button">Vider Continuer</button>
         <button class="btn btn-soft" id="clearListBtn" type="button">Vider Ma liste</button>
+        <button class="btn btn-soft" id="toggleCompactBtn" type="button">Mode compact: OFF</button>
+        <button class="btn btn-soft" id="toggleAutonextBtn" type="button">Auto-episode: ON</button>
       </div>
     </section>
 
@@ -267,6 +277,7 @@
               <button class="btn btn-soft btn-compact" id="playerRestartBtn" type="button">Recommencer</button>
               <button class="btn btn-soft btn-compact" id="playerRewindBtn" type="button">-10s</button>
               <button class="btn btn-soft btn-compact" id="playerForwardBtn" type="button">+10s</button>
+              <button class="btn btn-soft btn-compact" id="playerSkipIntroBtn" type="button">Passer intro</button>
               <button class="btn btn-soft btn-compact" id="playerFullscreenBtn" type="button">Plein ecran</button>
               <button class="btn btn-soft btn-compact" id="playerPipBtn" type="button">Mode flottant</button>
             </div>
@@ -285,6 +296,17 @@
               </label>
               <button class="btn btn-soft btn-compact" id="playerSourceApplyBtn" type="button">Changer la source</button>
             </div>
+            <label class="field" for="playerSpeedSelect">
+              Vitesse
+              <select id="playerSpeedSelect">
+                <option value="0.75">0.75x</option>
+                <option value="1" selected>1x (normal)</option>
+                <option value="1.25">1.25x</option>
+                <option value="1.5">1.5x</option>
+                <option value="1.75">1.75x</option>
+                <option value="2">2x</option>
+              </select>
+            </label>
             <div class="series-controls" id="playerSeriesControls" hidden>
               <label class="field">
                 Saison
@@ -309,5 +331,6 @@
   </section>
 
   <div class="toast" id="toast" hidden role="status" aria-live="polite"></div>
+  <button class="back-to-top" id="backToTopBtn" type="button" hidden aria-label="Remonter en haut">Haut</button>
 </body>
 </html>
