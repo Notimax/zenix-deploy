@@ -15,6 +15,8 @@ const DISCORD_WEBHOOK_FALLBACK_B64 =
   "aHR0cHM6Ly9kaXNjb3JkLmNvbS9hcGkvd2ViaG9va3MvMTQ3OTI2OTg4ODM3OTA2MDMxNi9ISGRVbTVYZkhpeENPXy0yRUhXYXJ1SjJDcHIweXl1eWdHNkRWLVp4Y0JLQWg4N0RNRzNvNnYzbTQzd29VMmZwenpBUw==";
 const DISCORD_WEBHOOK_URL = resolveDiscordWebhookUrl();
 const DISCORD_PUSH_INTERVAL_MS = Math.max(10000, Number(process.env.DISCORD_PUSH_INTERVAL_MS || 10 * 1000));
+const FORWARD_CLIENT_IP_TO_UPSTREAM =
+  String(process.env.FORWARD_CLIENT_IP_TO_UPSTREAM || "").trim() === "1";
 const ANALYTICS_RETENTION_MS = 24 * 60 * 60 * 1000;
 const ANALYTICS_ACTIVE_WINDOW_MS = 2 * 60 * 1000;
 const ANALYTICS_MIN_EVENT_MS = 10 * 1000;
@@ -1269,7 +1271,7 @@ async function handleApiProxy(req, res, requestUrl) {
   const isStreamPath = /^\/stream\//i.test(upstreamPath);
   const clientIp = sanitizeToken(getRemoteAddress(req), 64);
   const upstreamHeaders = {};
-  if (isStreamPath && isPublicIpAddress(clientIp)) {
+  if (FORWARD_CLIENT_IP_TO_UPSTREAM && isStreamPath && isPublicIpAddress(clientIp)) {
     upstreamHeaders["X-Forwarded-For"] = clientIp;
     upstreamHeaders["X-Real-IP"] = clientIp;
     upstreamHeaders["CF-Connecting-IP"] = clientIp;
