@@ -4551,13 +4551,13 @@ async function fetchStreamJson(path, options = {}) {
 
   const task = (async () => {
     try {
-      const proxy = await fetchJson(proxyUrl, proxyOptions);
-      writeStreamPayloadCache(safePath, proxy);
-      return proxy;
-    } catch {
       const direct = await fetchJson(directUrl, directOptions);
       writeStreamPayloadCache(safePath, direct);
       return direct;
+    } catch {
+      const proxy = await fetchJson(proxyUrl, proxyOptions);
+      writeStreamPayloadCache(safePath, proxy);
+      return proxy;
     }
   })();
 
