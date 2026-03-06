@@ -114,11 +114,12 @@ const state = {
   heroRotateTimer: null,
   heroSwapTimer: null,
   detailLangCache: new Map(),
+  detailToken: 0,
   playToken: 0,
   lastSyncAt: null,
   refreshFeedTimer: null,
   refreshTopTimer: null,
-  viewBeforeSearch: "all",
+  pendingCatalogUpdate: false,
   analyticsClientId: "",
   analyticsDisabled: false,
   analyticsInFlight: false,
@@ -753,6 +754,20 @@ function bindEvents() {
       // no-op
     });
   });
+
+  window.addEventListener(
+    "scroll",
+    () => {
+      consumePendingCatalogUpdate();
+    },
+    { passive: true }
+  );
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+      consumePendingCatalogUpdate();
+    }
+  });
 }
 
 function handleViewSelection(view) {
@@ -804,6 +819,33 @@ function setHidden(node, hidden) {
   if (node) {
     node.hidden = Boolean(hidden);
   }
+}
+
+function shouldRenderLiveCatalogUpdates() {
+  if (!refs.playerOverlay.hidden || !refs.detailModal.hidden) {
+    return false;
+  }
+  if (document.visibilityState === "hidden") {
+    return false;
+  }
+  if (state.query.trim().length > 0 || state.view === "calendar" || state.view === "top" || state.view === "list") {
+    return false;
+  }
+  if (Number(window.scrollY || 0) > 110) {
+    return false;
+  }
+  return true;
+}
+
+function consumePendingCatalogUpdate() {
+  if (!state.pendingCatalogUpdate) {
+    return;
+  }
+  if (!shouldRenderLiveCatalogUpdates()) {
+    return;
+  }
+  state.pendingCatalogUpdate = false;
+  renderAll();
 }
 
 function monthLabelFr(monthNumber) {
@@ -1549,9 +1591,10 @@ async function startBackgroundCatalogSync(startPage, lastPage) {
         saveCatalogSnapshot();
       }
 
-      if (page === lastPage || page % BACKGROUND_CATALOG_RENDER_EVERY === 0) {
+      if (shouldRenderLiveCatalogUpdates() && (page === lastPage || page % BACKGROUND_CATALOG_RENDER_EVERY === 0)) {
         renderAll();
       } else {
+        state.pendingCatalogUpdate = true;
         updateSyncText();
       }
 
@@ -1566,6 +1609,7 @@ async function startBackgroundCatalogSync(startPage, lastPage) {
     state.hasMore = state.page < state.totalPages;
     updateLoadMoreButton();
     updateSyncText();
+    consumePendingCatalogUpdate();
   }
 }
 
@@ -1584,11 +1628,11 @@ async function refreshCatalogHead() {
     state.lastSyncAt = new Date();
     saveCatalogSnapshot();
     if (state.catalog.length !== beforeCount) {
-      if (refs.playerOverlay.hidden) {
+      if (shouldRenderLiveCatalogUpdates()) {
         renderAll();
       } else {
+        state.pendingCatalogUpdate = true;
         renderCommunityStats();
-        renderCatalog(getVisibleCatalog());
         updateLoadMoreButton();
         updateSyncText();
       }
@@ -1776,6 +1820,7 @@ function renderAll() {
   setHidden(refs.popularSection, true);
   setHidden(refs.continueSection, true);
 
+  state.pendingCatalogUpdate = false;
   syncBrowseRoute();
   updateLoadMoreButton();
   updateSyncText();
@@ -2328,6 +2373,7 @@ function renderCatalog(items) {
   };
 
   appendChunk();
+  warmVisibleDetailCovers(items, 42);
 }
 
 function renderContinue() {
@@ -2361,6 +2407,14 @@ function buildMediaCard(item, resume = false, progressEntry = null, position = 0
   card.className = "media-card";
   card.dataset.cardId = String(item.id);
 
+  const details = state.detailsCache.get(item.id) || null;
+  const cover =
+    details?.posters?.wallpaper ||
+    details?.posters?.small ||
+    details?.posters?.large ||
+    item.backdrop ||
+    item.poster;
+
   const year = getYear(item.releaseDate) || "-";
   const runtime = item.runtime ? toHumanRuntime(item.runtime) : item.type === "tv" ? "Episodes" : "Film";
   const typeLabel = getItemTypeLabel(item).toUpperCase();
@@ -2375,11 +2429,12 @@ function buildMediaCard(item, resume = false, progressEntry = null, position = 0
   card.innerHTML = `
     <div class="media-thumb">
       <img
-        src="${escapeHtml(item.backdrop || item.poster)}"
+        src="${escapeHtml(cover)}"
         alt="${escapeHtml(item.title)}"
-        loading="${position < 56 ? "eager" : "lazy"}"
+        loading="${position < 58 ? "eager" : "lazy"}"
         decoding="async"
-        fetchpriority="${position < 12 ? "high" : "auto"}"
+        fetchpriority="${position < 14 ? "high" : "auto"}"
+        data-cover-id="${item.id}"
       />
       <div class="media-flags">
         <span class="flag good">FREE</span>
@@ -2402,7 +2457,7 @@ function buildMediaCard(item, resume = false, progressEntry = null, position = 0
 
   const mediaImg = card.querySelector("img");
   if (mediaImg) {
-    wireImageFallback(mediaImg, item.title, false);
+    wireImageFallback(mediaImg, item.title, true);
   }
 
   const play = card.querySelector(`[data-card-play="${item.id}"]`);
@@ -2443,6 +2498,17 @@ function buildMediaCard(item, resume = false, progressEntry = null, position = 0
       fav.textContent = nowFavorite ? "Retirer" : "+ Liste";
     });
   }
+
+  card.addEventListener("pointerdown", () => {
+    ensureDetails(item.id)
+      .then((entry) => {
+        updateCardCoverFromDetails(item.id, entry);
+      })
+      .catch(() => {
+        // optional warmup only
+      });
+  });
+
   card.addEventListener("pointerenter", () => {
     prefetchStreamForItem(item);
   });
@@ -2458,6 +2524,46 @@ function buildMediaCard(item, resume = false, progressEntry = null, position = 0
   });
 
   return card;
+}
+
+function updateCardCoverFromDetails(id, details) {
+  if (!details || Number(id) <= 0) {
+    return;
+  }
+  const cover = details?.posters?.wallpaper || details?.posters?.small || details?.posters?.large || "";
+  if (!cover) {
+    return;
+  }
+
+  const item = findItemById(Number(id));
+  if (item) {
+    item.backdrop = cover;
+  }
+
+  document.querySelectorAll(`[data-cover-id="${id}"]`).forEach((node) => {
+    if (node instanceof HTMLImageElement) {
+      if (node.src !== cover) {
+        node.src = cover;
+      }
+      wireImageFallback(node, item?.title || details?.title || "Zenix", true);
+    }
+  });
+}
+
+function warmVisibleDetailCovers(items, limit = 32) {
+  const rows = Array.isArray(items) ? items.slice(0, Math.max(0, limit)) : [];
+  rows.forEach((entry) => {
+    if (!entry || Number(entry.id || 0) <= 0) {
+      return;
+    }
+    ensureDetails(entry.id)
+      .then((details) => {
+        updateCardCoverFromDetails(entry.id, details);
+      })
+      .catch(() => {
+        // best effort only
+      });
+  });
 }
 
 function updateLoadMoreButton() {
@@ -2793,19 +2899,56 @@ async function syncDetailLanguageOptions(id, season, episode) {
 
 async function openDetails(id, options = {}) {
   state.selectedDetailId = id;
-  const item = findItemById(id) || (await buildItemFromDetails(id));
+  const detailToken = ++state.detailToken;
+  let item = findItemById(id);
+  if (!item) {
+    item = await buildItemFromDetails(id);
+  }
   if (!item) {
     throw new Error("Item not found");
   }
+
   state.activeHeroId = id;
   if (options.syncRoute !== false) {
     setAppRoute({ detail: id });
   }
 
+  const quickBackdrop = item.backdrop || item.poster || "";
+  if (refs.detailPanel) {
+    refs.detailPanel.style.setProperty("--detail-backdrop-image", toCssImage(quickBackdrop));
+  }
+  refs.detailPoster.src = item.poster || item.backdrop || "";
+  refs.detailPoster.alt = item.title;
+  wireImageFallback(refs.detailPoster, item.title, false);
+  refs.detailKicker.textContent = `${getItemTypeLabel(item)} detail`;
+  refs.detailTitle.textContent = item.title;
+  refs.detailMeta.textContent = [getYear(item.releaseDate || ""), getItemTypeLabel(item)].filter(Boolean).join(" - ");
+  refs.detailOverview.textContent = "Chargement des informations...";
+  refs.detailBadges.innerHTML = "";
+  [getItemTypeLabel(item), item.type === "tv" ? "Episodes" : "HD", "Gratuit"].forEach((label) => {
+    const span = document.createElement("span");
+    span.className = "badge";
+    span.textContent = label;
+    refs.detailBadges.appendChild(span);
+  });
+  refs.detailTrailerBtn.disabled = true;
+  updateDetailFavoriteButton(id);
+  refs.detailSeriesControls.hidden = true;
+  refs.detailLanguageSelect.innerHTML = "";
+  refs.detailLanguageSelect.disabled = true;
+  refs.trailerWrap.hidden = true;
+  refs.trailerFrame.src = "";
+  refs.detailModal.hidden = false;
+  updateBodyScrollLock();
+
   const [details, trailers] = await Promise.all([
     ensureDetails(id).catch(() => null),
     ensureTrailers(id).catch(() => []),
   ]);
+  if (state.detailToken !== detailToken || state.selectedDetailId !== id) {
+    return;
+  }
+
   const detailBackdrop =
     details?.posters?.wallpaper || details?.posters?.small || item.backdrop || details?.posters?.large || item.poster;
   if (refs.detailPanel) {
@@ -2877,6 +3020,9 @@ async function openDetails(id, options = {}) {
   if (item.type === "tv") {
     try {
       const seasons = await ensureSeasons(id);
+      if (state.detailToken !== detailToken || state.selectedDetailId !== id) {
+        return;
+      }
       if (seasons.length > 0) {
         const progress = state.progress[id] || null;
         const defaultSeason = Number(progress?.season || seasons[0].season);
@@ -2886,6 +3032,9 @@ async function openDetails(id, options = {}) {
         populateSeasonSelect(refs.detailSeasonSelect, seasons, defaultSeason);
         populateEpisodeSelect(refs.detailEpisodeSelect, episodes, defaultEpisode);
         await syncDetailLanguageOptions(id, defaultSeason, defaultEpisode);
+        if (state.detailToken !== detailToken || state.selectedDetailId !== id) {
+          return;
+        }
         refs.detailSeriesControls.hidden = false;
       } else {
         refs.detailSeriesControls.hidden = true;
@@ -2896,12 +3045,6 @@ async function openDetails(id, options = {}) {
   } else {
     refs.detailSeriesControls.hidden = true;
   }
-
-  refs.trailerWrap.hidden = true;
-  refs.trailerFrame.src = "";
-
-  refs.detailModal.hidden = false;
-  updateBodyScrollLock();
 }
 
 function closeDetails(options = {}) {
