@@ -8,3 +8,8 @@ services:
     startCommand: npm start
     autoDeploy: true
     healthCheckPath: /
+    envVars:
+      - key: DISCORD_WEBHOOK_URL
+        sync: false
+      - key: DISCORD_PUSH_INTERVAL_MS
+        value: "60000"

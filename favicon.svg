@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <linearGradient id="zenix_g" x1="10" y1="8" x2="54" y2="56" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#991119" />
+      <stop offset="0.55" stop-color="#F11424" />
+      <stop offset="1" stop-color="#FF8E2E" />
+    </linearGradient>
+    <linearGradient id="zenix_stroke" x1="8" y1="8" x2="56" y2="56" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFD5C2" stop-opacity="0.55" />
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0.18" />
+    </linearGradient>
+  </defs>
+
+  <rect x="5" y="5" width="54" height="54" rx="14" fill="#0A0D16" />
+  <rect x="7" y="7" width="50" height="50" rx="12" fill="url(#zenix_g)" />
+  <rect x="7.5" y="7.5" width="49" height="49" rx="11.5" stroke="url(#zenix_stroke)" />
+
+  <path
+    d="M18 20H46V27.2L29.6 43.6H46V50H18V42.8L34.4 26.4H18V20Z"
+    fill="white"
+  />
+</svg>

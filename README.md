@@ -23,3 +23,19 @@ Ouvre ensuite:
 ## Deploiement Render
 
 `render.yaml` deploie le service web `zenix` sur le plan free.
+
+## Webhook Discord (stats live)
+
+Le webhook Discord reste **strictement cote serveur**.
+
+Variables d'environnement:
+
+- `DISCORD_WEBHOOK_URL` : URL webhook Discord.
+- `DISCORD_PUSH_INTERVAL_MS` : frequence d'envoi des stats (defaut `60000`).
+
+Stats envoyees:
+
+- connectes actuellement (fenetre active courte),
+- visiteurs uniques sur 24h,
+- heartbeats sur 24h,
+- uptime serveur et total visiteurs depuis lancement.
