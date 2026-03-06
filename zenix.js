@@ -41,6 +41,12 @@ const CRITICAL_COVER_PRIME_MOBILE = 140;
 const CRITICAL_COVER_PRIME_DESKTOP = 84;
 const CRITICAL_COVER_PRIME_WAIT_MS = 700;
 const LIVE_RENDER_INTERACTION_GRACE_MS = 1200;
+const SCROLL_SYNC_THRESHOLD_PX = 900;
+const SCROLL_SYNC_DEBOUNCE_MS = 140;
+const SCROLL_SYNC_MIN_INTERVAL_MS = 420;
+const SEARCH_ASSIST_STEP_PAGES = 6;
+const SEARCH_ASSIST_MAX_STEPS = 3;
+const SEARCH_ASSIST_COOLDOWN_MS = 1200;
 const STREAM_PROXY_TIMEOUT_MS = 6500;
 const STREAM_PROXY_PREFETCH_TIMEOUT_MS = 4200;
 const STREAM_DIRECT_TIMEOUT_MS = 5200;
@@ -158,6 +164,11 @@ const state = {
   modalScrollY: 0,
   modalScrollCaptured: false,
   postCloseTapGuardUntil: 0,
+  scrollSyncTimer: 0,
+  lastScrollSyncAt: 0,
+  searchAssistInFlight: false,
+  searchAssistQuery: "",
+  searchAssistAt: 0,
 };
 
 const refs = {
@@ -634,6 +645,12 @@ function bindEvents() {
         }
       }
 
+      if (token === state.searchToken && state.query.length > 1) {
+        await ensureSearchCoverage(token).catch(() => {
+          // keep partial local list if background sync fails
+        });
+      }
+
       if (token === state.searchToken) {
         renderAll();
       }
@@ -1059,6 +1076,7 @@ function bindEvents() {
     () => {
       bumpInteractionWindow(520);
       consumePendingCatalogUpdate();
+      scheduleScrollDrivenCatalogSync();
     },
     { passive: true }
   );
@@ -1067,6 +1085,7 @@ function bindEvents() {
     if (document.visibilityState === "visible") {
       bumpInteractionWindow(420);
       consumePendingCatalogUpdate();
+      scheduleScrollDrivenCatalogSync({ immediate: true });
     }
   });
 }
@@ -1120,6 +1139,33 @@ function setActiveNav(view) {
 
 function isCatalogCategoryView(view) {
   return view === "movie" || view === "tv" || view === "anime";
+}
+
+function isCatalogBrowseView(view) {
+  return view === "all" || view === "latest" || view === "popular" || isCatalogCategoryView(view);
+}
+
+function getCatalogSyncProfile(view = resolveCatalogViewForSearch()) {
+  const compact = isCompactViewport();
+  const defaults = compact
+    ? { initialPages: 4, activeBatch: 5, manualBatch: 8, scrollBatch: 6 }
+    : { initialPages: 3, activeBatch: 4, manualBatch: 7, scrollBatch: 5 };
+
+  if (view === "movie" || view === "tv" || view === "anime") {
+    return compact
+      ? { initialPages: 6, activeBatch: 7, manualBatch: 10, scrollBatch: 9 }
+      : { initialPages: 5, activeBatch: 6, manualBatch: 9, scrollBatch: 8 };
+  }
+  if (view === "latest" || view === "popular") {
+    return compact
+      ? { initialPages: 5, activeBatch: 6, manualBatch: 9, scrollBatch: 8 }
+      : { initialPages: 4, activeBatch: 5, manualBatch: 8, scrollBatch: 7 };
+  }
+  return defaults;
+}
+
+function getLoadedCatalogPage() {
+  return Math.max(0, Number(state.page || 0), Number(state.catalogSyncPage || 0));
 }
 
 function resolveCatalogViewForSearch() {
@@ -1203,6 +1249,164 @@ function consumePendingCatalogUpdate() {
   }
   state.pendingCatalogUpdate = false;
   renderAll();
+}
+
+function isNearCatalogBottom(thresholdPx = SCROLL_SYNC_THRESHOLD_PX) {
+  const viewport = Number(window.innerHeight || 0);
+  const scrollY = Number(window.scrollY || window.pageYOffset || 0);
+  const doc = document.documentElement;
+  const body = document.body;
+  const scrollHeight = Math.max(
+    Number(doc?.scrollHeight || 0),
+    Number(body?.scrollHeight || 0),
+    Number(doc?.offsetHeight || 0)
+  );
+  if (scrollHeight <= 0 || viewport <= 0) {
+    return false;
+  }
+  return scrollHeight - (scrollY + viewport) <= Math.max(260, Number(thresholdPx || SCROLL_SYNC_THRESHOLD_PX));
+}
+
+async function syncCatalogBatch(reason = "active", options = {}) {
+  const activeView = resolveCatalogViewForSearch();
+  if (!isCatalogBrowseView(activeView)) {
+    return false;
+  }
+  if (state.loadingCatalog || state.backgroundSyncRunning || !state.hasMore) {
+    return false;
+  }
+  const loadedPage = getLoadedCatalogPage();
+  const totalPages = Math.max(loadedPage, Number(state.totalPages || 0));
+  if (totalPages <= loadedPage) {
+    return false;
+  }
+
+  const profile = getCatalogSyncProfile(activeView);
+  const preferredBatch = Number(options.batchPages || 0);
+  let batchPages = preferredBatch > 0 ? preferredBatch : Number(profile.activeBatch || 4);
+  if (reason === "manual") {
+    batchPages = Math.max(batchPages, Number(profile.manualBatch || batchPages));
+  } else if (reason === "scroll") {
+    batchPages = Math.max(batchPages, Number(profile.scrollBatch || batchPages));
+  } else if (reason === "search-assist") {
+    batchPages = Math.max(batchPages, SEARCH_ASSIST_STEP_PAGES);
+  }
+  batchPages = Math.max(1, Math.round(batchPages));
+
+  const startPage = loadedPage + 1;
+  const endPage = Math.min(totalPages, startPage + batchPages - 1);
+  if (startPage > endPage) {
+    return false;
+  }
+  await startBackgroundCatalogSync(startPage, endPage);
+  return true;
+}
+
+function scheduleScrollDrivenCatalogSync(options = {}) {
+  const immediate = options.immediate === true;
+  const force = options.force === true;
+  const run = () => {
+    state.scrollSyncTimer = 0;
+    syncCatalogForScroll({ force })
+      .catch(() => {
+        // best effort only
+      });
+  };
+
+  if (state.scrollSyncTimer) {
+    if (immediate) {
+      clearTimeout(state.scrollSyncTimer);
+      state.scrollSyncTimer = 0;
+      run();
+    }
+    return;
+  }
+
+  if (immediate) {
+    run();
+    return;
+  }
+
+  state.scrollSyncTimer = window.setTimeout(run, SCROLL_SYNC_DEBOUNCE_MS);
+}
+
+async function syncCatalogForScroll(options = {}) {
+  if (!refs.playerOverlay.hidden || !refs.detailModal.hidden) {
+    return;
+  }
+  if (state.view === "calendar" || state.view === "top" || state.view === "list" || state.view === "info") {
+    return;
+  }
+  if (!isCatalogBrowseView(resolveCatalogViewForSearch())) {
+    return;
+  }
+  if (!isNearCatalogBottom()) {
+    return;
+  }
+  const now = Date.now();
+  if (!options.force && now - Number(state.lastScrollSyncAt || 0) < SCROLL_SYNC_MIN_INTERVAL_MS) {
+    return;
+  }
+  state.lastScrollSyncAt = now;
+
+  if (state.query.trim().length > 1) {
+    await ensureSearchCoverage(state.searchToken, { force: true });
+    if (refs.playerOverlay.hidden && refs.detailModal.hidden) {
+      renderAll();
+    }
+    return;
+  }
+  const didSync = await syncCatalogBatch("scroll");
+  if (didSync && refs.playerOverlay.hidden && refs.detailModal.hidden) {
+    renderAll();
+  }
+}
+
+async function ensureSearchCoverage(token, options = {}) {
+  const query = String(state.query || "").trim();
+  if (query.length < 2 || token !== state.searchToken) {
+    return;
+  }
+  if (state.searchAssistInFlight || state.loadingCatalog) {
+    return;
+  }
+  const now = Date.now();
+  if (
+    !options.force &&
+    state.searchAssistQuery === query &&
+    now - Number(state.searchAssistAt || 0) < SEARCH_ASSIST_COOLDOWN_MS
+  ) {
+    return;
+  }
+
+  state.searchAssistInFlight = true;
+  state.searchAssistQuery = query;
+  state.searchAssistAt = now;
+
+  try {
+    let step = 0;
+    while (
+      step < SEARCH_ASSIST_MAX_STEPS &&
+      token === state.searchToken &&
+      query === String(state.query || "").trim() &&
+      state.hasMore
+    ) {
+      const localCount = getVisibleCatalog().length;
+      if (localCount > 0 && !options.force) {
+        break;
+      }
+      const didSync = await syncCatalogBatch("search-assist", { batchPages: SEARCH_ASSIST_STEP_PAGES });
+      if (!didSync) {
+        break;
+      }
+      step += 1;
+      if (getVisibleCatalog().length > 0 && !options.force) {
+        break;
+      }
+    }
+  } finally {
+    state.searchAssistInFlight = false;
+  }
 }
 
 function activatePostCloseTapGuard(ms = 420) {
@@ -1908,18 +2112,22 @@ async function syncCurrentViewData(reason = "interval") {
     });
   }
 
-  if (state.query.trim().length > 1) {
+  const hasQuery = state.query.trim().length > 1;
+  if (hasQuery) {
     await handleRemoteSearch(state.searchToken).catch(() => {
       // keep local filtering only
     });
+    await ensureSearchCoverage(state.searchToken).catch(() => {
+      // best effort
+    });
   }
 
-  if (!state.backgroundSyncRunning && state.page > 0 && state.page < state.totalPages) {
-    const maxBatch =
-      state.view === "all" || isCatalogCategoryView(state.view) || reason === "manual" ? 6 : 2;
-    const endPage = Math.min(state.totalPages, state.page + maxBatch);
-    if (state.page + 1 <= endPage) {
-      startBackgroundCatalogSync(state.page + 1, endPage);
+  if (!hasQuery && !state.backgroundSyncRunning && state.page > 0 && state.page < state.totalPages) {
+    const activeView = resolveCatalogViewForSearch();
+    if (isCatalogBrowseView(activeView)) {
+      await syncCatalogBatch(reason === "manual" ? "manual" : "active").catch(() => {
+        // retry next cycle
+      });
     }
   }
 
@@ -2043,7 +2251,9 @@ async function loadInitialCatalog() {
     state.catalogSyncPage = firstResult.currentPage;
     state.hasMore = firstResult.currentPage < firstResult.lastPage;
 
-    const warmupLastPage = Math.min(firstResult.lastPage, INITIAL_CATALOG_WARMUP_PAGES);
+    const initialProfile = getCatalogSyncProfile(resolveCatalogViewForSearch());
+    const warmupTargetPages = Math.max(INITIAL_CATALOG_WARMUP_PAGES, Number(initialProfile.initialPages || 1));
+    const warmupLastPage = Math.min(firstResult.lastPage, warmupTargetPages);
     for (let page = 2; page <= warmupLastPage; page += 1) {
       const result = await fetchCatalogPage(page);
       upsertCatalogItems(result.items, { prepend: false });
@@ -2055,7 +2265,11 @@ async function loadInitialCatalog() {
     state.lastSyncAt = new Date();
 
     if (state.page < state.totalPages) {
-      startBackgroundCatalogSync(state.page + 1, state.totalPages);
+      const batchPages = Math.max(1, Number(initialProfile.activeBatch || 4));
+      const endPage = Math.min(state.totalPages, state.page + batchPages);
+      if (state.page + 1 <= endPage) {
+        startBackgroundCatalogSync(state.page + 1, endPage);
+      }
     }
     saveCatalogSnapshot();
   } catch {
@@ -2151,6 +2365,9 @@ async function startBackgroundCatalogSync(startPage, lastPage) {
     updateLoadMoreButton();
     updateSyncText();
     consumePendingCatalogUpdate();
+    if (state.hasMore) {
+      scheduleScrollDrivenCatalogSync();
+    }
   }
 }
 
@@ -2419,6 +2636,9 @@ function renderAll() {
   syncBrowseRoute();
   updateLoadMoreButton();
   updateSyncText();
+  if (showBrowseView && state.hasMore) {
+    scheduleScrollDrivenCatalogSync();
+  }
 }
 
 function getVisibleCatalog() {
