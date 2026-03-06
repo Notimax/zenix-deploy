@@ -25,6 +25,8 @@ const FORWARD_CLIENT_IP_TO_UPSTREAM =
 const ANALYTICS_RETENTION_MS = 24 * 60 * 60 * 1000;
 const ANALYTICS_ACTIVE_WINDOW_MS = 2 * 60 * 1000;
 const ANALYTICS_MIN_EVENT_MS = 10 * 1000;
+const HLS_PROXY_USER_AGENT =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36";
 const DISCORD_STATS_STATE_FILE = path.join(ROOT, ".discord-stats-state.json");
 const proxyCache = new Map();
 const calendarCache = new Map();
@@ -1014,6 +1016,77 @@ function buildHlsProxyPath(targetUrl) {
   return `/api/hls-proxy?url=${encodeURIComponent(String(targetUrl || "").trim())}`;
 }
 
+function decodeCompactNumericPlaylistBody(rawBody) {
+  const digits = String(rawBody || "").replace(/\s+/g, "");
+  if (!digits || !/^\d+$/.test(digits) || digits.length < 12 || digits.length > 250000) {
+    return "";
+  }
+
+  const size = digits.length;
+  const best = new Array(size + 1).fill(null);
+  best[size] = { score: 0, next: -1, value: -1 };
+
+  for (let cursor = size - 1; cursor >= 0; cursor -= 1) {
+    let bestNode = null;
+    for (const chunkLength of [2, 3]) {
+      const next = cursor + chunkLength;
+      if (next > size || !best[next]) {
+        continue;
+      }
+      if (digits[cursor] === "0") {
+        continue;
+      }
+
+      const value = Number(digits.slice(cursor, next));
+      if (!Number.isInteger(value) || value < 0 || value > 255) {
+        continue;
+      }
+
+      let score = best[next].score;
+      if (value === 10 || value === 13 || value === 9) {
+        score += 0.5;
+      } else if (value >= 32 && value <= 126) {
+        score += 6;
+      } else {
+        score -= 40;
+      }
+      if (value === 35 || value === 69 || value === 88 || value === 77 || value === 51 || value === 85) {
+        score += 0.8;
+      }
+
+      if (!bestNode || score > bestNode.score) {
+        bestNode = { score, next, value };
+      }
+    }
+    best[cursor] = bestNode;
+  }
+
+  if (!best[0]) {
+    return "";
+  }
+
+  const bytes = [];
+  let pointer = 0;
+  while (pointer < size) {
+    const node = best[pointer];
+    if (!node) {
+      return "";
+    }
+    bytes.push(node.value);
+    pointer = node.next;
+  }
+
+  if (bytes.length < 6) {
+    return "";
+  }
+
+  try {
+    return Buffer.from(bytes).toString("utf8").trim();
+  } catch {
+    return "";
+  }
+}
+
 function decodeNumericPlaylistBody(rawBody) {
   const text = String(rawBody || "").trim();
   if (!text) {
@@ -1027,24 +1100,26 @@ function decodeNumericPlaylistBody(rawBody) {
     .split(/\r?\n/)
     .map((line) => String(line || "").trim())
     .filter(Boolean);
-  if (lines.length < 6 || lines.length > 60000) {
-    return text;
-  }
-  if (!lines.every((line) => /^\d{1,3}$/.test(line))) {
-    return text;
+  if (lines.length >= 6 && lines.length <= 60000 && lines.every((line) => /^\d{1,3}$/.test(line))) {
+    const bytes = lines.map((line) => Number(line));
+    if (!bytes.some((value) => !Number.isInteger(value) || value < 0 || value > 255)) {
+      try {
+        const decoded = Buffer.from(bytes).toString("utf8").trim();
+        if (decoded.includes("#EXTM3U")) {
+          return decoded;
+        }
+      } catch {
+        // fallback below
+      }
+    }
   }
 
-  const bytes = lines.map((line) => Number(line));
-  if (bytes.some((value) => !Number.isInteger(value) || value < 0 || value > 255)) {
-    return text;
+  const compactDecoded = decodeCompactNumericPlaylistBody(text);
+  if (compactDecoded.includes("#EXTM3U")) {
+    return compactDecoded;
   }
 
-  try {
-    const decoded = Buffer.from(bytes).toString("utf8").trim();
-    return decoded.includes("#EXTM3U") ? decoded : text;
-  } catch {
-    return text;
-  }
+  return text;
 }
 
 function rewriteHlsPlaylistUri(rawUri, baseUrl) {
@@ -1112,7 +1187,7 @@ async function handleHlsProxy(req, res, requestUrl) {
     const range = String(req.headers.range || "").trim();
     const upstreamHeaders = {
       Accept: "*/*",
-      "User-Agent": "Mozilla/5.0 (ZenixStream/HlsProxy)",
+      "User-Agent": HLS_PROXY_USER_AGENT,
       Referer: `${target.origin}/`,
       Origin: target.origin,
     };

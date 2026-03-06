@@ -128,6 +128,8 @@ const state = {
   nowPlaying: null,
   sourcePool: [],
   sourceIndex: -1,
+  sourceLoading: false,
+  sourceLoadTicket: 0,
   allEpisodeSources: [],
   availableLanguages: [],
   languagePreferences: loadLanguagePrefs(),
@@ -5080,6 +5082,9 @@ function clearManualSourceLock() {
 }
 
 function shouldIgnoreVideoErrorFallback() {
+  if (state.sourceLoading) {
+    return true;
+  }
   if (Date.now() < Number(state.ignoreVideoErrorUntil || 0)) {
     return true;
   }
@@ -5375,39 +5380,49 @@ function normalizeSourceLanguage(entry) {
   return raw;
 }
 
-function buildPlayableSourceUrl(source) {
+function buildPlayableSourceCandidates(source) {
   const raw = String(source?.url || "").trim();
   if (!raw) {
-    return "";
-  }
-  if (/\/api\/hls-proxy\?url=/i.test(raw)) {
-    return raw;
-  }
-  const looksLikeHls = source?.format === "hls" || /m3u8/i.test(raw);
-  if (!looksLikeHls) {
-    return raw;
+    return [];
   }
 
+  let absolute = raw;
   try {
-    const absolute = new URL(raw, window.location.href).href;
-    if (!/^https?:\/\//i.test(absolute)) {
-      return raw;
-    }
-    return `${API_BASE}/hls-proxy?url=${encodeURIComponent(absolute)}`;
+    absolute = new URL(raw, window.location.href).href;
   } catch {
-    return raw;
+    absolute = raw;
   }
+
+  const candidates = [];
+  const isProxied = /\/api\/hls-proxy\?url=/i.test(absolute);
+  const isRemoteHttp = /^https?:\/\//i.test(absolute);
+  const looksLikeHls = source?.format === "hls" || /m3u8/i.test(absolute);
+  const proxyUrl = !isProxied && isRemoteHttp ? `${API_BASE}/hls-proxy?url=${encodeURIComponent(absolute)}` : "";
+
+  if (looksLikeHls) {
+    if (proxyUrl) {
+      candidates.push(proxyUrl);
+    }
+    candidates.push(absolute);
+  } else {
+    candidates.push(absolute);
+    if (proxyUrl) {
+      candidates.push(proxyUrl);
+    }
+  }
+
+  return Array.from(new Set(candidates.filter(Boolean)));
 }
 
 async function startPlayerSource(source, resumeTime, token) {
-  const streamUrl = buildPlayableSourceUrl(source);
-  if (!streamUrl) {
+  const streamCandidates = buildPlayableSourceCandidates(source);
+  if (streamCandidates.length === 0) {
     throw new Error("Missing source URL");
   }
 
   const video = refs.playerVideo;
-  video.preload = "auto";
-  teardownPlayerEngine(video);
+  const loadTicket = ++state.sourceLoadTicket;
+  state.sourceLoading = true;
   if (refs.playerSourceMeta) {
     refs.playerSourceMeta.textContent = formatSourceLabel(
       source,
@@ -5423,31 +5438,50 @@ async function startPlayerSource(source, resumeTime, token) {
     setPlayerPill(refs.playerLanguagePill, source.language);
   }
 
-  if (source?.format === "hls") {
-    await startHlsPlayback(video, streamUrl, token);
-  } else {
-    if (source?.format === "dash" && !video.canPlayType(DASH_MIME)) {
-      throw new Error("DASH not supported");
-    }
-    video.src = streamUrl;
-    video.load();
-    await waitVideoReady(video, VIDEO_READY_TIMEOUT_MS);
-  }
-
-  if (token !== state.playToken) {
-    return;
-  }
-
-  if (resumeTime > 5 && Number.isFinite(video.duration) && resumeTime < video.duration - 8) {
-    video.currentTime = resumeTime;
-  }
-
+  let lastError = null;
   try {
-    await video.play();
-    setPlayerStatus("Lecture en cours.");
-  } catch {
-    setPlayerStatus("Clique sur Play dans le lecteur pour demarrer.");
+    for (const streamUrl of streamCandidates) {
+      const useHls = source?.format === "hls" || /m3u8/i.test(streamUrl);
+      try {
+        video.preload = "auto";
+        teardownPlayerEngine(video);
+        if (useHls) {
+          await startHlsPlayback(video, streamUrl, token);
+        } else {
+          if (source?.format === "dash" && !video.canPlayType(DASH_MIME)) {
+            throw new Error("DASH not supported");
+          }
+          video.src = streamUrl;
+          video.load();
+          await waitVideoReady(video, VIDEO_READY_TIMEOUT_MS);
+        }
+
+        if (token !== state.playToken) {
+          return;
+        }
+
+        if (resumeTime > 5 && Number.isFinite(video.duration) && resumeTime < video.duration - 8) {
+          video.currentTime = resumeTime;
+        }
+
+        try {
+          await video.play();
+          setPlayerStatus("Lecture en cours.");
+        } catch {
+          setPlayerStatus("Clique sur Play dans le lecteur pour demarrer.");
+        }
+        return;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+  } finally {
+    if (loadTicket === state.sourceLoadTicket) {
+      state.sourceLoading = false;
+    }
   }
+
+  throw lastError || new Error("No playable stream candidate");
 }
 
 async function startHlsPlayback(video, streamUrl, token) {
@@ -5655,6 +5689,7 @@ function closePlayer(options = {}) {
   setPlayerPill(refs.playerQualityPill, "Qualite auto");
   state.sourcePool = [];
   state.sourceIndex = -1;
+  state.sourceLoading = false;
   clearManualSourceLock();
   state.allEpisodeSources = [];
   state.availableLanguages = [];
