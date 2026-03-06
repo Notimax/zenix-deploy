@@ -12,7 +12,7 @@ const PROXY_TIMEOUT_MS = 16000;
 const CALENDAR_CACHE_MS = 6 * 60 * 1000;
 const WEBHOOK_TIMEOUT_MS = 10000;
 const DISCORD_WEBHOOK_URL = String(process.env.DISCORD_WEBHOOK_URL || "").trim();
-const DISCORD_PUSH_INTERVAL_MS = 60 * 1000;
+const DISCORD_PUSH_INTERVAL_MS = Math.max(15000, Number(process.env.DISCORD_PUSH_INTERVAL_MS || 60 * 1000));
 const ANALYTICS_RETENTION_MS = 24 * 60 * 60 * 1000;
 const ANALYTICS_ACTIVE_WINDOW_MS = 2 * 60 * 1000;
 const ANALYTICS_MIN_EVENT_MS = 10 * 1000;
@@ -396,6 +396,16 @@ function stripTags(value) {
   return decodeHtmlEntities(String(value || "").replace(/<[^>]*>/g, " ")).replace(/\s+/g, " ").trim();
 }
 
+function normalizeTitleKey(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
 function normalizeTypeFromPurstream(movie) {
   if (!movie || movie.type !== "tv") {
     return "film";
@@ -410,6 +420,7 @@ function normalizeTypeFromPurstream(movie) {
 function parsePurstreamCalendar(payload, month, year) {
   const days = Array.isArray(payload?.data?.items?.days) ? payload.data.items.days : [];
   const dedupe = new Set();
+  const semanticDedupe = new Set();
   const items = [];
 
   for (const entry of days) {
@@ -434,6 +445,11 @@ function parsePurstreamCalendar(payload, month, year) {
     if (type === "anime") {
       continue;
     }
+    const semanticKey = `${normalizeTitleKey(movie.title || "")}::${type}::${dayNumber}::${Number(movie.season || 0)}::${Number(movie.episode || 0)}`;
+    if (semanticDedupe.has(semanticKey)) {
+      continue;
+    }
+    semanticDedupe.add(semanticKey);
     items.push({
       source: "purstream",
       key,
@@ -581,19 +597,48 @@ function parseAnimePlanning(html, fallbackYear) {
 }
 
 function buildMergedCalendar(purstreamItems, animeItems) {
-  const merged = [];
+  const dedupe = new Map();
+  const pushMerged = (entry) => {
+    const normalizedTitle = normalizeTitleKey(entry?.title || "");
+    const normalizedType = normalizeTitleKey(entry?.type || entry?.kind || "");
+    const dateIso = String(entry?.dateIso || "").trim();
+    const season = Number(entry?.season || 0);
+    const episode = Number(entry?.episode || 0);
+    const key = `${normalizedTitle}::${normalizedType}::${dateIso}::${season}::${episode}`;
+    const current = dedupe.get(key);
+    if (!current) {
+      dedupe.set(key, entry);
+      return;
+    }
+
+    const currentPoster = String(current?.poster || "").trim();
+    const nextPoster = String(entry?.poster || "").trim();
+    if (!currentPoster && nextPoster) {
+      dedupe.set(key, entry);
+      return;
+    }
+
+    const currentHasId = Number(current?.mediaId || 0) > 0;
+    const nextHasId = Number(entry?.mediaId || 0) > 0;
+    if (!currentHasId && nextHasId) {
+      dedupe.set(key, entry);
+    }
+  };
+
   purstreamItems.forEach((entry) => {
-    merged.push({
+    pushMerged({
       ...entry,
       kind: entry.type,
     });
   });
   animeItems.forEach((entry) => {
-    merged.push({
+    pushMerged({
       ...entry,
       kind: entry.type,
     });
   });
+
+  const merged = Array.from(dedupe.values());
 
   merged.sort((left, right) => {
     const leftDate = Date.parse(left.dateIso || "");
@@ -716,6 +761,9 @@ async function handleAnalyticsHeartbeat(req, res, requestUrl) {
   try {
     const payload = await readJsonBody(req);
     markAnalyticsHeartbeat(req, payload || {});
+    pushDiscordStats("heartbeat").catch(() => {
+      // best effort only
+    });
     sendJson(res, 200, { type: "success" });
     return true;
   } catch {
@@ -1064,7 +1112,7 @@ if (DISCORD_WEBHOOK_URL.startsWith("https://discord.com/api/webhooks/")) {
     pushDiscordStats("startup").catch(() => {
       // best effort only
     });
-  }, 12000);
+  }, 2000);
   if (typeof startupTimer.unref === "function") {
     startupTimer.unref();
   }

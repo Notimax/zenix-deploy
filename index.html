@@ -20,8 +20,8 @@
   <link rel="dns-prefetch" href="//www.themoviedb.org" />
   <link rel="dns-prefetch" href="//cdn.jsdelivr.net" />
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Instrument+Serif:ital@0;1&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/zenix.css?v=20260306-c26" />
-  <script defer src="/zenix.js?v=20260306-c26"></script>
+  <link rel="stylesheet" href="/zenix.css?v=20260306-c27" />
+  <script defer src="/zenix.js?v=20260306-c27"></script>
 </head>
 <body>
   <div class="app-canvas" aria-hidden="true"></div>
@@ -38,6 +38,8 @@
     <nav class="main-nav" aria-label="Navigation principale">
       <button class="nav-pill active" data-view="all" type="button">Accueil</button>
       <button class="nav-pill" data-view="calendar" type="button">Calendrier</button>
+      <button class="nav-pill" data-view="latest" type="button">Nouveautes</button>
+      <button class="nav-pill" data-view="popular" type="button">Populaires</button>
       <button class="nav-pill" data-view="top" type="button">Top du jour</button>
       <button class="nav-pill" data-view="movie" type="button">Films</button>
       <button class="nav-pill" data-view="tv" type="button">Series</button>
@@ -69,12 +71,6 @@
         <div class="hero-meta" id="heroMeta"></div>
       </div>
       <img class="hero-art" id="heroArt" alt="Affiche hero" loading="eager" />
-    </section>
-
-    <section class="feature-rail" id="featureRailSection" hidden>
-      <div class="feature-window">
-        <div class="feature-track" id="featureRailTrack" aria-label="Titres en continu"></div>
-      </div>
     </section>
 
     <section class="status-strip" id="statusStrip">
@@ -112,22 +108,6 @@
         <button class="btn btn-soft" id="clearContinueBtn" type="button">Vider Continuer</button>
         <button class="btn btn-soft" id="clearListBtn" type="button">Vider Ma liste</button>
       </div>
-    </section>
-
-    <section class="spotlight" id="latestSection">
-      <div class="section-head">
-        <h2>Nouveautes</h2>
-        <p>Derniers ajouts detectes dans le catalogue.</p>
-      </div>
-      <div class="catalog-grid" id="latestGrid"></div>
-    </section>
-
-    <section class="spotlight" id="popularSection">
-      <div class="section-head">
-        <h2>Populaires</h2>
-        <p>Top du jour + tendances de lecture.</p>
-      </div>
-      <div class="catalog-grid" id="popularGrid"></div>
     </section>
 
     <section class="my-list" id="listSection" hidden>
@@ -171,6 +151,10 @@
         <label class="field-inline" for="calendarYearSelect">
           Annee
           <select id="calendarYearSelect"></select>
+        </label>
+        <label class="field-inline" for="calendarSearchInput">
+          Recherche
+          <input id="calendarSearchInput" class="calendar-search-input" type="search" placeholder="Nom du titre..." autocomplete="off" />
         </label>
         <button class="btn btn-soft" id="calendarRefreshBtn" type="button">Actualiser le calendrier</button>
       </div>
@@ -277,6 +261,13 @@
               <span class="player-pill" id="playerTypePill">Film</span>
               <span class="player-pill" id="playerLanguagePill">Auto</span>
               <span class="player-pill" id="playerQualityPill">Qualite auto</span>
+            </div>
+            <div class="player-source-control" id="playerSourceControl">
+              <label class="field" for="playerSourceSelect">
+                Source
+                <select id="playerSourceSelect"></select>
+              </label>
+              <button class="btn btn-soft btn-compact" id="playerSourceApplyBtn" type="button">Changer la source</button>
             </div>
             <div class="series-controls" id="playerSeriesControls" hidden>
               <label class="field">

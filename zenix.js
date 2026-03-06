@@ -4,6 +4,7 @@ const STORAGE_KEY = "zenix-progress-v4";
 const FAVORITES_KEY = "zenix-favorites-v1";
 const FAVORITES_BACKUP_KEY = "zenix-favorites-backup-v1";
 const LANGUAGE_PREFS_KEY = "zenix-language-prefs-v1";
+const CATALOG_CACHE_KEY = "zenix-catalog-cache-v2";
 const CLEANUP_KEY = "zenix-sw-cleaned-v4";
 const REFRESH_FEED_MS = 10 * 60 * 1000;
 const REFRESH_TOP_MS = 60 * 60 * 1000;
@@ -21,11 +22,11 @@ const INITIAL_IMAGE_WARMUP_LIMIT = 180;
 const CALENDAR_YEAR_RANGE = 3;
 const CALENDAR_CACHE_KEY = "zenix-calendar-cache-v1";
 const CALENDAR_CACHE_MAX_ENTRIES = 8;
-const INITIAL_CATALOG_WARMUP_PAGES = 1;
-const BACKGROUND_CATALOG_DELAY_MS = 35;
+const INITIAL_CATALOG_WARMUP_PAGES = 2;
+const BACKGROUND_CATALOG_DELAY_MS = 8;
 const BACKGROUND_CATALOG_RENDER_EVERY = 8;
-const CATALOG_RENDER_CHUNK_MIN = 18;
-const CATALOG_RENDER_CHUNK_MAX = 36;
+const CATALOG_RENDER_CHUNK_MIN = 28;
+const CATALOG_RENDER_CHUNK_MAX = 68;
 const STREAM_PROXY_TIMEOUT_MS = 6500;
 const STREAM_PROXY_PREFETCH_TIMEOUT_MS = 4200;
 const STREAM_DIRECT_TIMEOUT_MS = 5200;
@@ -65,6 +66,7 @@ const state = {
   chip: "all",
   sortBy: "featured",
   query: "",
+  calendarQuery: "",
   calendarMonth: new Date().getMonth() + 1,
   calendarYear: new Date().getFullYear(),
   calendarLoading: false,
@@ -116,7 +118,6 @@ const state = {
   lastSyncAt: null,
   refreshFeedTimer: null,
   refreshTopTimer: null,
-  featureRailSignature: "",
   viewBeforeSearch: "all",
   analyticsClientId: "",
   analyticsDisabled: false,
@@ -127,8 +128,6 @@ const state = {
 
 const refs = {
   heroSection: document.getElementById("hero"),
-  featureRailSection: document.getElementById("featureRailSection"),
-  featureRailTrack: document.getElementById("featureRailTrack"),
   statusStrip: document.getElementById("statusStrip"),
   quickLinksSection: document.getElementById("quickLinksSection"),
   filtersPanel: document.getElementById("filtersPanel"),
@@ -179,6 +178,7 @@ const refs = {
   emptyState: document.getElementById("emptyState"),
   calendarMonthSelect: document.getElementById("calendarMonthSelect"),
   calendarYearSelect: document.getElementById("calendarYearSelect"),
+  calendarSearchInput: document.getElementById("calendarSearchInput"),
   calendarRefreshBtn: document.getElementById("calendarRefreshBtn"),
   calendarMergedGrid: document.getElementById("calendarMergedGrid"),
   calendarMergedMeta: document.getElementById("calendarMergedMeta"),
@@ -222,6 +222,9 @@ const refs = {
   playerTypePill: document.getElementById("playerTypePill"),
   playerLanguagePill: document.getElementById("playerLanguagePill"),
   playerQualityPill: document.getElementById("playerQualityPill"),
+  playerSourceControl: document.getElementById("playerSourceControl"),
+  playerSourceSelect: document.getElementById("playerSourceSelect"),
+  playerSourceApplyBtn: document.getElementById("playerSourceApplyBtn"),
   toast: document.getElementById("toast"),
 };
 
@@ -259,7 +262,7 @@ async function init() {
   if (state.topDaily.length === 0) {
     state.topDaily = buildTopFromCatalog();
   }
-  warmImageCacheFromPool([...state.topDaily, ...state.catalog], INITIAL_IMAGE_WARMUP_LIMIT);
+  warmImageCacheFromPool([...state.topDaily, ...state.catalog], Math.max(INITIAL_IMAGE_WARMUP_LIMIT, 320));
 
   if (!state.activeHeroId) {
     const first = state.topDaily[0] || state.catalog[0];
@@ -348,24 +351,17 @@ function bindEvents() {
 
   refs.searchInput.addEventListener("input", (event) => {
     const nextQuery = String(event.target.value || "").trim();
-    const hadQuery = state.query.length > 0;
-    state.query = nextQuery;
-
-    if (state.query.length > 0) {
-      if (state.view !== "search") {
-        state.viewBeforeSearch = state.view;
+    if (state.view === "calendar") {
+      state.calendarQuery = nextQuery;
+      if (refs.calendarSearchInput && refs.calendarSearchInput.value !== nextQuery) {
+        refs.calendarSearchInput.value = nextQuery;
       }
-      state.view = "search";
-      state.chip = "all";
-      setActiveNav(state.view);
-      renderFilterChips();
-    } else if (hadQuery && state.view === "search") {
-      state.view = state.viewBeforeSearch || "all";
-      state.viewBeforeSearch = "all";
-      state.chip = "all";
-      setActiveNav(state.view);
-      renderFilterChips();
+      renderCalendarSection();
+      syncBrowseRoute({ replace: true });
+      return;
     }
+
+    state.query = nextQuery;
 
     const token = ++state.searchToken;
     renderAll();
@@ -418,7 +414,6 @@ function bindEvents() {
         } else {
           renderTopDaily();
           renderCommunityStats();
-          renderSpotlights();
           renderCatalog(getVisibleCatalog());
           updateSyncText();
         }
@@ -560,7 +555,7 @@ function bindEvents() {
     const seasons = state.seasonsCache.get(id) || [];
     const season = Number(refs.detailSeasonSelect.value || "1");
     const episodes = getEpisodesForSeason(seasons, season);
-    const selectedEpisode = episodes[0] ? episodes[0].episode : 1;
+    const selectedEpisode = getFirstPlayableEpisode(episodes);
     populateEpisodeSelect(refs.detailEpisodeSelect, episodes, selectedEpisode);
     syncDetailLanguageOptions(id, season, selectedEpisode).catch(() => {
       // no-op
@@ -606,7 +601,7 @@ function bindEvents() {
     const season = Number(refs.playerSeasonSelect.value || "1");
     const seasons = state.seasonsCache.get(state.nowPlaying.id) || [];
     const episodes = getEpisodesForSeason(seasons, season);
-    const episode = episodes[0] ? episodes[0].episode : 1;
+    const episode = getFirstPlayableEpisode(episodes);
     populateEpisodeSelect(refs.playerEpisodeSelect, episodes, episode);
     const language = String(refs.playerLanguageSelect?.value || "").trim();
     switchPlayerEpisode(season, episode, { language }).catch(() => {
@@ -639,6 +634,26 @@ function bindEvents() {
     }
     switchPlayerEpisode(season, episode, { language }).catch(() => {
       showMessage("Impossible de charger cet episode.", true);
+    });
+  });
+
+  refs.playerSourceSelect?.addEventListener("change", () => {
+    const index = Number(refs.playerSourceSelect.value || "-1");
+    if (!Number.isInteger(index) || index < 0) {
+      return;
+    }
+    switchPlayerSource(index).catch(() => {
+      showToast("Impossible de changer de source.", true);
+    });
+  });
+
+  refs.playerSourceApplyBtn?.addEventListener("click", () => {
+    const index = Number(refs.playerSourceSelect?.value || "-1");
+    if (!Number.isInteger(index) || index < 0) {
+      return;
+    }
+    switchPlayerSource(index).catch(() => {
+      showToast("Impossible de changer de source.", true);
     });
   });
 
@@ -741,12 +756,15 @@ function bindEvents() {
 }
 
 function handleViewSelection(view) {
-  const normalizedView = view === "catalog" ? "all" : view;
+  const normalizedView = view === "catalog" || view === "search" ? "all" : view;
   state.view = normalizedView;
   if (isCatalogCategoryView(normalizedView)) {
     state.chip = normalizedView;
   } else {
     state.chip = "all";
+  }
+  if (refs.searchInput) {
+    refs.searchInput.value = normalizedView === "calendar" ? state.calendarQuery : state.query;
   }
   setActiveNav(normalizedView);
   renderFilterChips();
@@ -770,13 +788,7 @@ function handleViewSelection(view) {
 }
 
 function setActiveNav(view) {
-  const normalizedView = view === "catalog" ? "all" : view;
-  if (normalizedView === "search") {
-    refs.navPills.forEach((entry) => {
-      entry.classList.remove("active");
-    });
-    return;
-  }
+  const normalizedView = view === "catalog" || view === "search" ? "all" : view;
   const hasMatch = refs.navPills.some((entry) => (entry.dataset.view || "") === normalizedView);
   const targetView = hasMatch ? normalizedView : "all";
   refs.navPills.forEach((entry) => {
@@ -843,6 +855,18 @@ function initCalendarControls() {
       showToast("Calendrier indisponible temporairement.", true);
     });
   });
+
+  if (refs.calendarSearchInput) {
+    refs.calendarSearchInput.value = state.calendarQuery || "";
+    refs.calendarSearchInput.addEventListener("input", (event) => {
+      state.calendarQuery = String(event.target.value || "").trim();
+      if (state.view === "calendar" && refs.searchInput) {
+        refs.searchInput.value = state.calendarQuery;
+      }
+      renderCalendarSection();
+      syncBrowseRoute({ replace: true });
+    });
+  }
 }
 
 async function ensureCalendarData(force = false) {
@@ -858,13 +882,40 @@ async function ensureCalendarData(force = false) {
   let overviewError = null;
 
   try {
+    if (!state.calendarOverviewUnavailable || force) {
+      try {
+        const payload = await fetchJson(
+          `${API_BASE}/calendar/overview?month=${state.calendarMonth}&year=${state.calendarYear}`,
+          { force }
+        );
+        const data = payload?.data || null;
+        if (!data || typeof data !== "object") {
+          throw new Error("Invalid calendar payload");
+        }
+        if (Array.isArray(data.merged) && data.merged.length === 0) {
+          throw new Error("Calendar payload empty");
+        }
+        state.calendarOverviewUnavailable = false;
+        state.calendarData = data;
+        saveCalendarSnapshot(state.calendarMonth, state.calendarYear, data);
+        renderCalendarSection();
+        return true;
+      } catch (error) {
+        overviewError = error;
+        const message = String(error?.message || "").toLowerCase();
+        if (message.includes("404") || message.includes("unknown api route")) {
+          state.calendarOverviewUnavailable = true;
+        }
+      }
+    }
+
     try {
       const direct = await fetchJson(
         `${STREAM_API_BASE}/calendar/${state.calendarMonth}/${state.calendarYear}/days`,
         {
           force,
-          timeoutMs: 10000,
-          retryDelays: [450],
+          timeoutMs: 4800,
+          retryDelays: [350],
         }
       );
       const rebuilt = buildCalendarFallbackFromDirect(direct, state.calendarMonth, state.calendarYear);
@@ -879,30 +930,6 @@ async function ensureCalendarData(force = false) {
       }
     } catch (error) {
       directError = error;
-    }
-
-    if (!state.calendarOverviewUnavailable || force) {
-      try {
-        const payload = await fetchJson(
-          `${API_BASE}/calendar/overview?month=${state.calendarMonth}&year=${state.calendarYear}`,
-          { force }
-        );
-        const data = payload?.data || null;
-        if (!data || typeof data !== "object") {
-          throw new Error("Invalid calendar payload");
-        }
-        state.calendarOverviewUnavailable = false;
-        state.calendarData = data;
-        saveCalendarSnapshot(state.calendarMonth, state.calendarYear, data);
-        renderCalendarSection();
-        return true;
-      } catch (error) {
-        overviewError = error;
-        const message = String(error?.message || "").toLowerCase();
-        if (message.includes("404") || message.includes("unknown api route")) {
-          state.calendarOverviewUnavailable = true;
-        }
-      }
     }
 
     const cached = loadCalendarSnapshot(state.calendarMonth, state.calendarYear);
@@ -1097,22 +1124,39 @@ function renderCalendarSection() {
     ...(Array.isArray(state.calendarData?.animeSama?.items) ? state.calendarData.animeSama.items : []),
   ];
   const sourceRows = mergedPrimary.length > 0 ? mergedPrimary : mergedFallback;
-  const dedupe = new Set();
-  const mergedRows = sourceRows
+  const compact = new Map();
+  sourceRows.forEach((entry) => {
+    const titleKey = normalizeTitleKey(entry?.title || "");
+    const typeKey = normalizeTitleKey(entry?.type || entry?.kind || "");
+    const dateKey = String(entry?.dateIso || "").trim() || String(entry?.dayNumber || "");
+    const key = `${titleKey}::${typeKey}::${dateKey}`;
+    const current = compact.get(key);
+    if (!current) {
+      compact.set(key, entry);
+      return;
+    }
+    const currentPoster = String(current?.poster || "").trim();
+    const nextPoster = String(entry?.poster || "").trim();
+    if (!currentPoster && nextPoster) {
+      compact.set(key, entry);
+      return;
+    }
+    const currentHasId = Number(current?.mediaId || 0) > 0;
+    const nextHasId = Number(entry?.mediaId || 0) > 0;
+    if (!currentHasId && nextHasId) {
+      compact.set(key, entry);
+    }
+  });
+
+  const query = normalizeTitleKey(state.calendarQuery || "");
+  const mergedRows = Array.from(compact.values())
     .filter((entry) => {
-      const key = String(
-        entry?.key ||
-          `${String(entry?.source || "src")}::${String(entry?.mediaId || 0)}::${String(entry?.dateIso || "")}::${String(
-            entry?.title || ""
-          )}`
-      );
-      if (dedupe.has(key)) {
-        return false;
+      if (!query) {
+        return true;
       }
-      dedupe.add(key);
-      return true;
+      return normalizeTitleKey(entry?.title || "").includes(query);
     })
-    .slice(0, 160);
+    .slice(0, 180);
 
   refs.calendarMergedGrid.innerHTML = "";
   const mergedFragment = document.createDocumentFragment();
@@ -1130,7 +1174,7 @@ function renderCalendarSection() {
     card.className = "calendar-merged-card";
     const detailId = resolveCalendarDetailId(entry);
     const hasDetails = detailId > 0;
-    const linkLabel = hasDetails ? "Voir details" : "Ouvrir";
+    const linkLabel = hasDetails ? "Voir details" : "Bientot";
     const typeLabel = typeMap[String(entry.type || entry.kind || "").toLowerCase()] || "Titre";
     const dateLabel =
       entry.source === "purstream"
@@ -1155,7 +1199,7 @@ function renderCalendarSection() {
           ${
             hasDetails
               ? `<button type="button" class="btn-small btn-info" data-calendar-open="${detailId}">${linkLabel}</button>`
-              : `<a class="btn-small btn-info" href="${escapeHtml(entry.url || "#")}" target="_blank" rel="noopener noreferrer">${linkLabel}</a>`
+              : `<span class="btn-small btn-info is-disabled">${linkLabel}</span>`
           }
         </div>
       </div>
@@ -1175,15 +1219,6 @@ function renderCalendarSection() {
         openDetails(detailId).catch(() => {
           showToast("Impossible d'ouvrir ce titre.", true);
         });
-      });
-    } else if (entry.url) {
-      card.classList.add("clickable");
-      card.addEventListener("click", (event) => {
-        const target = event.target;
-        if (target instanceof HTMLElement && target.closest("button, a")) {
-          return;
-        }
-        window.open(String(entry.url), "_blank", "noopener,noreferrer");
       });
     }
     mergedFragment.appendChild(card);
@@ -1215,8 +1250,11 @@ function renderCalendarSection() {
   });
 
   if (refs.calendarMergedMeta) {
-    const total = Number(state.calendarData?.mergedCount || mergedRows.length || 0);
-    refs.calendarMergedMeta.textContent = `${total} sorties detectees.`;
+    if (query) {
+      refs.calendarMergedMeta.textContent = `${mergedRows.length} resultat(s) pour "${state.calendarQuery}".`;
+    } else {
+      refs.calendarMergedMeta.textContent = `${mergedRows.length} sorties detectees.`;
+    }
   }
 }
 
@@ -1429,12 +1467,24 @@ async function loadInitialCatalog() {
     if (state.page < state.totalPages) {
       startBackgroundCatalogSync(state.page + 1, state.totalPages);
     }
+    saveCatalogSnapshot();
   } catch {
-    state.catalog = FALLBACK_ITEMS.slice();
-    state.page = 1;
-    state.totalPages = 1;
-    state.catalogSyncPage = 1;
-    state.hasMore = false;
+    const cached = loadCatalogSnapshot();
+    if (cached && Array.isArray(cached.items) && cached.items.length > 0) {
+      state.catalog = cached.items.map(normalizeCatalogItem).filter(Boolean);
+      state.page = Number(cached.page || 1);
+      state.totalPages = Number(cached.totalPages || state.page || 1);
+      state.catalogSyncPage = Number(cached.catalogSyncPage || state.page || 1);
+      state.hasMore = Boolean(cached.hasMore);
+      state.lastSyncAt = new Date(Number(cached.savedAt || Date.now()));
+      showToast("Mode cache actif: dernier catalogue local charge.");
+    } else {
+      state.catalog = FALLBACK_ITEMS.slice();
+      state.page = 1;
+      state.totalPages = 1;
+      state.catalogSyncPage = 1;
+      state.hasMore = false;
+    }
   } finally {
     state.loadingCatalog = false;
   }
@@ -1453,7 +1503,7 @@ async function loadMoreCatalog() {
     state.view === "list" ||
     state.view === "info" ||
     state.view === "calendar" ||
-    state.view === "search"
+    state.query.trim().length > 0
   ) {
     return;
   }
@@ -1469,6 +1519,7 @@ async function loadMoreCatalog() {
     state.catalogSyncPage = result.currentPage;
     state.hasMore = state.page < state.totalPages;
     state.lastSyncAt = new Date();
+    saveCatalogSnapshot();
     renderAll();
   } finally {
     state.loadingCatalog = false;
@@ -1494,6 +1545,9 @@ async function startBackgroundCatalogSync(startPage, lastPage) {
       state.catalogSyncPage = result.currentPage;
       state.hasMore = state.page < state.totalPages;
       state.lastSyncAt = new Date();
+      if (page % 3 === 0 || page === lastPage) {
+        saveCatalogSnapshot();
+      }
 
       if (page === lastPage || page % BACKGROUND_CATALOG_RENDER_EVERY === 0) {
         renderAll();
@@ -1519,16 +1573,21 @@ async function refreshCatalogHead() {
   try {
     const result = await fetchCatalogPage(1);
     const beforeCount = state.catalog.length;
-    upsertCatalogItems(result.items, { prepend: true });
+    const preferPrepend =
+      Number(window.scrollY || 0) < 120 &&
+      state.view !== "calendar" &&
+      state.view !== "list" &&
+      state.view !== "top";
+    upsertCatalogItems(result.items, { prepend: preferPrepend });
     state.totalPages = Math.max(state.totalPages, result.lastPage);
     state.catalogSyncPage = Math.max(state.catalogSyncPage, result.currentPage);
     state.lastSyncAt = new Date();
+    saveCatalogSnapshot();
     if (state.catalog.length !== beforeCount) {
       if (refs.playerOverlay.hidden) {
         renderAll();
       } else {
         renderCommunityStats();
-        renderSpotlights();
         renderCatalog(getVisibleCatalog());
         updateLoadMoreButton();
         updateSyncText();
@@ -1581,6 +1640,7 @@ async function handleRemoteSearch(token, signal) {
 
   const mapped = rows.map(normalizeCatalogItem);
   upsertCatalogItems(mapped, { prepend: true });
+  saveCatalogSnapshot();
 }
 
 function upsertCatalogItems(items, { prepend }) {
@@ -1659,48 +1719,27 @@ function buildTopFromCatalog() {
 }
 
 function renderAll() {
-  if (state.view === "catalog") {
+  if (state.view === "catalog" || state.view === "search") {
     state.view = "all";
   }
 
   const visible = getVisibleCatalog();
   const heroItem = getHeroItem(visible);
+  const hasQuery = state.query.trim().length > 0;
   const isInfoView = state.view === "info";
   const isCalendarView = state.view === "calendar";
   const isListView = state.view === "list";
   const isTopView = state.view === "top";
-  const isSearchView = state.view === "search";
-  const isMovieView = state.view === "movie";
-  const isTvView = state.view === "tv";
-  const isAnimeView = state.view === "anime";
-  const isHomeView = state.view === "all";
-  const isCategoryView = isMovieView || isTvView || isAnimeView;
-  const showBrowseView = !isInfoView && !isCalendarView && !isTopView && !isListView && !isSearchView;
-  const showSpotlights = showBrowseView && isHomeView;
-  const showTopOnly = isTopView && state.topDaily.length > 0;
-  const showTopInHome = showBrowseView && isHomeView && !isCategoryView && state.topDaily.length > 0;
-  const shouldRenderTop = showTopOnly || showTopInHome;
-  const railPool =
-    showBrowseView && isHomeView
-      ? (state.topDaily.length > 0 ? state.topDaily : visible).slice(0, 14)
-      : [];
-  const showFeatureRail = showBrowseView && isHomeView && railPool.length > 0;
+  const showBrowseView = !isInfoView && !isCalendarView && !isTopView && !isListView;
 
   if (showBrowseView) {
     renderHero(heroItem);
-    renderFeatureRail(railPool);
     renderCommunityStats();
-    renderSpotlights();
-    renderContinue();
-    renderCatalog(visible);
-    warmImageCacheFromPool(visible, 260);
-  }
-  if (isSearchView) {
     renderCatalog(visible);
     warmImageCacheFromPool(visible, 260);
   }
 
-  if (shouldRenderTop) {
+  if (isTopView) {
     renderTopDaily();
   }
   if (isListView) {
@@ -1711,31 +1750,31 @@ function renderAll() {
     renderCalendarSection();
   }
 
-  updateCatalogHeading(isSearchView, visible.length);
+  updateCatalogHeading(hasQuery, visible.length);
 
   setHidden(refs.heroSection, !showBrowseView);
-  setHidden(refs.statusStrip, isInfoView || isSearchView);
-  setHidden(refs.quickLinksSection, isInfoView || isSearchView);
-  setHidden(refs.filtersPanel, isInfoView || isCalendarView || isTopView || isSearchView);
-  setHidden(refs.communityPanel, isInfoView || isCalendarView || isTopView || isSearchView);
+  setHidden(refs.statusStrip, isInfoView || isCalendarView);
+  setHidden(refs.quickLinksSection, true);
+  setHidden(refs.filtersPanel, isInfoView || isCalendarView || isTopView || isListView);
+  setHidden(refs.communityPanel, isInfoView || isCalendarView || isTopView || isListView);
   setHidden(refs.infoSection, !isInfoView);
   setHidden(refs.calendarSection, !isCalendarView);
 
-  setHidden(refs.topSection, !(showTopOnly || showTopInHome));
-  setHidden(refs.featureRailSection, !showFeatureRail);
+  setHidden(refs.topSection, !isTopView);
+  setHidden(refs.featureRailSection, true);
 
-  const showCatalog = showBrowseView || isSearchView;
+  const showCatalog = showBrowseView;
   setHidden(refs.catalogSection, !showCatalog);
   setHidden(refs.emptyState, !showCatalog || visible.length > 0);
   refs.emptyState.textContent =
-    isSearchView && state.query.length > 0
+    hasQuery && state.query.length > 0
       ? `Aucun resultat pour "${state.query}".`
       : "Aucun resultat.";
 
   setHidden(refs.listSection, !(isListView && refs.listGrid.children.length > 0));
-  setHidden(refs.latestSection, !showSpotlights || refs.latestGrid.children.length === 0);
-  setHidden(refs.popularSection, !showSpotlights || refs.popularGrid.children.length === 0);
-  setHidden(refs.continueSection, !(showBrowseView && isHomeView && refs.continueGrid.children.length > 0));
+  setHidden(refs.latestSection, true);
+  setHidden(refs.popularSection, true);
+  setHidden(refs.continueSection, true);
 
   syncBrowseRoute();
   updateLoadMoreButton();
@@ -1748,6 +1787,10 @@ function getVisibleCatalog() {
     list = state.topDaily.slice();
   } else if (state.view === "list") {
     list = getFavoriteCatalog();
+  } else if (state.view === "latest") {
+    list.sort((a, b) => parseReleaseDate(b.releaseDate) - parseReleaseDate(a.releaseDate));
+  } else if (state.view === "popular") {
+    list = getPopularCatalog();
   }
 
   if (state.view === "movie") {
@@ -1771,7 +1814,7 @@ function getVisibleCatalog() {
   }
 
   const query = state.query.trim().toLowerCase();
-  if (state.view === "search" && query.length > 0) {
+  if (query.length > 0) {
     const queryKey = normalizeTitleKey(query);
     list = list.filter((item) => {
       const title = item.titleLower || item.title.toLowerCase();
@@ -1796,22 +1839,60 @@ function getVisibleCatalog() {
   return list;
 }
 
-function updateCatalogHeading(isSearchView, resultCount) {
+function getPopularCatalog() {
+  const map = new Map();
+  const push = (entry) => {
+    if (!entry || Number(entry.id || 0) <= 0 || map.has(entry.id)) {
+      return;
+    }
+    map.set(entry.id, entry);
+  };
+
+  state.topDaily.forEach(push);
+
+  Object.values(state.progress)
+    .sort((a, b) => Number(b?.lastPlayed || 0) - Number(a?.lastPlayed || 0))
+    .forEach((row) => {
+      const item = findItemById(Number(row?.id || 0));
+      if (item) {
+        push(item);
+      }
+    });
+
+  state.catalog.forEach(push);
+  return Array.from(map.values());
+}
+
+function updateCatalogHeading(hasQuery, resultCount) {
   if (!refs.catalogTitle || !refs.catalogSubtitle) {
     return;
   }
-  refs.catalogSection?.classList.toggle("search-mode", Boolean(isSearchView));
-  if (isSearchView) {
-    refs.catalogTitle.textContent = "Resultats recherche";
-    if (state.query.length > 0) {
-      refs.catalogSubtitle.textContent = `${resultCount} titre(s) trouve(s) pour "${state.query}".`;
-    } else {
-      refs.catalogSubtitle.textContent = "Recherche en cours...";
-    }
+  refs.catalogSection?.classList.toggle("search-mode", Boolean(hasQuery));
+
+  const titleByView = {
+    all: "Streaming",
+    movie: "Films",
+    tv: "Series",
+    anime: "Anime",
+    latest: "Nouveautes",
+    popular: "Populaires",
+  };
+  refs.catalogTitle.textContent = titleByView[state.view] || "Streaming";
+
+  if (hasQuery) {
+    refs.catalogSubtitle.textContent = `${resultCount} titre(s) trouve(s) pour "${state.query}".`;
     return;
   }
-  refs.catalogTitle.textContent = "Streaming";
-  refs.catalogSubtitle.textContent = "Nouveaux titres detectes automatiquement.";
+
+  if (state.view === "latest") {
+    refs.catalogSubtitle.textContent = "Derniers ajouts detectes automatiquement.";
+    return;
+  }
+  if (state.view === "popular") {
+    refs.catalogSubtitle.textContent = "Titres les plus regardes par la communaute.";
+    return;
+  }
+  refs.catalogSubtitle.textContent = "Catalogue fusionne films, series et anime.";
 }
 
 function renderFeatureRail(items) {
@@ -2386,7 +2467,7 @@ function updateLoadMoreButton() {
     state.view === "list" ||
     state.view === "info" ||
     state.view === "calendar" ||
-    state.view === "search" ||
+    state.query.trim().length > 0 ||
     !state.hasMore
   ) {
     refs.loadMoreBtn.hidden = true;
@@ -2406,20 +2487,14 @@ function updateSyncText(customText = "") {
     return;
   }
 
-  const topLabel = new Date().toLocaleDateString("fr-FR", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  });
-
   if (state.backgroundSyncRunning && state.totalPages > 0) {
     const current = Math.min(state.catalogSyncPage || state.page || 0, state.totalPages);
-    refs.syncInfo.textContent = `Top du jour ${topLabel}. Synchronisation catalogue ${current}/${state.totalPages}...`;
+    refs.syncInfo.textContent = `Synchronisation catalogue ${current}/${state.totalPages}...`;
     return;
   }
 
   if (!state.lastSyncAt) {
-    refs.syncInfo.textContent = `Top du jour ${topLabel}. Synchronisation initiale en cours.`;
+    refs.syncInfo.textContent = "Synchronisation initiale en cours.";
     return;
   }
 
@@ -2427,7 +2502,7 @@ function updateSyncText(customText = "") {
     hour: "2-digit",
     minute: "2-digit",
   });
-  refs.syncInfo.textContent = `Top du jour ${topLabel}. Derniere synchro catalogue: ${timeLabel}.`;
+  refs.syncInfo.textContent = `Derniere synchro catalogue: ${timeLabel}.`;
 }
 
 async function ensureDetails(id) {
@@ -2511,6 +2586,8 @@ async function ensureSeasons(id) {
                 episode: Number(episode?.episode || 0),
                 name: String(episode?.name || `Episode ${episode?.episode || "?"}`),
                 runtime: Number(episode?.runtime?.minutes || 0),
+                airDate: String(episode?.airDate || episode?.air_date || "").trim(),
+                isSoon: isEpisodeSoon(episode),
               }))
               .filter((episode) => episode.episode > 0)
           : [],
@@ -2535,6 +2612,71 @@ function getEpisodesForSeason(seasons, seasonNumber) {
   return season ? season.episodes : [];
 }
 
+function parseEpisodeAirDate(value) {
+  const raw = String(value || "").trim().toLowerCase();
+  if (!raw) {
+    return 0;
+  }
+  const direct = Date.parse(raw);
+  if (Number.isFinite(direct)) {
+    return direct;
+  }
+
+  const normalized = raw
+    .replaceAll("fevrier", "fevrier")
+    .replaceAll("ao t", "aout")
+    .replaceAll("decembre", "decembre");
+  const match = normalized.match(/^(\d{1,2})\s+([a-z\u00e9\u00ea\u00e8\u00f4\u00fb\u00ee\u00ef]+)\s+(\d{4})$/i);
+  if (!match) {
+    return 0;
+  }
+  const monthMap = {
+    janvier: 0,
+    fevrier: 1,
+    "f\u00e9vrier": 1,
+    mars: 2,
+    avril: 3,
+    mai: 4,
+    juin: 5,
+    juillet: 6,
+    aout: 7,
+    "ao\u00fbt": 7,
+    septembre: 8,
+    octobre: 9,
+    novembre: 10,
+    decembre: 11,
+    "d\u00e9cembre": 11,
+  };
+  const day = Number(match[1]);
+  const month = monthMap[match[2]];
+  const year = Number(match[3]);
+  if (!Number.isInteger(day) || !Number.isInteger(year) || month === undefined) {
+    return 0;
+  }
+  const parsed = new Date(year, month, day).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function isEpisodeSoon(rawEpisode) {
+  const title = String(rawEpisode?.name || rawEpisode?.formattedName || "").toLowerCase();
+  if (/soon|bientot|a venir|coming/.test(title)) {
+    return true;
+  }
+  const airDateTs = parseEpisodeAirDate(rawEpisode?.airDate || rawEpisode?.air_date || "");
+  if (airDateTs > Date.now() + 2 * 60 * 60 * 1000) {
+    return true;
+  }
+  if (Number(rawEpisode?.runtime?.minutes || 0) <= 0 && airDateTs > 0) {
+    return true;
+  }
+  return false;
+}
+
+function getFirstPlayableEpisode(episodes) {
+  const row = (episodes || []).find((entry) => !entry?.isSoon);
+  return row ? Number(row.episode || 1) : Number(episodes?.[0]?.episode || 1);
+}
+
 function populateSeasonSelect(select, seasons, selectedSeason) {
   select.innerHTML = "";
   seasons.forEach((entry) => {
@@ -2551,10 +2693,17 @@ function populateEpisodeSelect(select, episodes, selectedEpisode) {
   episodes.forEach((entry) => {
     const option = document.createElement("option");
     option.value = String(entry.episode);
-    option.textContent = `E${String(entry.episode).padStart(2, "0")} - ${entry.name}`;
+    const soonSuffix = entry?.isSoon ? " | soon" : "";
+    option.textContent = `E${String(entry.episode).padStart(2, "0")} - ${entry.name}${soonSuffix}`;
     option.selected = entry.episode === selectedEpisode;
+    option.disabled = Boolean(entry?.isSoon);
     select.appendChild(option);
   });
+
+  if (select.options.length > 0 && (!select.value || select.selectedOptions[0]?.disabled)) {
+    const fallback = getFirstPlayableEpisode(episodes);
+    select.value = String(fallback);
+  }
 }
 
 function populateLanguageSelect(select, languages, selectedLanguage) {
@@ -2653,8 +2802,10 @@ async function openDetails(id, options = {}) {
     setAppRoute({ detail: id });
   }
 
-  const details = await ensureDetails(id);
-  const trailers = await ensureTrailers(id);
+  const [details, trailers] = await Promise.all([
+    ensureDetails(id).catch(() => null),
+    ensureTrailers(id).catch(() => []),
+  ]);
   const detailBackdrop =
     details?.posters?.wallpaper || details?.posters?.small || item.backdrop || details?.posters?.large || item.poster;
   if (refs.detailPanel) {
@@ -2730,7 +2881,8 @@ async function openDetails(id, options = {}) {
         const progress = state.progress[id] || null;
         const defaultSeason = Number(progress?.season || seasons[0].season);
         const episodes = getEpisodesForSeason(seasons, defaultSeason);
-        const defaultEpisode = Number(progress?.episode || (episodes[0] ? episodes[0].episode : 1));
+        const fallbackEpisode = getFirstPlayableEpisode(episodes);
+        const defaultEpisode = Number(progress?.episode || fallbackEpisode);
         populateSeasonSelect(refs.detailSeasonSelect, seasons, defaultSeason);
         populateEpisodeSelect(refs.detailEpisodeSelect, episodes, defaultEpisode);
         await syncDetailLanguageOptions(id, defaultSeason, defaultEpisode);
@@ -2819,6 +2971,7 @@ async function openPlayer(id, options = {}) {
   if (refs.playerSourceMeta) {
     refs.playerSourceMeta.textContent = "";
   }
+  renderPlayerSourceOptions();
   populateLanguageSelect(refs.playerLanguageSelect, [], "");
   refs.playerLanguageSelect.disabled = true;
   updateBodyScrollLock();
@@ -2849,9 +3002,14 @@ async function openPlayer(id, options = {}) {
         throw new Error("No episode for selected season");
       }
 
-      let episode = Number(options.episode || resume?.episode || episodes[0].episode);
+      const firstPlayable = getFirstPlayableEpisode(episodes);
+      let episode = Number(options.episode || resume?.episode || firstPlayable);
       if (!episodes.some((entry) => entry.episode === episode)) {
-        episode = episodes[0].episode;
+        episode = firstPlayable;
+      }
+      const foundEpisode = episodes.find((entry) => entry.episode === episode);
+      if (foundEpisode?.isSoon) {
+        episode = firstPlayable;
       }
 
       populateSeasonSelect(refs.playerSeasonSelect, seasons, season);
@@ -2895,6 +3053,7 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
     throw new Error("No movie source");
   }
   state.sourceIndex = -1;
+  renderPlayerSourceOptions();
   await playFromSourcePool(resumeTime, token, 0);
   state.nowPlaying = {
     id: item.id,
@@ -2941,6 +3100,7 @@ async function loadEpisodeStream(
     throw new Error("No episode source");
   }
   state.sourceIndex = -1;
+  renderPlayerSourceOptions();
   await playFromSourcePool(resumeTime, token, 0);
 
   state.nowPlaying = {
@@ -3036,6 +3196,7 @@ async function playFromSourcePool(resumeTime, token, startIndex = 0) {
   let lastError = null;
   for (let index = startIndex; index < state.sourcePool.length; index += 1) {
     state.sourceIndex = index;
+    renderPlayerSourceOptions();
     const source = state.sourcePool[index];
     setPlayerStatus(`Connexion source ${index + 1}/${state.sourcePool.length}...`);
     try {
@@ -3159,10 +3320,55 @@ function formatSourceLabel(source, index, total) {
   if (source?.format && source.format !== "unknown") {
     chunks.push(source.format.toUpperCase());
   }
-  if (source?.host) {
-    chunks.push(source.host);
-  }
   return chunks.join(" - ");
+}
+
+function renderPlayerSourceOptions() {
+  if (!refs.playerSourceSelect || !refs.playerSourceApplyBtn) {
+    return;
+  }
+
+  refs.playerSourceSelect.innerHTML = "";
+  if (!Array.isArray(state.sourcePool) || state.sourcePool.length === 0) {
+    refs.playerSourceSelect.disabled = true;
+    refs.playerSourceApplyBtn.disabled = true;
+    if (refs.playerSourceControl) {
+      refs.playerSourceControl.hidden = true;
+    }
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+  state.sourcePool.forEach((entry, index) => {
+    const option = document.createElement("option");
+    option.value = String(index);
+    option.textContent = formatSourceLabel(entry, index, state.sourcePool.length);
+    option.selected = index === state.sourceIndex;
+    fragment.appendChild(option);
+  });
+  refs.playerSourceSelect.appendChild(fragment);
+  refs.playerSourceSelect.disabled = state.sourcePool.length <= 1;
+  refs.playerSourceApplyBtn.disabled = state.sourcePool.length <= 1;
+  if (state.sourceIndex >= 0) {
+    refs.playerSourceSelect.value = String(state.sourceIndex);
+  }
+  if (refs.playerSourceControl) {
+    refs.playerSourceControl.hidden = false;
+  }
+}
+
+async function switchPlayerSource(index) {
+  const safeIndex = Number(index);
+  if (!Number.isInteger(safeIndex) || safeIndex < 0 || safeIndex >= state.sourcePool.length) {
+    return;
+  }
+  if (safeIndex === state.sourceIndex) {
+    return;
+  }
+  const token = ++state.playToken;
+  const resumeTime = Number(refs.playerVideo.currentTime || 0);
+  await playFromSourcePool(resumeTime, token, safeIndex);
+  showToast("Source changee.");
 }
 
 function formatPlayerKind(item) {
@@ -3437,6 +3643,7 @@ function closePlayer(options = {}) {
   state.allEpisodeSources = [];
   state.availableLanguages = [];
   state.nowPlaying = null;
+  renderPlayerSourceOptions();
   populateLanguageSelect(refs.playerLanguageSelect, [], "");
   refs.playerLanguageSelect.disabled = true;
   if (options.syncRoute !== false && !refs.detailModal.hidden && state.selectedDetailId) {
@@ -3516,7 +3723,12 @@ async function autoAdvanceEpisode(ended) {
     return;
   }
 
-  const nextEpisode = sortedEpisodes[currentIndex + 1].episode;
+  const nextPlayable = sortedEpisodes.slice(currentIndex + 1).find((entry) => !entry.isSoon);
+  if (!nextPlayable) {
+    showToast("Prochain episode pas encore disponible.");
+    return;
+  }
+  const nextEpisode = nextPlayable.episode;
   populateEpisodeSelect(refs.playerEpisodeSelect, sortedEpisodes, nextEpisode);
   refs.playerEpisodeSelect.value = String(nextEpisode);
 
@@ -3730,12 +3942,12 @@ function applyBrowseStateFromRoute() {
   const url = new URL(window.location.href);
 
   const view = String(url.searchParams.get("view") || "");
-  const normalizedView = view === "catalog" ? "all" : view;
+  const normalizedView = view === "catalog" || view === "search" ? "all" : view;
   const chip = String(url.searchParams.get("chip") || "");
   const sort = String(url.searchParams.get("sort") || "");
   const query = String(url.searchParams.get("q") || "").trim();
 
-  const allowedViews = new Set(["all", "search", "calendar", "top", "movie", "tv", "anime", "list", "info"]);
+  const allowedViews = new Set(["all", "calendar", "top", "movie", "tv", "anime", "latest", "popular", "list", "info"]);
   const allowedChips = new Set(["all", "recent", "movie", "tv", "anime"]);
   const allowedSort = new Set(["featured", "recent", "title-asc", "title-desc", "runtime-desc"]);
 
@@ -3748,18 +3960,24 @@ function applyBrowseStateFromRoute() {
   if (allowedSort.has(sort)) {
     state.sortBy = sort;
   }
-  if (query.length > 0 && state.view !== "search") {
-    state.viewBeforeSearch = state.view;
-    state.view = "search";
-  } else if (query.length === 0 && state.view === "search") {
-    state.view = "all";
-  }
-  if (!isCatalogCategoryView(state.view) && state.view !== "all" && state.view !== "search") {
+  if (!isCatalogCategoryView(state.view) && state.view !== "all") {
     state.chip = "all";
   }
 
-  state.query = query;
-  refs.searchInput.value = query;
+  if (state.view === "calendar") {
+    state.calendarQuery = query;
+    state.query = "";
+    if (refs.calendarSearchInput) {
+      refs.calendarSearchInput.value = query;
+    }
+    refs.searchInput.value = query;
+  } else {
+    state.query = query;
+    refs.searchInput.value = query;
+    if (refs.calendarSearchInput) {
+      refs.calendarSearchInput.value = state.calendarQuery || "";
+    }
+  }
   refs.sortSelect.value = state.sortBy;
 }
 
@@ -3790,8 +4008,9 @@ function syncBrowseRoute(options = {}) {
     url.searchParams.delete("sort");
   }
 
-  if (state.query && state.query.length > 0) {
-    url.searchParams.set("q", state.query);
+  const queryValue = state.view === "calendar" ? state.calendarQuery : state.query;
+  if (queryValue && queryValue.length > 0) {
+    url.searchParams.set("q", queryValue);
   } else {
     url.searchParams.delete("q");
   }
@@ -4061,6 +4280,45 @@ function saveProgress(value) {
   const payload = JSON.stringify(value);
   localStorage.setItem(STORAGE_KEY, payload);
   sessionStorage.setItem(STORAGE_KEY, payload);
+}
+
+function loadCatalogSnapshot() {
+  try {
+    const raw = localStorage.getItem(CATALOG_CACHE_KEY) || sessionStorage.getItem(CATALOG_CACHE_KEY);
+    if (!raw) {
+      return null;
+    }
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") {
+      return null;
+    }
+    if (!Array.isArray(parsed.items) || parsed.items.length === 0) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function saveCatalogSnapshot() {
+  try {
+    if (!Array.isArray(state.catalog) || state.catalog.length === 0) {
+      return;
+    }
+    const payload = JSON.stringify({
+      savedAt: Date.now(),
+      page: state.page,
+      totalPages: state.totalPages,
+      catalogSyncPage: state.catalogSyncPage,
+      hasMore: state.hasMore,
+      items: state.catalog.slice(0, 900),
+    });
+    localStorage.setItem(CATALOG_CACHE_KEY, payload);
+    sessionStorage.setItem(CATALOG_CACHE_KEY, payload);
+  } catch {
+    // ignore quota/private mode issues
+  }
 }
 
 function getCalendarCacheEntryKey(month, year) {

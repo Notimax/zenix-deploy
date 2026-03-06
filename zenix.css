@@ -27,6 +27,7 @@ html,
 body {
   margin: 0;
   min-height: 100%;
+  overscroll-behavior-y: none;
 }
 
 html {
@@ -150,6 +151,11 @@ body {
   justify-content: center;
   gap: 8px;
   overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.main-nav::-webkit-scrollbar {
+  display: none;
 }
 
 .nav-pill {
@@ -185,6 +191,21 @@ body {
   color: #fff;
   font: inherit;
   padding: 10px 14px;
+}
+
+.calendar-search-input {
+  min-width: 160px;
+  width: min(260px, 42vw);
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+  font: inherit;
+  padding: 8px 10px;
+}
+
+.calendar-search-input::placeholder {
+  color: #9aa2b0;
 }
 
 .search-input::placeholder {
@@ -683,6 +704,22 @@ body {
   background-repeat: no-repeat;
 }
 
+.field select,
+.player-source-control select {
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background-color: #151a27;
+  color: #fff;
+  font: inherit;
+}
+
+.field-inline select option,
+.field select option,
+.player-source-control select option {
+  background: #121722;
+  color: #f4f6fb;
+}
+
 .spotlight {
   display: grid;
   gap: 8px;
@@ -881,6 +918,9 @@ body {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 12px;
+  contain: layout paint;
+  content-visibility: auto;
+  contain-intrinsic-size: 1px 900px;
 }
 
 .top-card,
@@ -891,6 +931,7 @@ body {
   overflow: hidden;
   box-shadow: var(--shadow-md);
   transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+  transform: translateZ(0);
 }
 
 .media-card {
@@ -1103,6 +1144,12 @@ body {
   filter: brightness(1.04);
 }
 
+.btn-small.is-disabled {
+  cursor: default;
+  opacity: 0.55;
+  pointer-events: none;
+}
+
 .catalog-actions {
   margin-top: 10px;
   display: flex;
@@ -1121,10 +1168,11 @@ body {
   inset: 0;
   z-index: 95;
   display: grid;
-  place-items: center;
+  place-items: start center;
   padding: 16px;
   background: rgba(0, 0, 0, 0.78);
   backdrop-filter: blur(8px);
+  overflow-y: auto;
 }
 
 .detail-panel,
@@ -1135,7 +1183,8 @@ body {
   box-shadow: var(--shadow-lg);
   padding: 16px;
   position: relative;
-  overflow: hidden;
+  overflow: auto;
+  margin: auto 0;
 }
 
 .detail-panel {
@@ -1268,6 +1317,15 @@ body {
   border: 1px solid rgba(255, 255, 255, 0.14);
   background: rgba(9, 12, 19, 0.76);
   padding: 10px;
+}
+
+.player-source-control {
+  display: grid;
+  gap: 8px;
+}
+
+.player-source-control .field {
+  gap: 6px;
 }
 
 .player-pills {
@@ -1592,6 +1650,7 @@ body {
   .topbar {
     grid-template-columns: 1fr;
     gap: 10px;
+    padding: 12px 14px;
   }
 
   .main-nav {
@@ -1612,13 +1671,18 @@ body {
 
   .hero {
     grid-template-columns: 1fr;
-    min-height: 0;
+    min-height: 380px;
   }
 
   .hero-art {
-    min-height: 280px;
+    min-height: 320px;
     border-left: 0;
     border-top: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .hero-content {
+    gap: 12px;
+    padding: 18px;
   }
 
   .detail-layout {
@@ -1627,6 +1691,7 @@ body {
 
   .player-panel {
     padding: 12px;
+    max-height: none;
   }
 
   .player-layout {
@@ -1656,6 +1721,35 @@ body {
 @media (max-width: 740px) {
   .layout {
     padding: 14px;
+  }
+
+  .hero {
+    min-height: 430px;
+  }
+
+  .hero-content {
+    position: absolute;
+    inset: auto 0 0 0;
+    z-index: 2;
+    background: linear-gradient(180deg, rgba(7, 8, 12, 0.05) 0%, rgba(7, 8, 12, 0.75) 32%, rgba(7, 8, 12, 0.96) 100%);
+  }
+
+  .hero h1 {
+    font-size: clamp(2rem, 9vw, 3.3rem);
+  }
+
+  .hero p {
+    font-size: 0.9rem;
+    max-width: none;
+  }
+
+  .hero-actions {
+    gap: 8px;
+  }
+
+  .hero-actions .btn {
+    flex: 1 1 calc(50% - 8px);
+    justify-content: center;
   }
 
   .community-stats {
@@ -1696,11 +1790,14 @@ body {
 
   .player-panel {
     padding: 10px;
+    border-radius: 14px;
+    margin-top: 0;
   }
 
   .player-head {
     flex-direction: column;
     align-items: flex-start;
+    gap: 8px;
   }
 
   .player-head .modal-close {
@@ -1735,6 +1832,16 @@ body {
 
   .feature-card {
     width: 176px;
+  }
+
+  .player-overlay,
+  .detail-modal {
+    padding: 6px;
+  }
+
+  .player-panel,
+  .detail-panel {
+    max-height: none;
   }
 
 }
