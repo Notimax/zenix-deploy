@@ -124,6 +124,9 @@ const state = {
   detailLangCache: new Map(),
   detailToken: 0,
   playToken: 0,
+  ignoreVideoErrorUntil: 0,
+  manualSourceLock: false,
+  manualSourceLockedIndex: -1,
   lastSyncAt: null,
   refreshFeedTimer: null,
   refreshTopTimer: null,
@@ -716,6 +719,9 @@ function bindEvents() {
   });
   refs.playerVideo.addEventListener("ended", onPlayerEnded);
   refs.playerVideo.addEventListener("error", () => {
+    if (shouldIgnoreVideoErrorFallback()) {
+      return;
+    }
     trySwitchToNextSource().catch(() => {
       setPlayerStatus("Erreur video detectee. Choisis un autre titre.", true);
     });
@@ -3421,6 +3427,7 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
     return;
   }
 
+  clearManualSourceLock();
   state.sourcePool = extractSources(payload);
   if (state.sourcePool.length === 0) {
     throw new Error("No movie source");
@@ -3458,6 +3465,7 @@ async function loadEpisodeStream(
     return;
   }
 
+  clearManualSourceLock();
   state.allEpisodeSources = extractSources(payload);
   state.availableLanguages = getAvailableLanguages(state.allEpisodeSources);
   const language = resolvePreferredLanguage(item.id, preferredLanguage, state.availableLanguages);
@@ -3541,7 +3549,27 @@ function extractSources(payload) {
   });
 }
 
+function clearManualSourceLock() {
+  state.manualSourceLock = false;
+  state.manualSourceLockedIndex = -1;
+}
+
+function shouldIgnoreVideoErrorFallback() {
+  if (Date.now() < Number(state.ignoreVideoErrorUntil || 0)) {
+    return true;
+  }
+  const videoErrorCode = Number(refs.playerVideo?.error?.code || 0);
+  if (videoErrorCode === 1) {
+    return true;
+  }
+  return false;
+}
+
 async function trySwitchToNextSource() {
+  if (state.manualSourceLock && state.manualSourceLockedIndex === state.sourceIndex) {
+    setPlayerStatus("Source selectionnee indisponible. Choisis une autre source.", true);
+    return;
+  }
   if (!state.sourcePool.length || state.sourceIndex < 0) {
     setPlayerStatus("Erreur video detectee. Choisis un autre titre.", true);
     return;
@@ -3565,7 +3593,8 @@ async function trySwitchToNextSource() {
   showToast("Source alternative active.");
 }
 
-async function playFromSourcePool(resumeTime, token, startIndex = 0) {
+async function playFromSourcePool(resumeTime, token, startIndex = 0, options = {}) {
+  const strictIndex = Boolean(options?.strictIndex);
   let lastError = null;
   for (let index = startIndex; index < state.sourcePool.length; index += 1) {
     state.sourceIndex = index;
@@ -3577,6 +3606,9 @@ async function playFromSourcePool(resumeTime, token, startIndex = 0) {
       return;
     } catch (error) {
       lastError = error;
+      if (strictIndex) {
+        break;
+      }
     }
   }
 
@@ -3738,9 +3770,11 @@ async function switchPlayerSource(index) {
   if (safeIndex === state.sourceIndex) {
     return;
   }
+  state.manualSourceLock = true;
+  state.manualSourceLockedIndex = safeIndex;
   const token = ++state.playToken;
   const resumeTime = Number(refs.playerVideo.currentTime || 0);
-  await playFromSourcePool(resumeTime, token, safeIndex);
+  await playFromSourcePool(resumeTime, token, safeIndex, { strictIndex: true });
   showToast("Source changee.");
 }
 
@@ -3909,6 +3943,7 @@ async function startHlsPlayback(video, streamUrl, token) {
 }
 
 function teardownPlayerEngine(video) {
+  state.ignoreVideoErrorUntil = Date.now() + 1400;
   destroyHlsInstance();
   video.pause();
   video.removeAttribute("src");
@@ -4013,6 +4048,7 @@ function closePlayer(options = {}) {
   setPlayerPill(refs.playerQualityPill, "Qualite auto");
   state.sourcePool = [];
   state.sourceIndex = -1;
+  clearManualSourceLock();
   state.allEpisodeSources = [];
   state.availableLanguages = [];
   state.nowPlaying = null;
