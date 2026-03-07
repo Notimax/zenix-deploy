@@ -27,8 +27,8 @@
   <link rel="dns-prefetch" href="//image.tmdb.org" />
   <link rel="dns-prefetch" href="//cdn.jsdelivr.net" />
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Instrument+Serif:ital@0;1&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/zenix.css?v=20260307-c95" />
-    <script defer src="/zenix.js?v=20260307-c95"></script>
+    <link rel="stylesheet" href="/zenix.css?v=20260307-c96" />
+    <script defer src="/zenix.js?v=20260307-c96"></script>
 </head>
 <body>
   <div class="startup-splash" id="startupSplash" aria-hidden="true">
@@ -249,6 +249,49 @@
           de fichiers. Zenix n'est pas responsable des fichiers multimedias diffuses par ces
           fournisseurs de videos.
         </p>
+        <div class="info-divider" aria-hidden="true"></div>
+        <h4>Suggestion</h4>
+        <p>Tu peux proposer une amelioration ou demander l'ajout d'un film, d'une serie ou d'un anime.</p>
+        <form class="suggestion-form" id="suggestionForm">
+          <div class="suggestion-grid">
+            <label class="field" for="suggestionType">
+              Type
+              <select id="suggestionType" required>
+                <option value="improve">Amelioration du site</option>
+                <option value="content">Ajout film/serie/anime</option>
+              </select>
+            </label>
+            <label class="field" for="suggestionTitle">
+              Titre (optionnel)
+              <input id="suggestionTitle" type="text" maxlength="120" placeholder="Ex: Arcane, Dune 2..." />
+            </label>
+          </div>
+          <label class="field" for="suggestionMessage">
+            Message
+            <textarea
+              id="suggestionMessage"
+              rows="4"
+              minlength="12"
+              maxlength="1600"
+              required
+              placeholder="Explique ta suggestion..."
+            ></textarea>
+          </label>
+          <div class="suggestion-grid">
+            <label class="field" for="suggestionContact">
+              Email (optionnel)
+              <input id="suggestionContact" type="email" maxlength="180" placeholder="ton@email.com" autocomplete="email" />
+            </label>
+            <label class="field" for="suggestionName">
+              Pseudo (optionnel)
+              <input id="suggestionName" type="text" maxlength="80" placeholder="Ton pseudo" autocomplete="nickname" />
+            </label>
+          </div>
+          <div class="suggestion-actions">
+            <button class="btn btn-primary" id="suggestionSubmitBtn" type="submit">Envoyer la suggestion</button>
+            <p class="suggestion-status" id="suggestionStatus" aria-live="polite"></p>
+          </div>
+        </form>
       </article>
     </section>
   </main>

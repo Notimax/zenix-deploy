@@ -49,6 +49,20 @@ Notes:
 - Pour eviter toute coupure, `CANONICAL_HOST` est laisse non renseigne par defaut dans `render.yaml`.
   Active-le dans Render seulement apres validation DNS/certificat.
 
+## Suggestions utilisateurs (Info)
+
+Un formulaire est disponible dans la section `Info` du front.
+
+- Endpoint: `POST /api/suggestions`
+- Destination email par defaut: `seekosint@gmail.com`
+- Transport par defaut: relay HTTP FormSubmit (`https://formsubmit.co/ajax`)
+
+Variables d'environnement optionnelles:
+
+- `SUGGESTIONS_EMAIL_TO` (defaut: `seekosint@gmail.com`)
+- `SUGGESTIONS_RELAY_BASE` (defaut: `https://formsubmit.co/ajax`)
+- `SUGGESTIONS_RATE_LIMIT_MS` (defaut: `45000`)
+
 ## Source Zenix (legale)
 
 Tu peux forcer des sources que tu controles via le fichier:

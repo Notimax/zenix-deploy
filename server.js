@@ -33,6 +33,14 @@ const FORWARD_CLIENT_IP_TO_UPSTREAM =
 const ANALYTICS_RETENTION_MS = 24 * 60 * 60 * 1000;
 const ANALYTICS_ACTIVE_WINDOW_MS = 2 * 60 * 1000;
 const ANALYTICS_MIN_EVENT_MS = 10 * 1000;
+const SUGGESTIONS_EMAIL_TO =
+  normalizeSuggestionEmail(process.env.SUGGESTIONS_EMAIL_TO || "seekosint@gmail.com") || "seekosint@gmail.com";
+const SUGGESTIONS_RELAY_BASE = String(process.env.SUGGESTIONS_RELAY_BASE || "https://formsubmit.co/ajax")
+  .trim()
+  .replace(/\/+$/, "");
+const SUGGESTIONS_RATE_LIMIT_MS = Math.max(5000, Number(process.env.SUGGESTIONS_RATE_LIMIT_MS || 45 * 1000));
+const SUGGESTIONS_MAX_MESSAGE_CHARS = Math.max(300, Number(process.env.SUGGESTIONS_MAX_MESSAGE_CHARS || 1600));
+const SUGGESTIONS_MIN_MESSAGE_CHARS = Math.max(8, Number(process.env.SUGGESTIONS_MIN_MESSAGE_CHARS || 12));
 const HLS_PROXY_USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36";
 const DISCORD_STATS_STATE_FILE = path.join(ROOT, ".discord-stats-state.json");
@@ -56,6 +64,7 @@ const zenixOwnedSourcesCache = {
 };
 const analyticsClients = new Map();
 const analyticsEvents = [];
+const suggestionRateLimitMap = new Map();
 let analyticsTotalSeen = 0;
 let analyticsLastPushAt = 0;
 let discordStatsMessageId = "";
@@ -175,6 +184,64 @@ function sanitizeToken(value, maxLength = 80) {
     .trim()
     .replace(/[^\w\-./:@ ]+/g, "")
     .slice(0, maxLength);
+}
+
+function normalizeSuggestionEmail(value) {
+  const raw = String(value || "").trim().toLowerCase();
+  if (!raw) {
+    return "";
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(raw)) {
+    return "";
+  }
+  return raw.slice(0, 180);
+}
+
+function sanitizeSuggestionText(value, maxLength = 1600) {
+  return String(value || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .replace(/[^\x09\x0A\x20-\x7E]/g, " ")
+    .trim()
+    .slice(0, Math.max(0, Number(maxLength) || 0));
+}
+
+function normalizeSuggestionType(value) {
+  const raw = String(value || "").trim().toLowerCase();
+  if (raw === "content" || raw === "add" || raw === "ajout") {
+    return "content";
+  }
+  return "improve";
+}
+
+function suggestionTypeLabel(value) {
+  return normalizeSuggestionType(value) === "content" ? "Ajout film/serie/anime" : "Amelioration du site";
+}
+
+function buildSuggestionsRelayUrl() {
+  if (!SUGGESTIONS_RELAY_BASE || !SUGGESTIONS_EMAIL_TO) {
+    return "";
+  }
+  return `${SUGGESTIONS_RELAY_BASE}/${encodeURIComponent(SUGGESTIONS_EMAIL_TO)}`;
+}
+
+function checkSuggestionRateLimit(ip, now = Date.now()) {
+  const key = sanitizeToken(ip, 80) || "unknown";
+  const last = Number(suggestionRateLimitMap.get(key) || 0);
+  if (now - last < SUGGESTIONS_RATE_LIMIT_MS) {
+    return {
+      limited: true,
+      retryAfterMs: Math.max(0, SUGGESTIONS_RATE_LIMIT_MS - (now - last)),
+    };
+  }
+  suggestionRateLimitMap.set(key, now);
+  const staleBefore = now - SUGGESTIONS_RATE_LIMIT_MS * 12;
+  for (const [entryKey, entryValue] of suggestionRateLimitMap.entries()) {
+    if (Number(entryValue || 0) < staleBefore) {
+      suggestionRateLimitMap.delete(entryKey);
+    }
+  }
+  return { limited: false, retryAfterMs: 0 };
 }
 
 function decodeBase64Utf8(value) {
@@ -2022,6 +2089,116 @@ async function handleAnalyticsWebhookStatus(req, res, requestUrl) {
   return true;
 }
 
+async function handleSuggestionSubmit(req, res, requestUrl) {
+  if (requestUrl.pathname !== "/api/suggestions") {
+    return false;
+  }
+
+  if (req.method === "OPTIONS") {
+    res.writeHead(204, {
+      Allow: "POST, OPTIONS",
+      "Cache-Control": "no-cache",
+    });
+    res.end();
+    return true;
+  }
+
+  if (req.method !== "POST") {
+    sendJson(res, 405, { error: "Method Not Allowed" });
+    return true;
+  }
+
+  const relayUrl = buildSuggestionsRelayUrl();
+  if (!relayUrl) {
+    sendJson(res, 503, { error: "Suggestions relay unavailable" });
+    return true;
+  }
+
+  const remoteIp = getRemoteAddress(req);
+  const rateLimit = checkSuggestionRateLimit(remoteIp);
+  if (rateLimit.limited) {
+    sendJson(res, 429, {
+      error: "Too many requests, please try again in a moment.",
+      retryAfterMs: rateLimit.retryAfterMs,
+    });
+    return true;
+  }
+
+  let payload;
+  try {
+    payload = await readJsonBody(req, 24 * 1024);
+  } catch {
+    sendJson(res, 400, { error: "Invalid request body" });
+    return true;
+  }
+
+  const type = normalizeSuggestionType(payload?.type);
+  const title = sanitizeSuggestionText(payload?.title, 120);
+  const message = sanitizeSuggestionText(payload?.message, SUGGESTIONS_MAX_MESSAGE_CHARS);
+  const contactEmailRaw = String(payload?.email || "").trim();
+  const contactEmail = normalizeSuggestionEmail(contactEmailRaw);
+  const contactName = sanitizeSuggestionText(payload?.name, 80);
+  const sourcePage = sanitizeToken(payload?.page, 180);
+
+  if (message.length < SUGGESTIONS_MIN_MESSAGE_CHARS) {
+    sendJson(res, 400, { error: `Message too short (minimum ${SUGGESTIONS_MIN_MESSAGE_CHARS} chars)` });
+    return true;
+  }
+  if (contactEmailRaw && !contactEmail) {
+    sendJson(res, 400, { error: "Invalid email" });
+    return true;
+  }
+
+  const now = new Date();
+  const submittedAt = now.toISOString();
+  const subjectParts = ["Zenix suggestion", suggestionTypeLabel(type)];
+  if (title) {
+    subjectParts.push(title);
+  }
+  const subject = subjectParts.join(" | ").slice(0, 220);
+
+  const detailsLines = [
+    `Type: ${suggestionTypeLabel(type)}`,
+    title ? `Titre: ${title}` : "",
+    contactName ? `Pseudo: ${contactName}` : "",
+    contactEmail ? `Email: ${contactEmail}` : "",
+    sourcePage ? `Page: ${sourcePage}` : "",
+    `IP: ${sanitizeToken(remoteIp, 80)}`,
+    `Date: ${submittedAt}`,
+    "",
+    "Message:",
+    message,
+  ].filter(Boolean);
+
+  try {
+    const relayResponse = await fetchRemoteForm(
+      relayUrl,
+      {
+        _subject: subject,
+        _captcha: "false",
+        _template: "table",
+        name: contactName || "Visiteur Zenix",
+        email: contactEmail || "noreply@zenix.best",
+        message: detailsLines.join("\n"),
+      },
+      "application/json, text/plain, */*"
+    );
+
+    if (relayResponse.status < 200 || relayResponse.status >= 300) {
+      console.warn(`[suggestions] Relay failed with status ${relayResponse.status}.`);
+      sendJson(res, 502, { error: "Suggestions relay failed" });
+      return true;
+    }
+
+    sendJson(res, 200, { type: "success" });
+    return true;
+  } catch (error) {
+    console.warn(`[suggestions] Relay error: ${String(error?.message || error || "unknown")}`);
+    sendJson(res, 502, { error: "Suggestions relay unavailable" });
+    return true;
+  }
+}
+
 async function fetchAnimePlanningPage() {
   const upstream = await fetchRemoteText(ANIME_PLANNING_URL, "text/html");
   if (upstream.status < 200 || upstream.status >= 300) {
@@ -2382,6 +2559,12 @@ const server = http.createServer((req, res) => {
       if (handledWebhookStatus) {
         return true;
       }
+      return handleSuggestionSubmit(req, res, requestUrl);
+    })
+    .then((handledSuggestions) => {
+      if (handledSuggestions) {
+        return true;
+      }
       return handleCalendarOverview(req, res, requestUrl);
     })
     .then((handledCalendar) => {
@@ -2468,6 +2651,12 @@ if (isDiscordWebhookConfigured()) {
   }
 } else {
   console.warn("[discord] Webhook disabled: define DISCORD_WEBHOOK_URL (or DISCORD_WEBHOOK / WEBHOOK_DISCORD_URL).");
+}
+
+if (buildSuggestionsRelayUrl()) {
+  console.log(`[suggestions] Relay enabled for ${SUGGESTIONS_EMAIL_TO}.`);
+} else {
+  console.warn("[suggestions] Relay disabled: define SUGGESTIONS_RELAY_BASE and SUGGESTIONS_EMAIL_TO.");
 }
 
 server.listen(PORT, () => {

@@ -217,6 +217,7 @@ const state = {
   pendingScrollRestoreView: "",
   networkOnline: navigator.onLine !== false,
   cardViewportObserver: null,
+  suggestionSubmitting: false,
 };
 
 const refs = {
@@ -228,6 +229,14 @@ const refs = {
   communityPanel: document.getElementById("communityPanel"),
   calendarSection: document.getElementById("calendarSection"),
   infoSection: document.getElementById("infoSection"),
+  suggestionForm: document.getElementById("suggestionForm"),
+  suggestionType: document.getElementById("suggestionType"),
+  suggestionTitle: document.getElementById("suggestionTitle"),
+  suggestionMessage: document.getElementById("suggestionMessage"),
+  suggestionContact: document.getElementById("suggestionContact"),
+  suggestionName: document.getElementById("suggestionName"),
+  suggestionSubmitBtn: document.getElementById("suggestionSubmitBtn"),
+  suggestionStatus: document.getElementById("suggestionStatus"),
 
   heroTitle: document.getElementById("heroTitle"),
   heroDescription: document.getElementById("heroDescription"),
@@ -697,6 +706,16 @@ function bindEvents() {
       document.getElementById(targetId)?.scrollIntoView({ behavior: "smooth", block: "start" });
     });
   });
+
+  if (refs.suggestionForm) {
+    refs.suggestionForm.addEventListener("submit", (event) => {
+      submitSuggestionFromInfo(event).catch(() => {
+        setSuggestionStatus("Envoi impossible pour le moment.", true);
+        showToast("Envoi impossible pour le moment.", true);
+        setSuggestionSubmitting(false);
+      });
+    });
+  }
 
   refs.searchInput.addEventListener("input", (event) => {
     const nextQuery = String(event.target.value || "").trim();
@@ -7679,6 +7698,101 @@ function restoreModalScrollPosition() {
 function updateBodyScrollLock() {
   const lock = !refs.playerOverlay.hidden || !refs.detailModal.hidden;
   document.body.style.overflow = lock ? "hidden" : "";
+}
+
+function setSuggestionStatus(message = "", isError = false) {
+  if (!refs.suggestionStatus) {
+    return;
+  }
+  refs.suggestionStatus.textContent = String(message || "").trim();
+  refs.suggestionStatus.classList.toggle("error", Boolean(isError));
+}
+
+function setSuggestionSubmitting(isSubmitting) {
+  state.suggestionSubmitting = Boolean(isSubmitting);
+  if (refs.suggestionSubmitBtn) {
+    refs.suggestionSubmitBtn.disabled = state.suggestionSubmitting;
+    refs.suggestionSubmitBtn.textContent = state.suggestionSubmitting
+      ? "Envoi en cours..."
+      : "Envoyer la suggestion";
+  }
+}
+
+function isValidSuggestionEmail(value) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return true;
+  }
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(raw);
+}
+
+async function submitSuggestionFromInfo(event) {
+  event.preventDefault();
+  if (state.suggestionSubmitting) {
+    return;
+  }
+
+  const type = String(refs.suggestionType?.value || "improve").trim();
+  const title = String(refs.suggestionTitle?.value || "").trim();
+  const message = String(refs.suggestionMessage?.value || "").trim();
+  const email = String(refs.suggestionContact?.value || "").trim();
+  const name = String(refs.suggestionName?.value || "").trim();
+
+  if (message.length < 12) {
+    setSuggestionStatus("Message trop court (minimum 12 caracteres).", true);
+    showToast("Message trop court.", true);
+    return;
+  }
+  if (!isValidSuggestionEmail(email)) {
+    setSuggestionStatus("Email invalide.", true);
+    showToast("Email invalide.", true);
+    return;
+  }
+
+  setSuggestionSubmitting(true);
+  setSuggestionStatus("Envoi de ta suggestion...");
+
+  try {
+    const response = await fetch(`${API_BASE}/suggestions`, {
+      method: "POST",
+      credentials: "omit",
+      headers: {
+        "Content-Type": "application/json; charset=utf-8",
+      },
+      body: JSON.stringify({
+        type,
+        title,
+        message,
+        email,
+        name,
+        page: window.location.pathname,
+      }),
+    });
+
+    let payload = null;
+    try {
+      payload = await response.json();
+    } catch {
+      payload = null;
+    }
+
+    if (!response.ok) {
+      const errorMessage =
+        String(payload?.error || "").trim() ||
+        (response.status === 429 ? "Trop de demandes. Reessaie dans un instant." : "Envoi indisponible.");
+      throw new Error(errorMessage);
+    }
+
+    refs.suggestionForm?.reset();
+    setSuggestionStatus("Suggestion envoyee a seekosint@gmail.com.");
+    showToast("Suggestion envoyee. Merci !");
+  } catch (error) {
+    const safeError = String(error?.message || "Envoi impossible pour le moment.");
+    setSuggestionStatus(safeError, true);
+    showToast(safeError, true);
+  } finally {
+    setSuggestionSubmitting(false);
+  }
 }
 
 function parseReleaseDate(value) {
