@@ -282,6 +282,7 @@ const refs = {
   continueGrid: document.getElementById("continueGrid"),
   homeInterestSection: document.getElementById("homeInterestSection"),
   homeInterestGrid: document.getElementById("homeInterestGrid"),
+  nativeAdSection: document.getElementById("nativeAdSection"),
 
   catalogSection: document.getElementById("catalogSection"),
   catalogTitle: document.getElementById("catalogTitle"),
@@ -3428,6 +3429,8 @@ function renderAll() {
   const hasHomeInterestCards = Boolean(refs.homeInterestGrid && refs.homeInterestGrid.children.length > 0);
   const showHomeInterest = showBrowseView && state.view === "all" && !hasQuery && hasHomeInterestCards;
   setHidden(refs.homeInterestSection, !showHomeInterest);
+  const showNativeAd = showBrowseView && state.view === "all" && !hasQuery;
+  setHidden(refs.nativeAdSection, !showNativeAd);
 
   state.pendingCatalogUpdate = false;
   updateSearchInputControls(refs.searchInput?.value || "");
