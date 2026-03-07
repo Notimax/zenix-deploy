@@ -1209,6 +1209,56 @@ function pipeUpstreamBodyToResponse(upstream, res) {
   });
 }
 
+async function fetchHlsUpstreamWithFallback(target, range, signal) {
+  const baseHeaders = {
+    Accept: "*/*",
+    "User-Agent": HLS_PROXY_USER_AGENT,
+  };
+  const headerVariants = [
+    {
+      Referer: `${target.origin}/`,
+      Origin: target.origin,
+    },
+    {
+      Referer: `${PURSTREAM_WEB_BASE}/`,
+      Origin: PURSTREAM_WEB_BASE,
+    },
+    {},
+  ];
+
+  let lastResponse = null;
+  for (let index = 0; index < headerVariants.length; index += 1) {
+    const headers = {
+      ...baseHeaders,
+      ...headerVariants[index],
+    };
+    if (range) {
+      headers.Range = range;
+    }
+
+    const upstream = await fetch(target.href, {
+      method: "GET",
+      headers,
+      redirect: "follow",
+      signal,
+    });
+    lastResponse = upstream;
+    const status = Number(upstream.status || 0);
+    if (status !== 403 && status !== 429) {
+      return upstream;
+    }
+    if (index < headerVariants.length - 1) {
+      try {
+        await upstream.arrayBuffer();
+      } catch {
+        // ignore body drain issues
+      }
+      await sleep(120 + index * 180);
+    }
+  }
+  return lastResponse;
+}
+
 async function handleHlsProxy(req, res, requestUrl) {
   if (requestUrl.pathname !== "/api/hls-proxy") {
     return false;
@@ -1229,22 +1279,7 @@ async function handleHlsProxy(req, res, requestUrl) {
   const timeoutId = setTimeout(() => controller.abort(), Math.max(18000, PROXY_TIMEOUT_MS));
   try {
     const range = String(req.headers.range || "").trim();
-    const upstreamHeaders = {
-      Accept: "*/*",
-      "User-Agent": HLS_PROXY_USER_AGENT,
-      Referer: `${target.origin}/`,
-      Origin: target.origin,
-    };
-    if (range) {
-      upstreamHeaders.Range = range;
-    }
-
-    const upstream = await fetch(target.href, {
-      method: "GET",
-      headers: upstreamHeaders,
-      redirect: "follow",
-      signal: controller.signal,
-    });
+    const upstream = await fetchHlsUpstreamWithFallback(target, range, controller.signal);
 
     const status = Number(upstream.status || 502);
     const contentType = String(upstream.headers.get("content-type") || "").toLowerCase();

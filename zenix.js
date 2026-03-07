@@ -62,6 +62,7 @@ const DASH_MIME = "application/dash+xml";
 const VIDEO_READY_TIMEOUT_MS = 26000;
 const HLS_READY_TIMEOUT_MS = 36000;
 const HLS_MANIFEST_TIMEOUT_MS = 38000;
+const HLS_PROXY_PROBE_TIMEOUT_MS = 5200;
 const HEARTBEAT_INTERVAL_MS = 30 * 1000;
 const HEARTBEAT_REQUEST_TIMEOUT_MS = 9000;
 const HEARTBEAT_KEY = "zenix-client-id-v1";
@@ -5471,24 +5472,52 @@ async function openPlayer(id, options = {}) {
 
 async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
   setPlayerStatus("Connexion au flux film...");
-  const payload = await fetchStreamJson(`/stream/${item.id}`);
+  const streamPath = `/stream/${item.id}`;
+  const payload = await fetchStreamJson(streamPath);
   if (token !== state.playToken) {
     return;
   }
 
   clearManualSourceLock();
   state.sourcePool = extractSources(payload);
+  state.allEpisodeSources = state.sourcePool.slice();
   state.sourceRetryAttempts.clear();
   if (state.sourcePool.length === 0) {
     throw new Error("No movie source");
   }
   state.sourceIndex = -1;
   renderPlayerSourceOptions();
-  await playFromSourcePoolWithRescue(resumeTime, token, {
-    startIndex: 0,
-    skipPremiumFallback: true,
-    allowPremiumRescue: true,
-  });
+  try {
+    await playFromSourcePoolWithRescue(resumeTime, token, {
+      startIndex: 0,
+      skipPremiumFallback: true,
+      allowPremiumRescue: true,
+    });
+  } catch (firstError) {
+    if (token !== state.playToken) {
+      throw firstError;
+    }
+    setPlayerStatus("Actualisation des sources film...");
+    const refreshedPayload = await fetchStreamJson(streamPath, { force: true });
+    if (token !== state.playToken) {
+      return;
+    }
+    clearManualSourceLock();
+    state.sourcePool = extractSources(refreshedPayload);
+    state.allEpisodeSources = state.sourcePool.slice();
+    state.sourceRetryAttempts.clear();
+    if (state.sourcePool.length === 0) {
+      throw firstError;
+    }
+    state.sourceIndex = -1;
+    renderPlayerSourceOptions();
+    await playFromSourcePoolWithRescue(resumeTime, token, {
+      startIndex: 0,
+      skipPremiumFallback: true,
+      allowPremiumRescue: true,
+    });
+    showToast("Source film actualisee automatiquement.");
+  }
   state.nowPlaying = {
     id: item.id,
     type: "movie",
@@ -5513,44 +5542,54 @@ async function loadEpisodeStream(
   preferredLanguage = "",
   syncRoute = true
 ) {
+  const streamPath = `/stream/${item.id}/episode?season=${season}&episode=${episode}`;
   setPlayerStatus(`Chargement S${season}E${episode}...`);
 
-  const payload = await fetchStreamJson(`/stream/${item.id}/episode?season=${season}&episode=${episode}`);
+  const payload = await fetchStreamJson(streamPath);
   if (token !== state.playToken) {
     return;
   }
 
-  clearManualSourceLock();
-  state.allEpisodeSources = extractSources(payload);
-  state.availableLanguages = getAvailableLanguages(state.allEpisodeSources);
-  let language = resolvePreferredLanguage(item.id, preferredLanguage, state.availableLanguages);
-  state.sourcePool = filterSourcesByLanguage(state.allEpisodeSources, language);
-  state.sourceRetryAttempts.clear();
-  state.selectedLanguageByMedia.set(item.id, language);
-  saveLanguagePrefsMap(state.selectedLanguageByMedia);
+  const applyEpisodeSourcePayload = (nextPayload, preferredLanguageInput = "") => {
+    clearManualSourceLock();
+    state.allEpisodeSources = extractSources(nextPayload);
+    state.availableLanguages = getAvailableLanguages(state.allEpisodeSources);
+    let nextLanguage = resolvePreferredLanguage(item.id, preferredLanguageInput, state.availableLanguages);
+    state.sourcePool = filterSourcesByLanguage(state.allEpisodeSources, nextLanguage);
+    if (state.sourcePool.length === 0 && state.allEpisodeSources.length > 0) {
+      nextLanguage = "";
+      state.sourcePool = state.allEpisodeSources.slice();
+    }
+    state.sourceRetryAttempts.clear();
+    state.selectedLanguageByMedia.set(item.id, nextLanguage);
+    saveLanguagePrefsMap(state.selectedLanguageByMedia);
 
-  populateLanguageSelect(refs.playerLanguageSelect, state.availableLanguages, language);
-  refs.playerLanguageSelect.disabled = state.availableLanguages.length <= 1;
-  setPlayerPill(refs.playerLanguagePill, language || "Auto");
+    populateLanguageSelect(refs.playerLanguageSelect, state.availableLanguages, nextLanguage);
+    refs.playerLanguageSelect.disabled = state.availableLanguages.length <= 1;
+    setPlayerPill(refs.playerLanguagePill, nextLanguage || "Auto");
+    if (state.sourcePool.length === 0) {
+      throw new Error("No episode source");
+    }
+    state.sourceIndex = -1;
+    renderPlayerSourceOptions();
+    return nextLanguage;
+  };
 
-  if (state.sourcePool.length === 0) {
-    throw new Error("No episode source");
-  }
-  state.sourceIndex = -1;
-  renderPlayerSourceOptions();
-  try {
-    await playFromSourcePoolWithRescue(resumeTime, token, {
-      startIndex: 0,
-      skipPremiumFallback: true,
-      allowPremiumRescue: true,
-    });
-  } catch (error) {
-    if (state.allEpisodeSources.length > state.sourcePool.length) {
+  const playEpisodeSources = async () => {
+    try {
+      await playFromSourcePoolWithRescue(resumeTime, token, {
+        startIndex: 0,
+        skipPremiumFallback: true,
+        allowPremiumRescue: true,
+      });
+    } catch (error) {
+      if (state.allEpisodeSources.length <= state.sourcePool.length) {
+        throw error;
+      }
       state.sourcePool = state.allEpisodeSources.slice();
       state.sourceRetryAttempts.clear();
       state.sourceIndex = -1;
       renderPlayerSourceOptions();
-      language = "";
       setPlayerPill(refs.playerLanguagePill, "Auto");
       await playFromSourcePoolWithRescue(resumeTime, token, {
         startIndex: 0,
@@ -5558,9 +5597,24 @@ async function loadEpisodeStream(
         allowPremiumRescue: true,
       });
       showToast("Bascule auto vers une source plus compatible.");
-    } else {
-      throw error;
     }
+  };
+
+  let language = applyEpisodeSourcePayload(payload, preferredLanguage);
+  try {
+    await playEpisodeSources();
+  } catch (firstError) {
+    if (token !== state.playToken) {
+      throw firstError;
+    }
+    setPlayerStatus(`Actualisation des sources S${season}E${episode}...`);
+    const refreshedPayload = await fetchStreamJson(streamPath, { force: true });
+    if (token !== state.playToken) {
+      return;
+    }
+    language = applyEpisodeSourcePayload(refreshedPayload, preferredLanguage || language);
+    await playEpisodeSources();
+    showToast("Sources episode actualisees automatiquement.");
   }
 
   state.nowPlaying = {
@@ -6170,15 +6224,6 @@ function normalizeSourceLanguage(entry) {
   return "";
 }
 
-function shouldPreferDirectHlsFirst() {
-  const ua = String(navigator.userAgent || "");
-  const isIOS =
-    /iP(hone|od|ad)/i.test(ua) ||
-    (navigator.platform === "MacIntel" && Number(navigator.maxTouchPoints || 0) > 1);
-  const isDesktopSafari = /Safari/i.test(ua) && !/Chrome|Chromium|Edg|OPR|Firefox/i.test(ua);
-  return isIOS || isDesktopSafari;
-}
-
 function buildPlayableSourceCandidates(source) {
   const raw = String(source?.url || "").trim();
   if (!raw) {
@@ -6198,20 +6243,45 @@ function buildPlayableSourceCandidates(source) {
   const looksLikeHls = source?.format === "hls" || /m3u8/i.test(absolute);
   const proxyUrl = !isProxied && isRemoteHttp ? `${API_BASE}/hls-proxy?url=${encodeURIComponent(absolute)}` : "";
 
-  if (looksLikeHls && shouldPreferDirectHlsFirst()) {
-    candidates.push(absolute);
-    if (proxyUrl) {
-      candidates.push(proxyUrl);
-    }
-  } else {
-    // Proxy first for Chrome/desktop compatibility, direct fallback second.
-    if (proxyUrl) {
-      candidates.push(proxyUrl);
-    }
-    candidates.push(absolute);
+  if (proxyUrl) {
+    candidates.push(proxyUrl);
+  }
+  candidates.push(absolute);
+  if (!looksLikeHls && proxyUrl) {
+    // Non-HLS URLs usually play faster direct.
+    candidates.unshift(absolute);
   }
 
   return Array.from(new Set(candidates.filter(Boolean)));
+}
+
+function isHlsProxyCandidate(url) {
+  return /\/api\/hls-proxy\?url=/i.test(String(url || ""));
+}
+
+async function probeHlsProxyCandidate(url, timeoutMs = HLS_PROXY_PROBE_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), Math.max(1800, Number(timeoutMs || 0)));
+  try {
+    const response = await fetch(url, {
+      method: "GET",
+      mode: "same-origin",
+      cache: "no-store",
+      signal: controller.signal,
+      headers: {
+        Accept: `${HLS_MIME}, application/x-mpegURL, text/plain, */*`,
+      },
+    });
+    if (!response.ok) {
+      throw new Error(`HLS proxy HTTP ${response.status}`);
+    }
+    const body = await response.text();
+    if (!/#EXTM3U/i.test(body)) {
+      throw new Error("HLS proxy invalid playlist");
+    }
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 async function startPlayerSource(source, resumeTime, token) {
@@ -6247,6 +6317,9 @@ async function startPlayerSource(source, resumeTime, token) {
         video.preload = "auto";
         teardownPlayerEngine(video);
         if (useHls) {
+          if (isHlsProxyCandidate(streamUrl)) {
+            await probeHlsProxyCandidate(streamUrl);
+          }
           await startHlsPlayback(video, streamUrl, token);
         } else {
           if (source?.format === "dash" && !video.canPlayType(DASH_MIME)) {
