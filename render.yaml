@@ -13,3 +13,7 @@ services:
         sync: false
       - key: DISCORD_PUSH_INTERVAL_MS
         value: "10000"
+      - key: CANONICAL_HOST
+        sync: false
+      - key: CANONICAL_SCHEME
+        value: "https"

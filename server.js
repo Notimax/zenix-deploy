@@ -5,6 +5,9 @@ const { Readable } = require("node:stream");
 
 const ROOT = __dirname;
 const PORT = Number(process.env.PORT || 4173);
+const CANONICAL_HOST = normalizeHostName(process.env.CANONICAL_HOST || "");
+const CANONICAL_SCHEME =
+  String(process.env.CANONICAL_SCHEME || "https").trim().toLowerCase() === "http" ? "http" : "https";
 const REMOTE_API_BASE = "https://api.purstream.co/api/v1";
 const PURSTREAM_API_BASE = "https://api.purstream.co/api/v1";
 const PURSTREAM_WEB_BASE = "https://purstream.co";
@@ -97,6 +100,60 @@ function safeLocalPath(urlPathname) {
     return null;
   }
   return fullPath;
+}
+
+function normalizeHostName(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, "")
+    .replace(/\/.*/, "")
+    .replace(/:\d+$/, "")
+    .replace(/\.$/, "");
+}
+
+function shouldBypassCanonicalRedirect(hostname) {
+  const safe = normalizeHostName(hostname);
+  if (!safe) {
+    return true;
+  }
+  return safe === "localhost" || safe === "127.0.0.1" || safe === "::1" || safe.endsWith(".localhost");
+}
+
+function maybeRedirectToCanonical(req, res, requestUrl) {
+  if (!CANONICAL_HOST) {
+    return false;
+  }
+
+  const method = String(req.method || "GET").toUpperCase();
+  if (method !== "GET" && method !== "HEAD") {
+    return false;
+  }
+
+  if (String(requestUrl.pathname || "").startsWith("/api/")) {
+    return false;
+  }
+
+  const accept = String(req.headers.accept || "").toLowerCase();
+  if (!accept.includes("text/html")) {
+    return false;
+  }
+
+  const requestHost = normalizeHostName(requestUrl.hostname || req.headers.host || "");
+  if (shouldBypassCanonicalRedirect(requestHost)) {
+    return false;
+  }
+  if (requestHost === CANONICAL_HOST) {
+    return false;
+  }
+
+  const location = `${CANONICAL_SCHEME}://${CANONICAL_HOST}${requestUrl.pathname}${requestUrl.search}`;
+  res.writeHead(308, {
+    Location: location,
+    "Cache-Control": "no-cache",
+  });
+  res.end();
+  return true;
 }
 
 function send404(res) {
@@ -2309,6 +2366,9 @@ function streamFile(req, res, filePath) {
 const server = http.createServer((req, res) => {
   const host = req.headers.host || `localhost:${PORT}`;
   const requestUrl = new URL(req.url, `http://${host}`);
+  if (maybeRedirectToCanonical(req, res, requestUrl)) {
+    return;
+  }
   let pathname = requestUrl.pathname;
 
   handleAnalyticsHeartbeat(req, res, requestUrl)

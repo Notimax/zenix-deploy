@@ -40,6 +40,15 @@ Notes:
 - Le script commit les changements suivis (`git add -u`) puis push sur `origin` et `deploypublic`.
 - Si `RENDER_DEPLOY_HOOK_URL` est defini en variable d'environnement, le script appelle aussi le hook Render.
 
+### Domaine custom (zenix.best)
+
+- Le front declare `https://zenix.best/` en canonical (`index.html`), et `robots.txt` expose `sitemap.xml`.
+- La redirection vers le domaine canonique est supportee cote serveur via:
+  - `CANONICAL_HOST` (ex: `zenix.best`)
+  - `CANONICAL_SCHEME` (defaut: `https`)
+- Pour eviter toute coupure, `CANONICAL_HOST` est laisse non renseigne par defaut dans `render.yaml`.
+  Active-le dans Render seulement apres validation DNS/certificat.
+
 ## Source Zenix (legale)
 
 Tu peux forcer des sources que tu controles via le fichier:
