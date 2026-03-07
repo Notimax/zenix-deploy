@@ -1746,7 +1746,8 @@ function pipeUpstreamBodyToResponse(upstream, res) {
   });
 }
 
-async function fetchHlsUpstreamWithFallback(target, range, signal) {
+async function fetchHlsUpstreamWithFallback(target, range, signal, method = "GET") {
+  const safeMethod = String(method || "GET").toUpperCase() === "HEAD" ? "HEAD" : "GET";
   const baseHeaders = {
     Accept: "*/*",
     "User-Agent": HLS_PROXY_USER_AGENT,
@@ -1774,7 +1775,7 @@ async function fetchHlsUpstreamWithFallback(target, range, signal) {
     }
 
     const upstream = await fetch(target.href, {
-      method: "GET",
+      method: safeMethod,
       headers,
       redirect: "follow",
       signal,
@@ -1800,7 +1801,8 @@ async function handleHlsProxy(req, res, requestUrl) {
   if (requestUrl.pathname !== "/api/hls-proxy") {
     return false;
   }
-  if (req.method !== "GET") {
+  const requestMethod = String(req.method || "GET").toUpperCase();
+  if (requestMethod !== "GET" && requestMethod !== "HEAD") {
     sendJson(res, 405, { error: "Method Not Allowed" });
     return true;
   }
@@ -1816,7 +1818,14 @@ async function handleHlsProxy(req, res, requestUrl) {
   const timeoutId = setTimeout(() => controller.abort(), Math.max(18000, PROXY_TIMEOUT_MS));
   try {
     const range = String(req.headers.range || "").trim();
-    const upstream = await fetchHlsUpstreamWithFallback(target, range, controller.signal);
+    let upstream = await fetchHlsUpstreamWithFallback(target, range, controller.signal, requestMethod);
+    if (
+      requestMethod === "HEAD" &&
+      [400, 401, 403, 404, 405, 429, 500, 501].includes(Number(upstream.status || 0))
+    ) {
+      // Some hosts don't support HEAD reliably; fall back to GET headers for player probes.
+      upstream = await fetchHlsUpstreamWithFallback(target, range, controller.signal, "GET");
+    }
 
     const status = Number(upstream.status || 502);
     const contentType = String(upstream.headers.get("content-type") || "").toLowerCase();
@@ -1826,6 +1835,19 @@ async function handleHlsProxy(req, res, requestUrl) {
       contentType.includes("vnd.apple.mpegurl");
 
     if (isPlaylist) {
+      if (requestMethod === "HEAD") {
+        const headers = {
+          "Content-Type": "application/vnd.apple.mpegurl; charset=utf-8",
+          "Cache-Control": "no-cache",
+        };
+        const contentLength = upstream.headers.get("content-length");
+        if (contentLength) {
+          headers["Content-Length"] = String(contentLength);
+        }
+        res.writeHead(status, headers);
+        res.end();
+        return true;
+      }
       const buffer = Buffer.from(await upstream.arrayBuffer());
       const bodyText = decodeNumericPlaylistBody(buffer.toString("utf8"));
       const rewritten = rewriteHlsPlaylistBody(bodyText, target.href);
@@ -1855,6 +1877,10 @@ async function handleHlsProxy(req, res, requestUrl) {
       headers["Content-Length"] = String(contentLength);
     }
     res.writeHead(status, headers);
+    if (requestMethod === "HEAD") {
+      res.end();
+      return true;
+    }
     await pipeUpstreamBodyToResponse(upstream, res);
     return true;
   } catch (error) {
