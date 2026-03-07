@@ -5399,13 +5399,12 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
   if (state.sourcePool.length === 0) {
     throw new Error("No movie source");
   }
-  const hasFreeSource = state.sourcePool.some((entry) => !entry?.premiumHint);
   state.sourceIndex = -1;
   renderPlayerSourceOptions();
   await playFromSourcePoolWithRescue(resumeTime, token, {
     startIndex: 0,
     skipPremiumFallback: true,
-    allowPremiumRescue: !hasFreeSource,
+    allowPremiumRescue: true,
   });
   state.nowPlaying = {
     id: item.id,
@@ -5455,12 +5454,11 @@ async function loadEpisodeStream(
   }
   state.sourceIndex = -1;
   renderPlayerSourceOptions();
-  const hasFreeSource = state.sourcePool.some((entry) => !entry?.premiumHint);
   try {
     await playFromSourcePoolWithRescue(resumeTime, token, {
       startIndex: 0,
       skipPremiumFallback: true,
-      allowPremiumRescue: !hasFreeSource,
+      allowPremiumRescue: true,
     });
   } catch (error) {
     if (state.allEpisodeSources.length > state.sourcePool.length) {
@@ -5473,7 +5471,7 @@ async function loadEpisodeStream(
       await playFromSourcePoolWithRescue(resumeTime, token, {
         startIndex: 0,
         skipPremiumFallback: true,
-        allowPremiumRescue: false,
+        allowPremiumRescue: true,
       });
       showToast("Bascule auto vers une source plus compatible.");
     } else {
@@ -5628,6 +5626,14 @@ function getNextAutomaticSourceIndex(startIndex, avoidPremium = true) {
   return -1;
 }
 
+function getFallbackSourceIndex(startIndex) {
+  let index = getNextAutomaticSourceIndex(startIndex, true);
+  if (index >= 0) {
+    return index;
+  }
+  return getNextAutomaticSourceIndex(startIndex, false);
+}
+
 async function trySwitchToNextSource() {
   if (state.manualSourceLock) {
     setPlayerStatus("Source selectionnee indisponible. Choisis une autre source.", true);
@@ -5641,12 +5647,18 @@ async function trySwitchToNextSource() {
   const currentSource = state.sourcePool[state.sourceIndex] || null;
   const avoidPremiumAuto = !currentSource?.premiumHint;
   let nextIndex = getNextAutomaticSourceIndex(state.sourceIndex, avoidPremiumAuto);
+  if (nextIndex < 0) {
+    nextIndex = getFallbackSourceIndex(state.sourceIndex);
+  }
   if (nextIndex < 0 || nextIndex >= state.sourcePool.length) {
     if (state.allEpisodeSources.length > state.sourcePool.length) {
       state.sourcePool = state.allEpisodeSources.slice();
       state.sourceRetryAttempts.clear();
       state.sourceIndex = -1;
       nextIndex = getNextAutomaticSourceIndex(-1, avoidPremiumAuto);
+      if (nextIndex < 0) {
+        nextIndex = getFallbackSourceIndex(-1);
+      }
       showToast("Bascule automatique vers une autre langue/source.");
     } else {
       setPlayerStatus("Source indisponible. Aucun secours disponible.", true);
@@ -6066,6 +6078,15 @@ function normalizeSourceLanguage(entry) {
   return "";
 }
 
+function shouldPreferDirectHlsFirst() {
+  const ua = String(navigator.userAgent || "");
+  const isIOS =
+    /iP(hone|od|ad)/i.test(ua) ||
+    (navigator.platform === "MacIntel" && Number(navigator.maxTouchPoints || 0) > 1);
+  const isDesktopSafari = /Safari/i.test(ua) && !/Chrome|Chromium|Edg|OPR|Firefox/i.test(ua);
+  return isIOS || isDesktopSafari;
+}
+
 function buildPlayableSourceCandidates(source) {
   const raw = String(source?.url || "").trim();
   if (!raw) {
@@ -6082,13 +6103,21 @@ function buildPlayableSourceCandidates(source) {
   const candidates = [];
   const isProxied = /\/api\/hls-proxy\?url=/i.test(absolute);
   const isRemoteHttp = /^https?:\/\//i.test(absolute);
+  const looksLikeHls = source?.format === "hls" || /m3u8/i.test(absolute);
   const proxyUrl = !isProxied && isRemoteHttp ? `${API_BASE}/hls-proxy?url=${encodeURIComponent(absolute)}` : "";
 
-  // Proxy first for consistent compatibility between PC and mobile.
-  if (proxyUrl) {
-    candidates.push(proxyUrl);
+  if (looksLikeHls && shouldPreferDirectHlsFirst()) {
+    candidates.push(absolute);
+    if (proxyUrl) {
+      candidates.push(proxyUrl);
+    }
+  } else {
+    // Proxy first for Chrome/desktop compatibility, direct fallback second.
+    if (proxyUrl) {
+      candidates.push(proxyUrl);
+    }
+    candidates.push(absolute);
   }
-  candidates.push(absolute);
 
   return Array.from(new Set(candidates.filter(Boolean)));
 }
