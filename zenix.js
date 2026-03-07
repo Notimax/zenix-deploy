@@ -5511,7 +5511,7 @@ async function openPlayer(id, options = {}) {
 async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
   setPlayerStatus("Connexion au flux film...");
   const streamPath = `/stream/${item.id}`;
-  const payload = await fetchStreamJson(streamPath);
+  const payload = await fetchStreamJson(streamPath, { force: true });
   if (token !== state.playToken) {
     return;
   }
@@ -5587,7 +5587,7 @@ async function loadEpisodeStream(
   const streamPath = `/stream/${item.id}/episode?season=${season}&episode=${episode}`;
   setPlayerStatus(`Chargement S${season}E${episode}...`);
 
-  const payload = await fetchStreamJson(streamPath);
+  const payload = await fetchStreamJson(streamPath, { force: true });
   if (token !== state.playToken) {
     return;
   }
