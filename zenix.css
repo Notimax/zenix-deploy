@@ -2119,6 +2119,16 @@ body.startup-lock {
   display: block;
 }
 
+#playerEmbedFrame {
+  width: 100%;
+  max-height: min(74vh, 760px);
+  aspect-ratio: 16 / 9;
+  background: #000;
+  border: 0;
+  border-radius: 12px;
+  display: block;
+}
+
 .toast {
   position: fixed;
   right: 16px;

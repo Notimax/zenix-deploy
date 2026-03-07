@@ -22,8 +22,8 @@
   <link rel="dns-prefetch" href="//image.tmdb.org" />
   <link rel="dns-prefetch" href="//cdn.jsdelivr.net" />
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Instrument+Serif:ital@0;1&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/zenix.css?v=20260307-c68" />
-    <script defer src="/zenix.js?v=20260307-c68"></script>
+    <link rel="stylesheet" href="/zenix.css?v=20260307-c69" />
+    <script defer src="/zenix.js?v=20260307-c69"></script>
 </head>
 <body>
   <div class="startup-splash" id="startupSplash" aria-hidden="true">
@@ -277,6 +277,14 @@
           <div class="player-main">
             <div class="player-video-wrap">
               <video id="playerVideo" controls playsinline preload="metadata"></video>
+              <iframe
+                id="playerEmbedFrame"
+                title="Lecteur integre"
+                loading="lazy"
+                allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
+                allowfullscreen
+                hidden
+              ></iframe>
             </div>
             <div class="player-quickbar" aria-label="Actions rapides">
               <button class="btn btn-soft btn-compact" id="playerRestartBtn" type="button">Recommencer</button>

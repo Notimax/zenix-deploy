@@ -52,6 +52,7 @@ const STREAM_PROXY_TIMEOUT_MS = 6500;
 const STREAM_PROXY_PREFETCH_TIMEOUT_MS = 4200;
 const STREAM_DIRECT_TIMEOUT_MS = 5200;
 const STREAM_DIRECT_PREFETCH_TIMEOUT_MS = 3600;
+const ANIME_SIBNET_TIMEOUT_MS = 11000;
 const EPISODE_SOON_VERIFY_TTL_MS = 3 * 60 * 1000;
 const EPISODE_SOON_VERIFY_LIMIT = 40;
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
@@ -310,6 +311,7 @@ const refs = {
   playerStatus: document.getElementById("playerStatus"),
   playerSourceMeta: document.getElementById("playerSourceMeta"),
   playerVideo: document.getElementById("playerVideo"),
+  playerEmbedFrame: document.getElementById("playerEmbedFrame"),
   playerRestartBtn: document.getElementById("playerRestartBtn"),
   playerRewindBtn: document.getElementById("playerRewindBtn"),
   playerForwardBtn: document.getElementById("playerForwardBtn"),
@@ -1177,6 +1179,10 @@ function bindEvents() {
   refs.playerVideo.addEventListener("timeupdate", onPlayerProgress);
   refs.playerVideo.addEventListener("pause", () => {
     saveNowPlayingProgress({ force: true });
+    const currentSource = state.sourcePool[state.sourceIndex] || null;
+    if (isEmbedSource(currentSource)) {
+      return;
+    }
     const errorCode = Number(refs.playerVideo?.error?.code || 0);
     const nearStart = Number(refs.playerVideo?.currentTime || 0) < 1;
     if (
@@ -5574,9 +5580,16 @@ async function loadEpisodeStream(
     return;
   }
 
-  const applyEpisodeSourcePayload = (nextPayload, preferredLanguageInput = "") => {
+  const applyEpisodeSourcePayload = async (nextPayload, preferredLanguageInput = "") => {
     clearManualSourceLock();
-    state.allEpisodeSources = extractSources(nextPayload);
+    const baseSources = extractSources(nextPayload);
+    state.allEpisodeSources = await appendAnimeSibnetSource(
+      item,
+      season,
+      episode,
+      baseSources,
+      preferredLanguageInput
+    );
     state.availableLanguages = getAvailableLanguages(state.allEpisodeSources);
     let nextLanguage = resolvePreferredLanguage(item.id, preferredLanguageInput, state.availableLanguages);
     state.sourcePool = filterSourcesByLanguage(state.allEpisodeSources, nextLanguage);
@@ -5624,7 +5637,7 @@ async function loadEpisodeStream(
     }
   };
 
-  let language = applyEpisodeSourcePayload(payload, preferredLanguage);
+  let language = await applyEpisodeSourcePayload(payload, preferredLanguage);
   try {
     await playEpisodeSources();
   } catch (firstError) {
@@ -5636,7 +5649,7 @@ async function loadEpisodeStream(
     if (token !== state.playToken) {
       return;
     }
-    language = applyEpisodeSourcePayload(refreshedPayload, preferredLanguage || language);
+    language = await applyEpisodeSourcePayload(refreshedPayload, preferredLanguage || language);
     await playEpisodeSources();
     showToast("Sources episode actualisees automatiquement.");
   }
@@ -5677,6 +5690,65 @@ async function switchPlayerEpisode(season, episode, options = {}) {
     token,
     String(options.language || state.nowPlaying.language || "")
   );
+}
+
+function toAnimeSibnetLanguageToken(language) {
+  const raw = String(language || "").trim().toUpperCase();
+  return raw === "VF" ? "vf" : "vostfr";
+}
+
+async function appendAnimeSibnetSource(item, season, episode, sources, language = "") {
+  const base = Array.isArray(sources) ? sources.slice() : [];
+  if (!item || !item.isAnime) {
+    return base;
+  }
+  if (base.some((entry) => /sibnet\.ru/i.test(String(entry?.url || "")))) {
+    return base;
+  }
+
+  const safeTitle = String(item.title || "").trim();
+  if (!safeTitle) {
+    return base;
+  }
+
+  const safeSeason = Math.max(1, Number(season || 1));
+  const safeEpisode = Math.max(1, Number(episode || 1));
+  const langToken = toAnimeSibnetLanguageToken(language);
+  const sourceLanguage = langToken === "vf" ? "VF" : "VOSTFR";
+  const params = new URLSearchParams({
+    title: safeTitle,
+    season: String(safeSeason),
+    episode: String(safeEpisode),
+    language: langToken,
+  });
+
+  try {
+    const payload = await fetchJson(`${API_BASE}/anime-sibnet?${params.toString()}`, {
+      timeoutMs: ANIME_SIBNET_TIMEOUT_MS,
+      retryDelays: [350, 900],
+    });
+    const sourceUrl = String(payload?.data?.sourceUrl || "").trim();
+    if (!sourceUrl) {
+      return base;
+    }
+    const sibnetEntry = normalizeSourceEntry(
+      {
+        stream_url: sourceUrl,
+        format: "embed",
+        quality: "Sibnet",
+        language: sourceLanguage,
+        source_name: "Sibnet",
+      },
+      base.length
+    );
+    if (sibnetEntry && !base.some((entry) => String(entry?.url || "").trim() === sibnetEntry.url)) {
+      base.push(sibnetEntry);
+    }
+  } catch {
+    // optional fallback source only
+  }
+
+  return base;
 }
 
 function pickSource(payload) {
@@ -5725,6 +5797,10 @@ function clearManualSourceLock() {
 }
 
 function shouldIgnoreVideoErrorFallback() {
+  const currentSource = state.sourcePool[state.sourceIndex] || null;
+  if (isEmbedSource(currentSource)) {
+    return true;
+  }
   if (state.sourceLoading) {
     return true;
   }
@@ -5762,6 +5838,10 @@ function startPlaybackGuard(token) {
     if (state.sourceLoading || state.sourceIndex < 0 || state.manualSourceLock) {
       return;
     }
+    const currentSource = state.sourcePool[state.sourceIndex] || null;
+    if (isEmbedSource(currentSource)) {
+      return;
+    }
     const video = refs.playerVideo;
     if (!video || video.ended || video.seeking) {
       return;
@@ -5785,6 +5865,11 @@ function schedulePlaybackHealthMonitor(token, step = 0) {
   const delay = step === 0 ? 2200 : 3200;
   state.playbackHealthTimer = window.setTimeout(() => {
     if (token !== state.playToken) {
+      return;
+    }
+    const currentSource = state.sourcePool[state.sourceIndex] || null;
+    if (isEmbedSource(currentSource)) {
+      clearPlaybackHealthMonitor();
       return;
     }
     const video = refs.playerVideo;
@@ -6007,6 +6092,9 @@ function normalizeSourceEntry(entry, index) {
 
 function guessSourceFormat(entry, url) {
   const raw = String(entry?.format || entry?.type || "").toLowerCase();
+  if (raw.includes("embed") || raw.includes("iframe")) {
+    return "embed";
+  }
   if (raw.includes("m3u8") || raw.includes("hls")) {
     return "hls";
   }
@@ -6021,6 +6109,9 @@ function guessSourceFormat(entry, url) {
   }
 
   const cleanUrl = String(url || "").split("#")[0].split("?")[0].toLowerCase();
+  if (/video\.sibnet\.ru\/shell\.php/i.test(cleanUrl)) {
+    return "embed";
+  }
   if (cleanUrl.endsWith(".m3u8")) {
     return "hls";
   }
@@ -6116,6 +6207,8 @@ function getSourceScore(format, quality, language, index, host = "") {
   let score = 0;
   if (format === "mp4") {
     score += 300;
+  } else if (format === "embed") {
+    score += 240;
   } else if (format === "hls") {
     score += 260;
   } else if (format === "webm") {
@@ -6317,6 +6410,40 @@ function normalizeSourceLanguage(entry) {
   return "";
 }
 
+function isEmbedSource(source, url = "") {
+  const format = String(source?.format || "").trim().toLowerCase();
+  if (format === "embed" || format === "iframe") {
+    return true;
+  }
+  const raw = String(url || source?.url || "").trim().toLowerCase();
+  if (!raw) {
+    return false;
+  }
+  return /video\.sibnet\.ru\/shell\.php/i.test(raw) || /\/embed[-_/]/i.test(raw);
+}
+
+function resetPlayerEmbedFrame() {
+  if (!refs.playerEmbedFrame) {
+    return;
+  }
+  refs.playerEmbedFrame.hidden = true;
+  const current = String(refs.playerEmbedFrame.getAttribute("src") || "").trim();
+  if (!current || current === "about:blank") {
+    return;
+  }
+  refs.playerEmbedFrame.setAttribute("src", "about:blank");
+}
+
+function showPlayerEmbedFrame(url) {
+  if (!refs.playerEmbedFrame) {
+    throw new Error("Embed frame unavailable");
+  }
+  refs.playerVideo.hidden = true;
+  refs.playerVideo.controls = false;
+  refs.playerEmbedFrame.hidden = false;
+  refs.playerEmbedFrame.setAttribute("src", String(url || "").trim());
+}
+
 function buildPlayableSourceCandidates(source) {
   const raw = String(source?.url || "").trim();
   if (!raw) {
@@ -6328,6 +6455,10 @@ function buildPlayableSourceCandidates(source) {
     absolute = new URL(raw, window.location.href).href;
   } catch {
     absolute = raw;
+  }
+
+  if (isEmbedSource(source, absolute)) {
+    return [absolute];
   }
 
   const candidates = [];
@@ -6376,13 +6507,24 @@ async function startPlayerSource(source, resumeTime, token) {
   let sourceStarted = false;
   try {
     for (const streamUrl of streamCandidates) {
+      const useEmbed = isEmbedSource(source, streamUrl);
       const useHls = source?.format === "hls" || /m3u8/i.test(streamUrl);
       try {
-        video.preload = "auto";
         teardownPlayerEngine(video);
-        if (useHls) {
+        if (useEmbed) {
+          showPlayerEmbedFrame(streamUrl);
+          setPlayerStatus("Lecture en cours.");
+        } else if (useHls) {
+          resetPlayerEmbedFrame();
+          video.hidden = false;
+          video.controls = true;
+          video.preload = "auto";
           await startHlsPlayback(video, streamUrl, token);
         } else {
+          resetPlayerEmbedFrame();
+          video.hidden = false;
+          video.controls = true;
+          video.preload = "auto";
           if (source?.format === "dash" && !video.canPlayType(DASH_MIME)) {
             throw new Error("DASH not supported");
           }
@@ -6395,27 +6537,31 @@ async function startPlayerSource(source, resumeTime, token) {
           return;
         }
 
-        if (video.error && Number(video.error.code || 0) > 0) {
+        if (!useEmbed && video.error && Number(video.error.code || 0) > 0) {
           throw new Error(`Video error code ${Number(video.error.code || 0)}`);
         }
 
-        if (resumeTime > 5 && Number.isFinite(video.duration) && resumeTime < video.duration - 8) {
+        if (!useEmbed && resumeTime > 5 && Number.isFinite(video.duration) && resumeTime < video.duration - 8) {
           video.currentTime = resumeTime;
         }
 
-        try {
-          await video.play();
-          setPlayerStatus("Lecture en cours.");
-        } catch (playError) {
-          if (isUnplayablePlayError(playError)) {
-            throw playError;
+        if (!useEmbed) {
+          try {
+            await video.play();
+            setPlayerStatus("Lecture en cours.");
+          } catch (playError) {
+            if (isUnplayablePlayError(playError)) {
+              throw playError;
+            }
+            setPlayerStatus("Clique sur Play dans le lecteur pour demarrer.");
           }
-          setPlayerStatus("Clique sur Play dans le lecteur pour demarrer.");
         }
         sourceStarted = true;
         markSourceHostResult(source?.host, true);
         markCurrentSourceSuccessful(state.sourceIndex, source);
-        schedulePlaybackHealthMonitor(token, 0);
+        if (!useEmbed) {
+          schedulePlaybackHealthMonitor(token, 0);
+        }
         return;
       } catch (error) {
         lastError = error;
@@ -6538,7 +6684,10 @@ async function startHlsPlayback(video, streamUrl, token) {
 function teardownPlayerEngine(video) {
   state.ignoreVideoErrorUntil = Date.now() + 1400;
   clearPlaybackHealthMonitor();
+  resetPlayerEmbedFrame();
   destroyHlsInstance();
+  video.hidden = false;
+  video.controls = true;
   video.pause();
   video.removeAttribute("src");
   video.load();

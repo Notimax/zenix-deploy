@@ -9,8 +9,11 @@ const REMOTE_API_BASE = "https://api.purstream.co/api/v1";
 const PURSTREAM_API_BASE = "https://api.purstream.co/api/v1";
 const PURSTREAM_WEB_BASE = "https://purstream.co";
 const ANIME_PLANNING_URL = "https://anime-sama.tv/planning/";
+const ANIME_SAMA_BASE = "https://anime-sama.to";
+const ANIME_SAMA_SEARCH_ENDPOINT = `${ANIME_SAMA_BASE}/template-php/defaut/fetch.php`;
 const PROXY_TIMEOUT_MS = 16000;
 const CALENDAR_CACHE_MS = 6 * 60 * 1000;
+const ANIME_SIBNET_CACHE_MS = 12 * 60 * 1000;
 const WEBHOOK_TIMEOUT_MS = 10000;
 const DISCORD_WEBHOOK_FALLBACK_B64 =
   "aHR0cHM6Ly9kaXNjb3JkLmNvbS9hcGkvd2ViaG9va3MvMTQ3OTI2OTg4ODM3OTA2MDMxNi9ISGRVbTVYZkhpeENPXy0yRUhXYXJ1SjJDcHIweXl1eWdHNkRWLVp4Y0JLQWg4N0RNRzNvNnYzbTQzd29VMmZwenpBUw==";
@@ -31,6 +34,7 @@ const HLS_PROXY_USER_AGENT =
 const DISCORD_STATS_STATE_FILE = path.join(ROOT, ".discord-stats-state.json");
 const proxyCache = new Map();
 const calendarCache = new Map();
+const animeSibnetCache = new Map();
 const analyticsClients = new Map();
 const analyticsEvents = [];
 let analyticsTotalSeen = 0;
@@ -1013,6 +1017,270 @@ async function fetchRemoteText(target, accept = "text/html") {
   }
 }
 
+async function fetchRemoteForm(target, formData = {}, accept = "text/html") {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), PROXY_TIMEOUT_MS);
+  try {
+    const body = new URLSearchParams(formData).toString();
+    const response = await fetch(target, {
+      method: "POST",
+      headers: {
+        Accept: accept,
+        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+        "User-Agent": "Mozilla/5.0 (ZenixStream)",
+      },
+      body,
+      signal: controller.signal,
+    });
+    return {
+      status: response.status,
+      body: await response.text(),
+      contentType: response.headers.get("content-type") || "text/plain; charset=utf-8",
+    };
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+function normalizeSibnetUrl(value) {
+  let url = String(value || "").trim();
+  if (!url) {
+    return "";
+  }
+  if (url.startsWith("//")) {
+    url = `https:${url}`;
+  }
+  if (/^http:\/\/video\.sibnet\.ru/i.test(url)) {
+    url = url.replace(/^http:\/\//i, "https://");
+  }
+  return url;
+}
+
+function extractFirstAnimeCatalogueLink(searchHtml) {
+  const text = String(searchHtml || "");
+  const matches = text.matchAll(/href="([^"]+)"/gi);
+  for (const match of matches) {
+    const raw = String(match?.[1] || "").trim();
+    if (!raw) {
+      continue;
+    }
+    try {
+      const absolute = new URL(raw, ANIME_SAMA_BASE).href;
+      const parsed = new URL(absolute);
+      if (/^\/catalogue\//i.test(parsed.pathname)) {
+        return absolute;
+      }
+    } catch {
+      // ignore malformed links
+    }
+  }
+  return "";
+}
+
+function extractAnimePanels(catalogHtml) {
+  const text = String(catalogHtml || "");
+  const panels = [];
+  const regex = /panneauAnime\(\s*["']([^"']+)["']\s*,\s*["']([^"']+)["']\s*\)/gi;
+  let match;
+  while ((match = regex.exec(text)) !== null) {
+    const label = String(match?.[1] || "").trim();
+    const pathValue = String(match?.[2] || "").trim();
+    if (!pathValue) {
+      continue;
+    }
+    panels.push({
+      label,
+      path: pathValue.replace(/^\/+/, ""),
+    });
+  }
+  return panels;
+}
+
+function chooseAnimePanelPath(panels, season = 1, language = "vostfr") {
+  const rows = Array.isArray(panels) ? panels.filter(Boolean) : [];
+  if (rows.length === 0) {
+    return "";
+  }
+  const safeSeason = Math.max(1, Number(season || 1));
+  const safeLang = String(language || "vostfr").toLowerCase() === "vf" ? "vf" : "vostfr";
+  const seasonToken = `saison${safeSeason}`;
+
+  const withSeason = rows.filter((entry) => String(entry.path || "").toLowerCase().includes(seasonToken));
+  const seasonAndLang = withSeason.find((entry) => {
+    const value = String(entry.path || "").toLowerCase();
+    return value.endsWith(`/${safeLang}`) || value.includes(`/${safeLang}/`) || value.endsWith(safeLang);
+  });
+  if (seasonAndLang) {
+    return seasonAndLang.path;
+  }
+  if (withSeason.length > 0) {
+    return withSeason[0].path;
+  }
+  const langOnly = rows.find((entry) => {
+    const value = String(entry.path || "").toLowerCase();
+    return value.endsWith(`/${safeLang}`) || value.includes(`/${safeLang}/`) || value.endsWith(safeLang);
+  });
+  if (langOnly) {
+    return langOnly.path;
+  }
+  return rows[0].path;
+}
+
+function extractEpisodesScriptUrl(pageHtml, pageUrl) {
+  const text = String(pageHtml || "");
+  const match = text.match(/src=['"]([^'"]*episodes\.js(?:\?[^'"]*)?)['"]/i);
+  if (!match) {
+    return "";
+  }
+  const raw = String(match?.[1] || "").trim();
+  if (!raw) {
+    return "";
+  }
+  try {
+    return new URL(raw, pageUrl).href;
+  } catch {
+    return "";
+  }
+}
+
+function parseEpisodeArrays(episodesScript) {
+  const text = String(episodesScript || "");
+  const arrays = [];
+  const regex = /var\s+eps(\d+)\s*=\s*\[([\s\S]*?)\];/gi;
+  let match;
+  while ((match = regex.exec(text)) !== null) {
+    const name = `eps${String(match?.[1] || "").trim()}`;
+    const body = String(match?.[2] || "");
+    const urls = [];
+    const urlRegex = /['"]([^'"]+)['"]/g;
+    let urlMatch;
+    while ((urlMatch = urlRegex.exec(body)) !== null) {
+      const normalized = normalizeSibnetUrl(String(urlMatch?.[1] || "").trim());
+      if (normalized) {
+        urls.push(normalized);
+      }
+    }
+    if (urls.length > 0) {
+      arrays.push({ name, urls });
+    }
+  }
+  return arrays;
+}
+
+function pickSibnetEpisodeUrl(episodeArrays, episode = 1) {
+  const safeEpisode = Math.max(1, Number(episode || 1));
+  const index = safeEpisode - 1;
+  const rows = Array.isArray(episodeArrays) ? episodeArrays : [];
+  const ranked = rows
+    .map((entry) => {
+      const urls = Array.isArray(entry?.urls) ? entry.urls : [];
+      const sibnetCount = urls.reduce(
+        (count, value) => (String(value || "").toLowerCase().includes("sibnet.ru") ? count + 1 : count),
+        0
+      );
+      const candidate = normalizeSibnetUrl(urls[index] || "");
+      return {
+        name: String(entry?.name || ""),
+        sibnetCount,
+        candidate,
+      };
+    })
+    .filter((entry) => Boolean(entry.candidate))
+    .sort((left, right) => Number(right.sibnetCount || 0) - Number(left.sibnetCount || 0));
+
+  const sibnetAtEpisode = ranked.find((entry) => String(entry.candidate || "").toLowerCase().includes("sibnet.ru"));
+  if (sibnetAtEpisode) {
+    return sibnetAtEpisode;
+  }
+  return ranked[0] || { name: "", sibnetCount: 0, candidate: "" };
+}
+
+async function resolveAnimeSibnetSource(title, season, episode, language = "vostfr") {
+  const safeTitle = String(title || "").trim();
+  if (!safeTitle) {
+    throw new Error("Missing title");
+  }
+
+  const safeSeason = Math.max(1, Number(season || 1));
+  const safeEpisode = Math.max(1, Number(episode || 1));
+  const safeLanguage = String(language || "vostfr").toLowerCase() === "vf" ? "vf" : "vostfr";
+  const cacheKey = `${safeTitle.toLowerCase()}|${safeSeason}|${safeEpisode}|${safeLanguage}`;
+  const now = Date.now();
+  const cached = animeSibnetCache.get(cacheKey);
+  if (cached && Number(cached.expiresAt || 0) > now) {
+    return cached.value;
+  }
+
+  const searchResponse = await fetchRemoteForm(ANIME_SAMA_SEARCH_ENDPOINT, {
+    query: safeTitle,
+  });
+  if (searchResponse.status < 200 || searchResponse.status >= 300) {
+    throw new Error("Anime search unavailable");
+  }
+
+  const catalogUrl = extractFirstAnimeCatalogueLink(searchResponse.body);
+  if (!catalogUrl) {
+    throw new Error("Anime not found");
+  }
+
+  const catalogResponse = await fetchRemoteText(catalogUrl, "text/html");
+  if (catalogResponse.status < 200 || catalogResponse.status >= 300) {
+    throw new Error("Anime page unavailable");
+  }
+  const panels = extractAnimePanels(catalogResponse.body);
+  const selectedPanelPath = chooseAnimePanelPath(panels, safeSeason, safeLanguage);
+  if (!selectedPanelPath) {
+    throw new Error("Anime panel unavailable");
+  }
+
+  const baseCatalogUrl = catalogUrl.endsWith("/") ? catalogUrl : `${catalogUrl}/`;
+  const seasonPageUrl = new URL(`${selectedPanelPath.replace(/^\/+/, "")}/`, baseCatalogUrl).href;
+  const seasonPage = await fetchRemoteText(seasonPageUrl, "text/html");
+  if (seasonPage.status < 200 || seasonPage.status >= 300) {
+    throw new Error("Anime season page unavailable");
+  }
+
+  const episodesScriptUrl =
+    extractEpisodesScriptUrl(seasonPage.body, seasonPageUrl) ||
+    new URL("episodes.js", seasonPageUrl).href;
+  const episodesScript = await fetchRemoteText(episodesScriptUrl, "application/javascript, text/javascript, */*");
+  if (episodesScript.status < 200 || episodesScript.status >= 300) {
+    throw new Error("Anime episodes script unavailable");
+  }
+
+  const arrays = parseEpisodeArrays(episodesScript.body);
+  const picked = pickSibnetEpisodeUrl(arrays, safeEpisode);
+  const sourceUrl = normalizeSibnetUrl(picked.candidate);
+  if (!sourceUrl || !/^https?:\/\//i.test(sourceUrl)) {
+    throw new Error("Sibnet source unavailable");
+  }
+
+  const payload = {
+    title: safeTitle,
+    season: safeSeason,
+    episode: safeEpisode,
+    language: safeLanguage,
+    catalogUrl,
+    seasonPageUrl,
+    episodesScriptUrl,
+    sourceUrl,
+    sourceArray: picked.name,
+  };
+
+  animeSibnetCache.set(cacheKey, {
+    expiresAt: now + ANIME_SIBNET_CACHE_MS,
+    value: payload,
+  });
+  if (animeSibnetCache.size > 450) {
+    const oldest = Array.from(animeSibnetCache.entries()).sort(
+      (left, right) => Number(left?.[1]?.expiresAt || 0) - Number(right?.[1]?.expiresAt || 0)
+    );
+    oldest.slice(0, animeSibnetCache.size - 450).forEach(([key]) => animeSibnetCache.delete(key));
+  }
+
+  return payload;
+}
+
 function buildHlsProxyPath(targetUrl) {
   return `/api/hls-proxy?url=${encodeURIComponent(String(targetUrl || "").trim())}`;
 }
@@ -1534,6 +1802,45 @@ async function handleCalendarOverview(req, res, requestUrl) {
   }
 }
 
+async function handleAnimeSibnet(req, res, requestUrl) {
+  if (requestUrl.pathname !== "/api/anime-sibnet") {
+    return false;
+  }
+  if (req.method !== "GET") {
+    sendJson(res, 405, { error: "Method Not Allowed" });
+    return true;
+  }
+
+  const title = String(requestUrl.searchParams.get("title") || "").trim();
+  if (title.length < 2) {
+    sendJson(res, 400, { error: "Missing title" });
+    return true;
+  }
+
+  const season = toInt(requestUrl.searchParams.get("season"), 1, 1, 200);
+  const episode = toInt(requestUrl.searchParams.get("episode"), 1, 1, 20000);
+  const language = String(requestUrl.searchParams.get("language") || "vostfr").toLowerCase() === "vf" ? "vf" : "vostfr";
+
+  try {
+    const data = await resolveAnimeSibnetSource(title, season, episode, language);
+    sendJson(res, 200, {
+      apiVersion: "zenix-anime-sibnet-v1",
+      type: "success",
+      data,
+    });
+    return true;
+  } catch (error) {
+    const reason = String(error?.message || "").toLowerCase();
+    const status =
+      reason.includes("not found") || reason.includes("unavailable") || reason.includes("missing") ? 404 : 502;
+    sendJson(res, status, {
+      error: "Anime sibnet unavailable",
+      reason: sanitizeToken(String(error?.message || ""), 120),
+    });
+    return true;
+  }
+}
+
 async function handleApiProxy(req, res, requestUrl) {
   if (!requestUrl.pathname.startsWith("/api/")) {
     return false;
@@ -1696,6 +2003,12 @@ const server = http.createServer((req, res) => {
     })
     .then((handledHlsProxy) => {
       if (handledHlsProxy) {
+        return true;
+      }
+      return handleAnimeSibnet(req, res, requestUrl);
+    })
+    .then((handledAnimeSibnet) => {
+      if (handledAnimeSibnet) {
         return true;
       }
       return handleApiProxy(req, res, requestUrl);
