@@ -1085,8 +1085,11 @@ function bindEvents() {
     if (language) {
       state.selectedLanguageByMedia.set(id, language);
       state.detailLangCache.set(id, language);
-      saveLanguagePrefsMap(state.selectedLanguageByMedia);
+    } else {
+      state.selectedLanguageByMedia.delete(id);
+      state.detailLangCache.delete(id);
     }
+    saveLanguagePrefsMap(state.selectedLanguageByMedia);
   });
 
   bindFastPress(refs.playerCloseBtn, () => {
@@ -1149,8 +1152,10 @@ function bindEvents() {
     const language = String(refs.playerLanguageSelect.value || "").trim();
     if (language) {
       state.selectedLanguageByMedia.set(state.nowPlaying.id, language);
-      saveLanguagePrefsMap(state.selectedLanguageByMedia);
+    } else {
+      state.selectedLanguageByMedia.delete(state.nowPlaying.id);
     }
+    saveLanguagePrefsMap(state.selectedLanguageByMedia);
     switchPlayerEpisode(season, episode, { language }).catch(() => {
       showMessage("Impossible de charger cet episode.", true);
     });
@@ -5020,12 +5025,12 @@ function populateLanguageSelect(select, languages, selectedLanguage) {
   }
   select.innerHTML = "";
   const normalized = Array.from(new Set(languages.filter(Boolean)));
+  const fallback = document.createElement("option");
+  fallback.value = "";
+  fallback.textContent = "Auto";
+  fallback.selected = !String(selectedLanguage || "").trim();
+  select.appendChild(fallback);
   if (normalized.length === 0) {
-    const fallback = document.createElement("option");
-    fallback.value = "";
-    fallback.textContent = "Auto";
-    fallback.selected = true;
-    select.appendChild(fallback);
     return;
   }
   normalized.forEach((lang) => {
@@ -5069,10 +5074,10 @@ function resolvePreferredLanguage(mediaId, requestedLanguage, availableLanguages
   const fallbackOrder = ["VF", "VOSTFR", "MULTI", "VO"];
   for (const entry of fallbackOrder) {
     if (availableLanguages.includes(entry)) {
-      return entry;
+      break;
     }
   }
-  return availableLanguages[0] || "";
+  return "";
 }
 
 function filterSourcesByLanguage(sources, language) {
@@ -5598,7 +5603,11 @@ async function loadEpisodeStream(
       state.sourcePool = state.allEpisodeSources.slice();
     }
     state.sourceRetryAttempts.clear();
-    state.selectedLanguageByMedia.set(item.id, nextLanguage);
+    if (nextLanguage) {
+      state.selectedLanguageByMedia.set(item.id, nextLanguage);
+    } else {
+      state.selectedLanguageByMedia.delete(item.id);
+    }
     saveLanguagePrefsMap(state.selectedLanguageByMedia);
 
     populateLanguageSelect(refs.playerLanguageSelect, state.availableLanguages, nextLanguage);
@@ -5849,8 +5858,10 @@ function startPlaybackGuard(token) {
     const errorCode = Number(video.error?.code || 0);
     const currentTime = Number(video.currentTime || 0);
     const readyState = Number(video.readyState || 0);
+    const networkState = Number(video.networkState || 0);
     const blockedAtStart = video.paused && currentTime < 1.2 && readyState >= 2;
-    if (errorCode <= 0 && !blockedAtStart) {
+    const noSourceAtStart = video.paused && currentTime < 0.25 && readyState === 0 && networkState === 3;
+    if (errorCode <= 0 && !blockedAtStart && !noSourceAtStart) {
       return;
     }
     clearPlaybackGuard();
@@ -5879,8 +5890,10 @@ function schedulePlaybackHealthMonitor(token, step = 0) {
     const errorCode = Number(video.error?.code || 0);
     const currentTime = Number(video.currentTime || 0);
     const readyState = Number(video.readyState || 0);
+    const networkState = Number(video.networkState || 0);
     const blockedAtStart = step >= 1 && video.paused && currentTime < 1.2 && readyState >= 2;
-    if (errorCode > 0 || blockedAtStart) {
+    const noSourceAtStart = step >= 2 && video.paused && currentTime < 0.25 && readyState === 0 && networkState === 3;
+    if (errorCode > 0 || blockedAtStart || noSourceAtStart) {
       trySwitchToNextSource().catch(() => {
         setPlayerStatus("Erreur video detectee. Choisis une autre source.", true);
       });
@@ -6444,7 +6457,7 @@ function showPlayerEmbedFrame(url) {
   refs.playerEmbedFrame.setAttribute("src", String(url || "").trim());
 }
 
-function buildPlayableSourceCandidates(source) {
+function buildPlayableSourceCandidates(source, options = {}) {
   const raw = String(source?.url || "").trim();
   if (!raw) {
     return [];
@@ -6467,7 +6480,15 @@ function buildPlayableSourceCandidates(source) {
   const looksLikeHls = source?.format === "hls" || /m3u8/i.test(absolute);
   const proxyUrl = !isProxied && isRemoteHttp ? `${API_BASE}/hls-proxy?url=${encodeURIComponent(absolute)}` : "";
 
-  if (proxyUrl) {
+  if (looksLikeHls && options.preferDirectHls) {
+    candidates.push(absolute);
+    if (proxyUrl) {
+      candidates.push(proxyUrl);
+    }
+    return Array.from(new Set(candidates.filter(Boolean)));
+  }
+
+  if (proxyUrl && looksLikeHls) {
     candidates.push(proxyUrl);
   }
   candidates.push(absolute);
@@ -6480,12 +6501,14 @@ function buildPlayableSourceCandidates(source) {
 }
 
 async function startPlayerSource(source, resumeTime, token) {
-  const streamCandidates = buildPlayableSourceCandidates(source);
+  const video = refs.playerVideo;
+  const streamCandidates = buildPlayableSourceCandidates(source, {
+    preferDirectHls: shouldUseNativeHls(video),
+  });
   if (streamCandidates.length === 0) {
     throw new Error("Missing source URL");
   }
 
-  const video = refs.playerVideo;
   const loadTicket = ++state.sourceLoadTicket;
   state.sourceLoading = true;
   if (refs.playerSourceMeta) {
