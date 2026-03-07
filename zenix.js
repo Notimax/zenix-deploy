@@ -93,6 +93,7 @@ const INTEREST_SEED_MAX = 40;
 const INTEREST_HOME_LIMIT = 10;
 const SEARCH_SIGNAL_MAX = 220;
 const SEARCH_SIGNAL_MAX_AGE_MS = 180 * 24 * 60 * 60 * 1000;
+const LOCK_VISIBLE_ROOT_URL = true;
 
 const FALLBACK_ITEMS = [
   {
@@ -536,6 +537,7 @@ async function init() {
     });
   }
   await applyInitialRoute();
+  keepVisibleRootUrl({ replace: true });
   startAutoRefresh();
   startHeroRotation();
   startAnalyticsHeartbeat();
@@ -8694,7 +8696,28 @@ function applyBrowseParamsToUrl(url) {
   }
 }
 
+function keepVisibleRootUrl(options = {}) {
+  if (!LOCK_VISIBLE_ROOT_URL || typeof window === "undefined" || typeof history === "undefined") {
+    return;
+  }
+  const hasExtra = window.location.pathname !== "/" || window.location.search.length > 0 || window.location.hash.length > 0;
+  if (!hasExtra) {
+    return;
+  }
+  const replace = options.replace !== false;
+  if (replace) {
+    history.replaceState({}, "", "/");
+  } else {
+    history.pushState({}, "", "/");
+  }
+}
+
 function syncBrowseRoute(options = {}) {
+  if (LOCK_VISIBLE_ROOT_URL) {
+    keepVisibleRootUrl({ replace: true });
+    return;
+  }
+
   const route = readAppRoute();
   if (route.watch > 0 || route.detail > 0) {
     return;
@@ -8719,6 +8742,11 @@ function syncBrowseRoute(options = {}) {
 }
 
 function setAppRoute(route, options = {}) {
+  if (LOCK_VISIBLE_ROOT_URL) {
+    keepVisibleRootUrl({ replace: true });
+    return;
+  }
+
   const replace = Boolean(options.replace);
   const url = new URL(window.location.href);
   applyBrowseParamsToUrl(url);
