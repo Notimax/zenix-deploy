@@ -62,7 +62,6 @@ const DASH_MIME = "application/dash+xml";
 const VIDEO_READY_TIMEOUT_MS = 26000;
 const HLS_READY_TIMEOUT_MS = 36000;
 const HLS_MANIFEST_TIMEOUT_MS = 38000;
-const HLS_PROXY_PROBE_TIMEOUT_MS = 5200;
 const HEARTBEAT_INTERVAL_MS = 30 * 1000;
 const HEARTBEAT_REQUEST_TIMEOUT_MS = 9000;
 const HEARTBEAT_KEY = "zenix-client-id-v1";
@@ -142,6 +141,7 @@ const state = {
   sourceHostHealth: loadSourceHostHealth(),
   sourceLoading: false,
   sourceLoadTicket: 0,
+  playbackHealthTimer: 0,
   allEpisodeSources: [],
   availableLanguages: [],
   languagePreferences: loadLanguagePrefs(),
@@ -1176,6 +1176,28 @@ function bindEvents() {
   refs.playerVideo.addEventListener("timeupdate", onPlayerProgress);
   refs.playerVideo.addEventListener("pause", () => {
     saveNowPlayingProgress({ force: true });
+    const errorCode = Number(refs.playerVideo?.error?.code || 0);
+    const nearStart = Number(refs.playerVideo?.currentTime || 0) < 1;
+    if (
+      errorCode > 0 &&
+      nearStart &&
+      !refs.playerOverlay.hidden &&
+      !state.sourceLoading &&
+      !state.manualSourceLock
+    ) {
+      window.setTimeout(() => {
+        if (refs.playerOverlay.hidden || state.sourceLoading || state.manualSourceLock) {
+          return;
+        }
+        const stillErrorCode = Number(refs.playerVideo?.error?.code || 0);
+        if (stillErrorCode <= 0) {
+          return;
+        }
+        trySwitchToNextSource().catch(() => {
+          setPlayerStatus("Source indisponible. Aucun secours disponible.", true);
+        });
+      }, 140);
+    }
   });
   refs.playerVideo.addEventListener("seeked", () => {
     saveNowPlayingProgress({ force: true });
@@ -5714,6 +5736,40 @@ function shouldIgnoreVideoErrorFallback() {
   return false;
 }
 
+function clearPlaybackHealthMonitor() {
+  if (state.playbackHealthTimer) {
+    clearTimeout(state.playbackHealthTimer);
+    state.playbackHealthTimer = 0;
+  }
+}
+
+function schedulePlaybackHealthMonitor(token, step = 0) {
+  clearPlaybackHealthMonitor();
+  const delay = step === 0 ? 2200 : 3200;
+  state.playbackHealthTimer = window.setTimeout(() => {
+    if (token !== state.playToken) {
+      return;
+    }
+    const video = refs.playerVideo;
+    if (!video || video.ended) {
+      return;
+    }
+    const errorCode = Number(video.error?.code || 0);
+    const currentTime = Number(video.currentTime || 0);
+    const readyState = Number(video.readyState || 0);
+    const blockedAtStart = step >= 1 && video.paused && currentTime < 1.2 && readyState >= 2;
+    if (errorCode > 0 || blockedAtStart) {
+      trySwitchToNextSource().catch(() => {
+        setPlayerStatus("Erreur video detectee. Choisis une autre source.", true);
+      });
+      return;
+    }
+    if (step < 6) {
+      schedulePlaybackHealthMonitor(token, step + 1);
+    }
+  }, delay);
+}
+
 async function retryCurrentSource(options = {}) {
   if (!state.sourcePool.length || state.sourceIndex < 0) {
     throw new Error("No active source");
@@ -6255,35 +6311,6 @@ function buildPlayableSourceCandidates(source) {
   return Array.from(new Set(candidates.filter(Boolean)));
 }
 
-function isHlsProxyCandidate(url) {
-  return /\/api\/hls-proxy\?url=/i.test(String(url || ""));
-}
-
-async function probeHlsProxyCandidate(url, timeoutMs = HLS_PROXY_PROBE_TIMEOUT_MS) {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), Math.max(1800, Number(timeoutMs || 0)));
-  try {
-    const response = await fetch(url, {
-      method: "GET",
-      mode: "same-origin",
-      cache: "no-store",
-      signal: controller.signal,
-      headers: {
-        Accept: `${HLS_MIME}, application/x-mpegURL, text/plain, */*`,
-      },
-    });
-    if (!response.ok) {
-      throw new Error(`HLS proxy HTTP ${response.status}`);
-    }
-    const body = await response.text();
-    if (!/#EXTM3U/i.test(body)) {
-      throw new Error("HLS proxy invalid playlist");
-    }
-  } finally {
-    clearTimeout(timeoutId);
-  }
-}
-
 async function startPlayerSource(source, resumeTime, token) {
   const streamCandidates = buildPlayableSourceCandidates(source);
   if (streamCandidates.length === 0) {
@@ -6317,9 +6344,6 @@ async function startPlayerSource(source, resumeTime, token) {
         video.preload = "auto";
         teardownPlayerEngine(video);
         if (useHls) {
-          if (isHlsProxyCandidate(streamUrl)) {
-            await probeHlsProxyCandidate(streamUrl);
-          }
           await startHlsPlayback(video, streamUrl, token);
         } else {
           if (source?.format === "dash" && !video.canPlayType(DASH_MIME)) {
@@ -6354,6 +6378,7 @@ async function startPlayerSource(source, resumeTime, token) {
         sourceStarted = true;
         markSourceHostResult(source?.host, true);
         markCurrentSourceSuccessful(state.sourceIndex, source);
+        schedulePlaybackHealthMonitor(token, 0);
         return;
       } catch (error) {
         lastError = error;
@@ -6475,6 +6500,7 @@ async function startHlsPlayback(video, streamUrl, token) {
 
 function teardownPlayerEngine(video) {
   state.ignoreVideoErrorUntil = Date.now() + 1400;
+  clearPlaybackHealthMonitor();
   destroyHlsInstance();
   video.pause();
   video.removeAttribute("src");
@@ -6656,6 +6682,7 @@ function onPlayerProgress() {
 }
 
 function onPlayerEnded() {
+  clearPlaybackHealthMonitor();
   if (!state.nowPlaying) {
     return;
   }

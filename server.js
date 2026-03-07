@@ -1603,11 +1603,10 @@ function resolveCacheControl(filePath, ext) {
     "index.html",
     "sw.js",
     "manifest.webmanifest",
+    "zenix.js",
+    "zenix.css",
+    "hls.min.js",
   ]);
-
-  if (baseName === "zenix.js" || baseName === "zenix.css") {
-    return "public, max-age=86400, stale-while-revalidate=604800";
-  }
 
   if (noCacheFiles.has(baseName) || ext === ".html" || ext === ".webmanifest") {
     return "no-cache";
