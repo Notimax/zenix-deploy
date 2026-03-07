@@ -176,6 +176,7 @@ const state = {
   ignoreVideoErrorUntil: 0,
   manualSourceLock: false,
   manualSourceLockedIndex: -1,
+  awaitingUserPlayUntil: 0,
   lastSyncAt: null,
   refreshFeedTimer: null,
   refreshTopTimer: null,
@@ -1183,6 +1184,12 @@ function bindEvents() {
   });
 
   refs.playerVideo.addEventListener("timeupdate", onPlayerProgress);
+  refs.playerVideo.addEventListener("play", () => {
+    clearAwaitingUserPlay();
+  });
+  refs.playerVideo.addEventListener("playing", () => {
+    clearAwaitingUserPlay();
+  });
   refs.playerVideo.addEventListener("pause", () => {
     saveNowPlayingProgress({ force: true });
     const currentSource = state.sourcePool[state.sourceIndex] || null;
@@ -5413,6 +5420,7 @@ async function openPlayer(id, options = {}) {
   if (refs.playerSourceMeta) {
     refs.playerSourceMeta.textContent = "";
   }
+  clearAwaitingUserPlay();
   renderPlayerSourceOptions();
   populateLanguageSelect(refs.playerLanguageSelect, [], "");
   refs.playerLanguageSelect.disabled = true;
@@ -5951,6 +5959,18 @@ function clearManualSourceLock() {
   state.sourceRetryAttempts.clear();
 }
 
+function markAwaitingUserPlay(ms = 45000) {
+  state.awaitingUserPlayUntil = Date.now() + Math.max(3000, Number(ms || 0));
+}
+
+function clearAwaitingUserPlay() {
+  state.awaitingUserPlayUntil = 0;
+}
+
+function isAwaitingUserPlay() {
+  return Date.now() < Number(state.awaitingUserPlayUntil || 0);
+}
+
 function shouldIgnoreVideoErrorFallback() {
   const currentSource = state.sourcePool[state.sourceIndex] || null;
   if (isEmbedSource(currentSource)) {
@@ -6005,8 +6025,9 @@ function startPlaybackGuard(token) {
     const currentTime = Number(video.currentTime || 0);
     const readyState = Number(video.readyState || 0);
     const networkState = Number(video.networkState || 0);
-    const blockedAtStart = video.paused && currentTime < 1.2 && readyState >= 2;
-    const noSourceAtStart = video.paused && currentTime < 0.25 && readyState === 0 && networkState === 3;
+    const awaitingUser = isAwaitingUserPlay();
+    const blockedAtStart = !awaitingUser && video.paused && currentTime < 1.2 && readyState >= 2;
+    const noSourceAtStart = !awaitingUser && video.paused && currentTime < 0.25 && readyState === 0 && networkState === 3;
     if (errorCode <= 0 && !blockedAtStart && !noSourceAtStart) {
       return;
     }
@@ -6037,8 +6058,10 @@ function schedulePlaybackHealthMonitor(token, step = 0) {
     const currentTime = Number(video.currentTime || 0);
     const readyState = Number(video.readyState || 0);
     const networkState = Number(video.networkState || 0);
-    const blockedAtStart = step >= 1 && video.paused && currentTime < 1.2 && readyState >= 2;
-    const noSourceAtStart = step >= 2 && video.paused && currentTime < 0.25 && readyState === 0 && networkState === 3;
+    const awaitingUser = isAwaitingUserPlay();
+    const blockedAtStart = !awaitingUser && step >= 1 && video.paused && currentTime < 1.2 && readyState >= 2;
+    const noSourceAtStart =
+      !awaitingUser && step >= 2 && video.paused && currentTime < 0.25 && readyState === 0 && networkState === 3;
     if (errorCode > 0 || blockedAtStart || noSourceAtStart) {
       trySwitchToNextSource().catch(() => {
         setPlayerStatus("Erreur video detectee. Choisis une autre source.", true);
@@ -6717,11 +6740,13 @@ async function startPlayerSource(source, resumeTime, token) {
         if (!useEmbed) {
           try {
             await video.play();
+            clearAwaitingUserPlay();
             setPlayerStatus("Lecture en cours.");
           } catch (playError) {
             if (isUnplayablePlayError(playError)) {
               throw playError;
             }
+            markAwaitingUserPlay(60000);
             setPlayerStatus("Clique sur Play dans le lecteur pour demarrer.");
           }
         }
@@ -6964,6 +6989,7 @@ function setPlayerStatus(message, isError = false) {
 function closePlayer(options = {}) {
   activatePostCloseTapGuard(1400);
   clearPlaybackGuard();
+  clearAwaitingUserPlay();
   refs.playerOverlay.hidden = true;
   refs.playerSeriesControls.hidden = true;
   saveNowPlayingProgress({ force: true });
