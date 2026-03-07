@@ -83,7 +83,7 @@ const SOURCE_FAILURE_PENALTY = 22;
 const SOURCE_SUCCESS_BONUS = 8;
 const SOURCE_RETRY_PER_INDEX = 1;
 const FILTER_PREMIUM_SOURCES = false;
-const AUTO_PREMIUM_FALLBACK = false;
+const AUTO_PREMIUM_FALLBACK = true;
 
 const FALLBACK_ITEMS = [
   {
@@ -5540,7 +5540,7 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
     await playFromSourcePoolWithRescue(resumeTime, token, {
       startIndex: 0,
       skipPremiumFallback: true,
-      allowPremiumRescue: false,
+      allowPremiumRescue: true,
     });
   } catch (firstError) {
     if (token !== state.playToken) {
@@ -5565,7 +5565,7 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
     await playFromSourcePoolWithRescue(resumeTime, token, {
       startIndex: 0,
       skipPremiumFallback: true,
-      allowPremiumRescue: false,
+      allowPremiumRescue: true,
     });
     showToast("Source film actualisee automatiquement.");
   }
@@ -5644,7 +5644,7 @@ async function loadEpisodeStream(
       await playFromSourcePoolWithRescue(resumeTime, token, {
         startIndex: 0,
         skipPremiumFallback: true,
-        allowPremiumRescue: false,
+        allowPremiumRescue: true,
       });
     } catch (error) {
       if (state.allEpisodeSources.length <= state.sourcePool.length) {
@@ -5658,7 +5658,7 @@ async function loadEpisodeStream(
       await playFromSourcePoolWithRescue(resumeTime, token, {
         startIndex: 0,
         skipPremiumFallback: true,
-        allowPremiumRescue: false,
+        allowPremiumRescue: true,
       });
       showToast("Bascule auto vers une source plus compatible.");
     }
@@ -5759,7 +5759,7 @@ function appendAutoZenixRelaySources(sources) {
     return base;
   }
 
-  const seen = new Set(base.map((entry) => String(entry?.url || "").trim()).filter(Boolean));
+  const seen = new Set(base.map((entry) => getSourceDedupKey(entry)).filter(Boolean));
   const relayRows = [];
 
   for (const source of base) {
@@ -5767,7 +5767,8 @@ function appendAutoZenixRelaySources(sources) {
       continue;
     }
     const relayUrl = toZenixRelayUrl(source);
-    if (!relayUrl || seen.has(relayUrl)) {
+    const relayKey = canonicalizeSourceUrl(relayUrl);
+    if (!relayUrl || !relayKey || seen.has(relayKey)) {
       continue;
     }
 
@@ -5784,7 +5785,7 @@ function appendAutoZenixRelaySources(sources) {
     if (!relayEntry) {
       continue;
     }
-    seen.add(relayEntry.url);
+    seen.add(relayKey);
     relayRows.push(relayEntry);
   }
 
@@ -5825,7 +5826,7 @@ async function appendZenixOwnedSources(item, season, episode, sources) {
       return base;
     }
 
-    const existing = new Set(base.map((entry) => String(entry?.url || "").trim()).filter(Boolean));
+    const existing = new Set(base.map((entry) => getSourceDedupKey(entry)).filter(Boolean));
     const owned = raw
       .map((entry, index) =>
         normalizeSourceEntry(
@@ -5840,7 +5841,7 @@ async function appendZenixOwnedSources(item, season, episode, sources) {
         if (!entry) {
           return false;
         }
-        const key = String(entry.url || "").trim();
+        const key = getSourceDedupKey(entry);
         if (!key || existing.has(key)) {
           return false;
         }
@@ -5933,10 +5934,11 @@ function extractSources(payload) {
 
   const seen = new Set();
   const deduped = normalized.filter((entry) => {
-    if (seen.has(entry.url)) {
+    const key = getSourceDedupKey(entry) || String(entry.url || "").trim();
+    if (!key || seen.has(key)) {
       return false;
     }
-    seen.add(entry.url);
+    seen.add(key);
     return true;
   });
   deduped.sort((left, right) => {
@@ -5984,6 +5986,12 @@ function shouldIgnoreVideoErrorFallback() {
   }
   const videoErrorCode = Number(refs.playerVideo?.error?.code || 0);
   if (videoErrorCode === 1) {
+    return true;
+  }
+  if (videoErrorCode > 0) {
+    return false;
+  }
+  if (Date.now() < Number(state.ignoreVideoErrorUntil || 0)) {
     return true;
   }
   return false;
@@ -6102,6 +6110,12 @@ async function retryCurrentSource(options = {}) {
 }
 
 async function handlePlayerPlaybackError() {
+  const videoErrorCode = Number(refs.playerVideo?.error?.code || 0);
+  const nearStart = Number(refs.playerVideo?.currentTime || 0) < 1.2;
+  if (videoErrorCode === 3 && nearStart) {
+    await trySwitchToNextSource();
+    return;
+  }
   const index = Number(state.sourceIndex);
   const source = state.sourcePool[index] || null;
   if (source && canRetryCurrentSourceOnce(index, source)) {
@@ -6112,29 +6126,43 @@ async function handlePlayerPlaybackError() {
   await trySwitchToNextSource();
 }
 
-function getNextAutomaticSourceIndex(startIndex, avoidPremium = true) {
+function getNextAutomaticSourceIndex(startIndex, avoidPremium = true, excludeKeys = null) {
   if (!Array.isArray(state.sourcePool) || state.sourcePool.length === 0) {
     return -1;
   }
   const from = Math.max(-1, Number(startIndex || -1)) + 1;
+  const blockedKeys = excludeKeys instanceof Set ? excludeKeys : null;
   if (!avoidPremium) {
-    return from < state.sourcePool.length ? from : -1;
+    for (let index = from; index < state.sourcePool.length; index += 1) {
+      const key = getSourceDedupKey(state.sourcePool[index]);
+      if (blockedKeys && key && blockedKeys.has(key)) {
+        continue;
+      }
+      return index;
+    }
+    return -1;
   }
 
   for (let index = from; index < state.sourcePool.length; index += 1) {
-    if (!state.sourcePool[index]?.premiumHint) {
-      return index;
+    const source = state.sourcePool[index];
+    if (source?.premiumHint) {
+      continue;
     }
+    const key = getSourceDedupKey(source);
+    if (blockedKeys && key && blockedKeys.has(key)) {
+      continue;
+    }
+    return index;
   }
   return -1;
 }
 
-function getFallbackSourceIndex(startIndex) {
-  let index = getNextAutomaticSourceIndex(startIndex, true);
+function getFallbackSourceIndex(startIndex, excludeKeys = null) {
+  let index = getNextAutomaticSourceIndex(startIndex, true, excludeKeys);
   if (index >= 0) {
     return index;
   }
-  return getNextAutomaticSourceIndex(startIndex, false);
+  return getNextAutomaticSourceIndex(startIndex, false, excludeKeys);
 }
 
 async function trySwitchToNextSource() {
@@ -6149,18 +6177,24 @@ async function trySwitchToNextSource() {
 
   const currentSource = state.sourcePool[state.sourceIndex] || null;
   const avoidPremiumAuto = !currentSource?.premiumHint;
-  let nextIndex = getNextAutomaticSourceIndex(state.sourceIndex, avoidPremiumAuto);
+  const attemptedKeys = new Set();
+  const currentKey = getSourceDedupKey(currentSource);
+  if (currentKey) {
+    attemptedKeys.add(currentKey);
+  }
+
+  let nextIndex = getNextAutomaticSourceIndex(state.sourceIndex, avoidPremiumAuto, attemptedKeys);
   if (nextIndex < 0 && AUTO_PREMIUM_FALLBACK) {
-    nextIndex = getFallbackSourceIndex(state.sourceIndex);
+    nextIndex = getFallbackSourceIndex(state.sourceIndex, attemptedKeys);
   }
   if (nextIndex < 0 || nextIndex >= state.sourcePool.length) {
     if (state.allEpisodeSources.length > state.sourcePool.length) {
       state.sourcePool = state.allEpisodeSources.slice();
       state.sourceRetryAttempts.clear();
       state.sourceIndex = -1;
-      nextIndex = getNextAutomaticSourceIndex(-1, avoidPremiumAuto);
+      nextIndex = getNextAutomaticSourceIndex(-1, avoidPremiumAuto, attemptedKeys);
       if (nextIndex < 0 && AUTO_PREMIUM_FALLBACK) {
-        nextIndex = getFallbackSourceIndex(-1);
+        nextIndex = getFallbackSourceIndex(-1, attemptedKeys);
       }
       showToast("Bascule automatique vers une autre langue/source.");
     } else {
@@ -6184,14 +6218,23 @@ async function playFromSourcePool(resumeTime, token, startIndex = 0, options = {
   const skipPremiumFallback = Boolean(options?.skipPremiumFallback);
   const startSource = state.sourcePool[startIndex] || null;
   const startIsPremium = Boolean(startSource?.premiumHint);
+  const attemptedKeys = new Set();
   let lastError = null;
   for (let index = startIndex; index < state.sourcePool.length; index += 1) {
-    state.sourceIndex = index;
-    renderPlayerSourceOptions();
     const source = state.sourcePool[index];
+    const key = getSourceDedupKey(source);
+    if (key && attemptedKeys.has(key)) {
+      continue;
+    }
+    if (key) {
+      attemptedKeys.add(key);
+    }
     if (skipPremiumFallback && !startIsPremium && index > startIndex && source?.premiumHint) {
       break;
     }
+
+    state.sourceIndex = index;
+    renderPlayerSourceOptions();
     setPlayerStatus(`Connexion source ${index + 1}/${state.sourcePool.length}...`);
     try {
       await startPlayerSource(source, resumeTime, token);
@@ -6647,6 +6690,28 @@ function extractProxyTargetUrl(url) {
   }
 }
 
+function canonicalizeSourceUrl(url) {
+  const raw = String(url || "").trim();
+  if (!raw) {
+    return "";
+  }
+  try {
+    const absolute = new URL(raw, window.location.href).href;
+    const proxyTarget = extractProxyTargetUrl(absolute);
+    return proxyTarget || absolute;
+  } catch {
+    const proxyTarget = extractProxyTargetUrl(raw);
+    return proxyTarget || raw;
+  }
+}
+
+function getSourceDedupKey(source) {
+  if (!source) {
+    return "";
+  }
+  return canonicalizeSourceUrl(source.url);
+}
+
 function buildPlayableSourceCandidates(source, options = {}) {
   const raw = String(source?.url || "").trim();
   if (!raw) {
@@ -6781,13 +6846,32 @@ async function startPlayerSource(source, resumeTime, token) {
             if (isUnplayablePlayError(playError)) {
               throw playError;
             }
-            markAwaitingUserPlay(60000);
-            setPlayerStatus("Clique sur Play dans le lecteur pour demarrer.");
+            let mutedRecovery = false;
+            if (!video.muted) {
+              try {
+                video.muted = true;
+                await video.play();
+                mutedRecovery = true;
+                clearAwaitingUserPlay();
+                setPlayerStatus("Lecture en cours (mode muet).");
+                showToast("Lecture demarree en mode muet. Active le son si besoin.");
+              } catch (mutedError) {
+                video.muted = false;
+                if (isUnplayablePlayError(mutedError)) {
+                  throw mutedError;
+                }
+              }
+            }
+            if (!mutedRecovery) {
+              markAwaitingUserPlay(60000);
+              setPlayerStatus("Clique sur Play dans le lecteur pour demarrer.");
+            }
           }
+          await waitForPlaybackBootstrap(video, token);
         }
         sourceStarted = true;
+        state.ignoreVideoErrorUntil = 0;
         markSourceHostResult(source?.host, true);
-        markCurrentSourceSuccessful(state.sourceIndex, source);
         if (!useEmbed) {
           schedulePlaybackHealthMonitor(token, 0);
         }
@@ -6807,6 +6891,44 @@ async function startPlayerSource(source, resumeTime, token) {
   }
 
   throw lastError || new Error("No playable stream candidate");
+}
+
+async function waitForPlaybackBootstrap(video, token, timeoutMs = 4200) {
+  const deadline = Date.now() + Math.max(1200, Number(timeoutMs || 0));
+  while (Date.now() < deadline) {
+    if (token !== state.playToken) {
+      return;
+    }
+    const errorCode = Number(video?.error?.code || 0);
+    if (errorCode > 0) {
+      throw new Error(`Video error code ${errorCode}`);
+    }
+    const currentTime = Number(video?.currentTime || 0);
+    const readyState = Number(video?.readyState || 0);
+    if (currentTime > 0.18 || (!video?.paused && readyState >= 2 && currentTime > 0)) {
+      return;
+    }
+    await wait(220);
+  }
+
+  if (token !== state.playToken) {
+    return;
+  }
+  const errorCode = Number(video?.error?.code || 0);
+  if (errorCode > 0) {
+    throw new Error(`Video error code ${errorCode}`);
+  }
+  const currentTime = Number(video?.currentTime || 0);
+  const readyState = Number(video?.readyState || 0);
+  const networkState = Number(video?.networkState || 0);
+  const paused = Boolean(video?.paused);
+  if (currentTime <= 0.18 && paused && readyState === 0 && (networkState === 2 || networkState === 3)) {
+    throw new Error("Source stalled at bootstrap");
+  }
+  if (currentTime <= 0.18 && paused && readyState >= 2) {
+    markAwaitingUserPlay(60000);
+    return;
+  }
 }
 
 function shouldUseNativeHls(video) {
@@ -7095,6 +7217,15 @@ function saveNowPlayingProgress(options = {}) {
 }
 
 function onPlayerProgress() {
+  const currentSource = state.sourcePool[state.sourceIndex] || null;
+  if (currentSource && !isEmbedSource(currentSource)) {
+    const currentTime = Number(refs.playerVideo?.currentTime || 0);
+    const errorCode = Number(refs.playerVideo?.error?.code || 0);
+    const paused = Boolean(refs.playerVideo?.paused);
+    if (currentTime >= 1.2 && errorCode <= 0 && !paused) {
+      markCurrentSourceSuccessful(state.sourceIndex, currentSource);
+    }
+  }
   saveNowPlayingProgress();
 }
 
