@@ -24,6 +24,22 @@ Ouvre ensuite:
 
 `render.yaml` deploie le service web `zenix` sur le plan free.
 
+### Update en ligne (automatique a chaque push)
+
+Le service Render est configure avec `autoDeploy: true`.
+
+Pour publier les changements locaux sur les remotes de deploiement:
+
+```powershell
+cd "C:\Users\user\Desktop\Bot osint\site\Zenix Stream"
+powershell -ExecutionPolicy Bypass -File .\publish-online.ps1 -Message "feat: update zenix"
+```
+
+Notes:
+
+- Le script commit les changements suivis (`git add -u`) puis push sur `origin` et `deploypublic`.
+- Si `RENDER_DEPLOY_HOOK_URL` est defini en variable d'environnement, le script appelle aussi le hook Render.
+
 ## Source Zenix (legale)
 
 Tu peux forcer des sources que tu controles via le fichier:

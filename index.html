@@ -22,8 +22,8 @@
   <link rel="dns-prefetch" href="//image.tmdb.org" />
   <link rel="dns-prefetch" href="//cdn.jsdelivr.net" />
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Instrument+Serif:ital@0;1&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/zenix.css?v=20260307-c87" />
-    <script defer src="/zenix.js?v=20260307-c87"></script>
+    <link rel="stylesheet" href="/zenix.css?v=20260307-c88" />
+    <script defer src="/zenix.js?v=20260307-c88"></script>
 </head>
 <body>
   <div class="startup-splash" id="startupSplash" aria-hidden="true">
@@ -48,7 +48,6 @@
 
     <nav class="main-nav" aria-label="Navigation principale">
       <button class="nav-pill active" data-view="all" type="button">Accueil</button>
-      <button class="nav-pill" data-view="interest" type="button">Interesse</button>
       <button class="nav-pill" data-view="calendar" type="button">Calendrier</button>
       <button class="nav-pill" data-view="latest" type="button">Nouveautes</button>
       <button class="nav-pill" data-view="popular" type="button">Populaires</button>
@@ -155,6 +154,14 @@
         <p>Reprends instantanement tes lectures precedentes.</p>
       </div>
       <div class="continue-grid" id="continueGrid"></div>
+    </section>
+
+    <section class="continue" id="homeInterestSection" hidden>
+      <div class="section-head">
+        <h2>Pour toi</h2>
+        <p>10 recommandations personnalisees (films, series et anime) selon tes likes, lectures et recherches.</p>
+      </div>
+      <div class="catalog-grid" id="homeInterestGrid"></div>
     </section>
 
     <section class="catalog-section" id="catalogSection">

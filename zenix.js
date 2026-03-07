@@ -88,6 +88,7 @@ const FILTER_PREMIUM_SOURCES = false;
 const AUTO_PREMIUM_FALLBACK = true;
 const INTEREST_QUERY_MAX = 40;
 const INTEREST_SEED_MAX = 40;
+const INTEREST_HOME_LIMIT = 10;
 const SEARCH_SIGNAL_MAX = 220;
 const SEARCH_SIGNAL_MAX_AGE_MS = 180 * 24 * 60 * 60 * 1000;
 
@@ -277,6 +278,8 @@ const refs = {
 
   continueSection: document.getElementById("continueSection"),
   continueGrid: document.getElementById("continueGrid"),
+  homeInterestSection: document.getElementById("homeInterestSection"),
+  homeInterestGrid: document.getElementById("homeInterestGrid"),
 
   catalogSection: document.getElementById("catalogSection"),
   catalogTitle: document.getElementById("catalogTitle"),
@@ -1542,7 +1545,7 @@ function bindEvents() {
 
 function handleViewSelection(view) {
   rememberCurrentViewScroll();
-  const normalizedView = view === "catalog" || view === "search" ? "all" : view;
+  const normalizedView = view === "catalog" || view === "search" || view === "interest" ? "all" : view;
   state.view = normalizedView;
   if (isCatalogCategoryView(normalizedView)) {
     state.chip = normalizedView;
@@ -1583,7 +1586,7 @@ function handleViewSelection(view) {
 }
 
 function setActiveNav(view) {
-  const normalizedView = view === "catalog" || view === "search" ? "all" : view;
+  const normalizedView = view === "catalog" || view === "search" || view === "interest" ? "all" : view;
   const hasMatch = refs.navPills.some((entry) => (entry.dataset.view || "") === normalizedView);
   const targetView = hasMatch ? normalizedView : "all";
   refs.navPills.forEach((entry) => {
@@ -1596,7 +1599,7 @@ function isCatalogCategoryView(view) {
 }
 
 function isCatalogBrowseView(view) {
-  return view === "all" || view === "interest" || view === "latest" || view === "popular" || isCatalogCategoryView(view);
+  return view === "all" || view === "latest" || view === "popular" || isCatalogCategoryView(view);
 }
 
 function getCatalogSyncProfile(view = resolveCatalogViewForSearch()) {
@@ -1624,7 +1627,7 @@ function getCatalogSyncProfile(view = resolveCatalogViewForSearch()) {
       : { initialPages: 7, activeBatch: 9, manualBatch: 13, scrollBatch: 11 }
     );
   }
-  if (view === "latest" || view === "popular" || view === "interest") {
+  if (view === "latest" || view === "popular") {
     return tune(
       compact
       ? { initialPages: 7, activeBatch: 9, manualBatch: 13, scrollBatch: 11 }
@@ -1643,7 +1646,7 @@ function resolveCatalogViewForSearch() {
   if (query.length === 0) {
     return state.view;
   }
-  if (state.view === "all" || state.view === "interest" || isCatalogCategoryView(state.view)) {
+  if (state.view === "all" || isCatalogCategoryView(state.view)) {
     return state.view;
   }
   return "all";
@@ -1940,7 +1943,7 @@ function isCompactViewport() {
 
 function shouldBoostCoverLoading() {
   const activeView = resolveCatalogViewForSearch();
-  return state.query.trim().length === 0 && (isCatalogCategoryView(activeView) || activeView === "interest");
+  return state.query.trim().length === 0 && isCatalogCategoryView(activeView);
 }
 
 function getCardImageProfile() {
@@ -2851,7 +2854,6 @@ async function syncCurrentViewData(reason = "interval") {
   const activeView = resolveCatalogViewForSearch();
   const shouldSyncCatalog =
     activeView === "all" ||
-    activeView === "interest" ||
     isCatalogCategoryView(activeView) ||
     activeView === "latest" ||
     activeView === "popular" ||
@@ -2865,7 +2867,7 @@ async function syncCurrentViewData(reason = "interval") {
     });
   }
 
-  if (state.view === "top" || state.view === "all" || state.view === "interest") {
+  if (state.view === "top" || state.view === "all") {
     await loadTopDaily().catch(() => {
       // retry next interval
     });
@@ -3366,6 +3368,9 @@ function renderAll() {
     renderCatalog(visible);
     if (!hasQuery) {
       renderContinue();
+      if (state.view === "all") {
+        renderHomeInterest();
+      }
     }
     const warmLimit = shouldBoostCoverLoading()
       ? isCompactViewport()
@@ -3412,6 +3417,9 @@ function renderAll() {
   setHidden(refs.popularSection, true);
   const showContinue = showBrowseView && !hasQuery && refs.continueGrid.children.length > 0;
   setHidden(refs.continueSection, !showContinue);
+  const hasHomeInterestCards = Boolean(refs.homeInterestGrid && refs.homeInterestGrid.children.length > 0);
+  const showHomeInterest = showBrowseView && state.view === "all" && !hasQuery && hasHomeInterestCards;
+  setHidden(refs.homeInterestSection, !showHomeInterest);
 
   state.pendingCatalogUpdate = false;
   updateSearchInputControls(refs.searchInput?.value || "");
@@ -3436,8 +3444,6 @@ function getVisibleCatalog() {
     list = state.topDaily.slice();
   } else if (activeView === "list") {
     list = getFavoriteCatalog();
-  } else if (activeView === "interest") {
-    list = getInterestCatalog();
   } else if (activeView === "latest") {
     list.sort((a, b) => parseReleaseDate(b.releaseDate) - parseReleaseDate(a.releaseDate));
   } else if (activeView === "popular") {
@@ -3609,7 +3615,6 @@ function updateCatalogHeading(hasQuery, resultCount) {
 
   const titleByView = {
     all: "Streaming",
-    interest: "Interesse",
     movie: "Films",
     tv: "Series",
     anime: "Anime",
@@ -3631,12 +3636,6 @@ function updateCatalogHeading(hasQuery, resultCount) {
   }
   if (state.view === "popular") {
     refs.catalogSubtitle.textContent = appendActiveFilterSummary("Titres les plus regardes par la communaute.");
-    return;
-  }
-  if (state.view === "interest") {
-    refs.catalogSubtitle.textContent = appendActiveFilterSummary(
-      "Suggestions personnalisees selon tes lectures, tes likes/dislikes et tes recherches."
-    );
     return;
   }
   refs.catalogSubtitle.textContent = appendActiveFilterSummary("Catalogue fusionne films, series et anime.");
@@ -4387,12 +4386,18 @@ function renderCatalog(items) {
   observeMediaCards(refs.catalogGrid);
 }
 
-function renderContinue() {
-  const entries = Object.values(state.progress)
+function getContinueEntries(limit = 6) {
+  return Object.values(state.progress)
     .filter((entry) => Number(entry?.lastPlayed || 0) > 0)
     .sort((a, b) => (b.lastPlayed || 0) - (a.lastPlayed || 0))
-    .slice(0, 6);
+    .slice(0, Math.max(1, Number(limit || 6)));
+}
 
+function renderContinue() {
+  if (!refs.continueGrid) {
+    return;
+  }
+  const entries = getContinueEntries(6);
   refs.continueGrid.innerHTML = "";
   refs.continueSection.hidden = entries.length === 0;
   const fragment = document.createDocumentFragment();
@@ -4412,6 +4417,60 @@ function renderContinue() {
   });
   refs.continueGrid.appendChild(fragment);
   observeMediaCards(refs.continueGrid);
+}
+
+function renderHomeInterest() {
+  if (!refs.homeInterestGrid) {
+    return;
+  }
+
+  const continueIds = new Set(
+    getContinueEntries(6)
+      .map((entry) => Number(entry?.id || 0))
+      .filter((id) => id > 0)
+  );
+  const ranked = getInterestCatalog();
+  const picks = [];
+  const seenIds = new Set();
+
+  for (const item of ranked) {
+    const id = Number(item?.id || 0);
+    if (id <= 0 || seenIds.has(id) || continueIds.has(id)) {
+      continue;
+    }
+    seenIds.add(id);
+    picks.push(item);
+    if (picks.length >= INTEREST_HOME_LIMIT) {
+      break;
+    }
+  }
+
+  if (picks.length < INTEREST_HOME_LIMIT) {
+    for (const item of ranked) {
+      const id = Number(item?.id || 0);
+      if (id <= 0 || seenIds.has(id)) {
+        continue;
+      }
+      seenIds.add(id);
+      picks.push(item);
+      if (picks.length >= INTEREST_HOME_LIMIT) {
+        break;
+      }
+    }
+  }
+
+  const finalPicks = picks.slice(0, INTEREST_HOME_LIMIT);
+  refs.homeInterestGrid.innerHTML = "";
+  refs.homeInterestSection.hidden = finalPicks.length === 0;
+  const fragment = document.createDocumentFragment();
+  const imageProfile = getCardImageProfile();
+
+  finalPicks.forEach((item, index) => {
+    fragment.appendChild(buildMediaCard(item, false, null, index, imageProfile));
+  });
+
+  refs.homeInterestGrid.appendChild(fragment);
+  observeMediaCards(refs.homeInterestGrid);
 }
 
 function removeContinueProgressEntry(id, options = {}) {
@@ -8263,7 +8322,6 @@ function applySavedBrowseState() {
 
   const allowedViews = new Set([
     "all",
-    "interest",
     "calendar",
     "top",
     "movie",
@@ -8313,14 +8371,13 @@ function applyBrowseStateFromRoute() {
   const url = new URL(window.location.href);
 
   const view = String(url.searchParams.get("view") || "");
-  const normalizedView = view === "catalog" || view === "search" ? "all" : view;
+  const normalizedView = view === "catalog" || view === "search" || view === "interest" ? "all" : view;
   const chip = String(url.searchParams.get("chip") || "");
   const sort = String(url.searchParams.get("sort") || "");
   const query = String(url.searchParams.get("q") || "").trim();
 
   const allowedViews = new Set([
     "all",
-    "interest",
     "calendar",
     "top",
     "movie",
