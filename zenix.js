@@ -4393,11 +4393,15 @@ function getContinueEntries(limit = 6) {
     .slice(0, Math.max(1, Number(limit || 6)));
 }
 
+function getContinueDisplayLimit() {
+  return isCompactViewport() ? 6 : 5;
+}
+
 function renderContinue() {
   if (!refs.continueGrid) {
     return;
   }
-  const entries = getContinueEntries(6);
+  const entries = getContinueEntries(getContinueDisplayLimit());
   refs.continueGrid.innerHTML = "";
   refs.continueSection.hidden = entries.length === 0;
   const fragment = document.createDocumentFragment();
