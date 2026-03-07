@@ -52,6 +52,11 @@ Variable optionnelle:
 
 - `ZENIX_OWNED_SOURCES_FILE` pour changer le chemin du JSON.
 
+Mode auto (active par defaut):
+
+- Le lecteur cree aussi automatiquement une source `Zenix Source` pour les flux libres detectes (film/serie/anime), sans configuration manuelle titre par titre.
+- Le JSON `zenix-owned-sources.json` reste prioritaire si tu veux forcer des sources precises.
+
 ## Webhook Discord (stats live)
 
 Le webhook Discord reste **strictement cote serveur**.

@@ -5121,7 +5121,8 @@ async function syncDetailLanguageOptions(id, season, episode) {
   }
   const payload = await fetchStreamJson(`/stream/${id}/episode?season=${season}&episode=${episode}`);
   const baseSources = extractSources(payload);
-  const sources = await appendZenixOwnedSources(item, season, episode, baseSources);
+  const autoSources = appendAutoZenixRelaySources(baseSources);
+  const sources = await appendZenixOwnedSources(item, season, episode, autoSources);
   const languages = getAvailableLanguages(sources);
   const selected = resolvePreferredLanguage(id, refs.detailLanguageSelect?.value || "", languages);
   populateLanguageSelect(refs.detailLanguageSelect, languages, selected);
@@ -5517,7 +5518,8 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
 
   clearManualSourceLock();
   const baseMovieSources = extractSources(payload);
-  state.sourcePool = await appendZenixOwnedSources(item, 1, 1, baseMovieSources);
+  const autoMovieSources = appendAutoZenixRelaySources(baseMovieSources);
+  state.sourcePool = await appendZenixOwnedSources(item, 1, 1, autoMovieSources);
   state.allEpisodeSources = state.sourcePool.slice();
   state.sourceRetryAttempts.clear();
   if (state.sourcePool.length === 0) {
@@ -5542,7 +5544,8 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
     }
     clearManualSourceLock();
     const refreshedMovieSources = extractSources(refreshedPayload);
-    state.sourcePool = await appendZenixOwnedSources(item, 1, 1, refreshedMovieSources);
+    const refreshedAutoMovieSources = appendAutoZenixRelaySources(refreshedMovieSources);
+    state.sourcePool = await appendZenixOwnedSources(item, 1, 1, refreshedAutoMovieSources);
     state.allEpisodeSources = state.sourcePool.slice();
     state.sourceRetryAttempts.clear();
     if (state.sourcePool.length === 0) {
@@ -5592,7 +5595,8 @@ async function loadEpisodeStream(
   const applyEpisodeSourcePayload = async (nextPayload, preferredLanguageInput = "") => {
     clearManualSourceLock();
     const baseSources = extractSources(nextPayload);
-    const ownedMergedSources = await appendZenixOwnedSources(item, season, episode, baseSources);
+    const autoMergedSources = appendAutoZenixRelaySources(baseSources);
+    const ownedMergedSources = await appendZenixOwnedSources(item, season, episode, autoMergedSources);
     state.allEpisodeSources = await appendAnimeSibnetSource(
       item,
       season,
@@ -5709,6 +5713,77 @@ async function switchPlayerEpisode(season, episode, options = {}) {
 function toAnimeSibnetLanguageToken(language) {
   const raw = String(language || "").trim().toUpperCase();
   return raw === "VF" ? "vf" : "vostfr";
+}
+
+function toZenixRelayUrl(source) {
+  const rawUrl = String(source?.url || "").trim();
+  if (!rawUrl) {
+    return "";
+  }
+
+  let absolute = rawUrl;
+  try {
+    absolute = new URL(rawUrl, window.location.href).href;
+  } catch {
+    absolute = rawUrl;
+  }
+
+  if (!/^https?:\/\//i.test(absolute)) {
+    return "";
+  }
+  if (/\/api\/hls-proxy\?url=/i.test(absolute)) {
+    return absolute;
+  }
+  if (isEmbedSource(source, absolute)) {
+    return "";
+  }
+
+  const isHls = String(source?.format || "").toLowerCase() === "hls" || /m3u8(?:$|\?)/i.test(absolute);
+  if (isHls) {
+    return `${API_BASE}/hls-proxy?url=${encodeURIComponent(absolute)}`;
+  }
+  return absolute;
+}
+
+function appendAutoZenixRelaySources(sources) {
+  const base = Array.isArray(sources) ? sources.slice() : [];
+  if (base.length === 0) {
+    return base;
+  }
+
+  const seen = new Set(base.map((entry) => String(entry?.url || "").trim()).filter(Boolean));
+  const relayRows = [];
+
+  for (const source of base) {
+    if (!source || source.premiumHint) {
+      continue;
+    }
+    const relayUrl = toZenixRelayUrl(source);
+    if (!relayUrl || seen.has(relayUrl)) {
+      continue;
+    }
+
+    const relayEntry = normalizeSourceEntry(
+      {
+        stream_url: relayUrl,
+        format: source.format || "",
+        quality: source.quality || "Zenix",
+        language: source.language || "",
+        source_name: "Zenix Source",
+      },
+      relayRows.length
+    );
+    if (!relayEntry) {
+      continue;
+    }
+    seen.add(relayEntry.url);
+    relayRows.push(relayEntry);
+  }
+
+  if (relayRows.length === 0) {
+    return base;
+  }
+  return relayRows.concat(base);
 }
 
 function getOwnedSourceMediaType(item) {
