@@ -283,6 +283,12 @@ const refs = {
   homeInterestSection: document.getElementById("homeInterestSection"),
   homeInterestGrid: document.getElementById("homeInterestGrid"),
   nativeAdSection: document.getElementById("nativeAdSection"),
+  nativeAdHomeMount: document.getElementById("nativeAdHomeMount"),
+  nativeAdCatalogSection: document.getElementById("nativeAdCatalogSection"),
+  nativeAdCatalogMount: document.getElementById("nativeAdCatalogMount"),
+  nativeAdDetailSection: document.getElementById("nativeAdDetailSection"),
+  nativeAdDetailMount: document.getElementById("nativeAdDetailMount"),
+  nativeAdUnit: document.getElementById("nativeAdUnit"),
 
   catalogSection: document.getElementById("catalogSection"),
   catalogTitle: document.getElementById("catalogTitle"),
@@ -1943,6 +1949,48 @@ function setHidden(node, hidden) {
   }
 }
 
+function mountNativeAd(targetMount) {
+  if (!targetMount || !refs.nativeAdUnit) {
+    return;
+  }
+  if (refs.nativeAdUnit.parentElement !== targetMount) {
+    targetMount.appendChild(refs.nativeAdUnit);
+  }
+}
+
+function applyNativeAdPlacement() {
+  const hasQuery = state.query.trim().length > 0;
+  const isPlayerOpen = Boolean(refs.playerOverlay && !refs.playerOverlay.hidden);
+  const isDetailOpen = Boolean(refs.detailModal && !refs.detailModal.hidden);
+  const isInfoView = !hasQuery && state.view === "info";
+  const isCalendarView = state.view === "calendar";
+  const isListView = !hasQuery && state.view === "list";
+  const isTopView = !hasQuery && state.view === "top";
+  const showBrowseView = !isInfoView && !isCalendarView && !isTopView && !isListView;
+
+  const showNativeDetail = !isPlayerOpen && isDetailOpen;
+  const showNativeHome = !showNativeDetail && !isPlayerOpen && showBrowseView && !hasQuery && state.view === "all";
+  const showNativeCatalog = !showNativeDetail && !isPlayerOpen && showBrowseView && !hasQuery && state.view !== "all";
+
+  setHidden(refs.nativeAdSection, !showNativeHome);
+  setHidden(refs.nativeAdCatalogSection, !showNativeCatalog);
+  setHidden(refs.nativeAdDetailSection, !showNativeDetail);
+
+  if (showNativeDetail) {
+    mountNativeAd(refs.nativeAdDetailMount);
+    return;
+  }
+  if (showNativeHome) {
+    mountNativeAd(refs.nativeAdHomeMount);
+    return;
+  }
+  if (showNativeCatalog) {
+    mountNativeAd(refs.nativeAdCatalogMount);
+    return;
+  }
+  mountNativeAd(refs.nativeAdHomeMount);
+}
+
 function isCompactViewport() {
   if (typeof window.matchMedia === "function") {
     return window.matchMedia(`(max-width: ${MOBILE_VIEWPORT_MAX_WIDTH}px)`).matches;
@@ -3429,8 +3477,7 @@ function renderAll() {
   const hasHomeInterestCards = Boolean(refs.homeInterestGrid && refs.homeInterestGrid.children.length > 0);
   const showHomeInterest = showBrowseView && state.view === "all" && !hasQuery && hasHomeInterestCards;
   setHidden(refs.homeInterestSection, !showHomeInterest);
-  const showNativeAd = showBrowseView && state.view === "all" && !hasQuery;
-  setHidden(refs.nativeAdSection, !showNativeAd);
+  applyNativeAdPlacement();
 
   state.pendingCatalogUpdate = false;
   updateSearchInputControls(refs.searchInput?.value || "");
@@ -5432,6 +5479,7 @@ async function openDetails(id, options = {}) {
   refs.trailerFrame.src = "";
   refs.detailModal.hidden = false;
   updateBodyScrollLock();
+  applyNativeAdPlacement();
 
   const [details, trailers] = await Promise.all([
     ensureDetails(id).catch(() => null),
@@ -5587,6 +5635,7 @@ function closeDetails(options = {}) {
     setAppRoute({}, { replace: true });
   }
   updateBodyScrollLock();
+  applyNativeAdPlacement();
   if (refs.playerOverlay.hidden && refs.detailModal.hidden) {
     restoreModalScrollPosition();
   }
@@ -5659,6 +5708,7 @@ async function openPlayer(id, options = {}) {
   populateLanguageSelect(refs.playerLanguageSelect, [], "");
   refs.playerLanguageSelect.disabled = true;
   updateBodyScrollLock();
+  applyNativeAdPlacement();
   startPlaybackGuard(token);
   try {
     if (item.type === "tv") {
@@ -7467,6 +7517,7 @@ function closePlayer(options = {}) {
     setAppRoute({}, { replace: true });
   }
   updateBodyScrollLock();
+  applyNativeAdPlacement();
   renderContinue();
   if (refs.playerOverlay.hidden && refs.detailModal.hidden) {
     restoreModalScrollPosition();

@@ -27,8 +27,8 @@
   <link rel="dns-prefetch" href="//image.tmdb.org" />
   <link rel="dns-prefetch" href="//cdn.jsdelivr.net" />
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Instrument+Serif:ital@0;1&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/zenix.css?v=20260307-c94" />
-    <script defer src="/zenix.js?v=20260307-c94"></script>
+    <link rel="stylesheet" href="/zenix.css?v=20260307-c95" />
+    <script defer src="/zenix.js?v=20260307-c95"></script>
 </head>
 <body>
   <div class="startup-splash" id="startupSplash" aria-hidden="true">
@@ -172,12 +172,22 @@
     <section class="sponsor-slot" id="nativeAdSection" aria-label="Sponsorise" hidden>
       <div class="section-head">
         <h2>Sponsorise</h2>
-        <p>Publicite native</p>
+        <p>Publicite native - Accueil</p>
       </div>
-      <div class="native-banner-wrap">
-        <script async="async" data-cfasync="false" src="https://maddenwiped.com/6724b59b8680ca68d3195556ffa48409/invoke.js"></script>
-        <div id="container-6724b59b8680ca68d3195556ffa48409"></div>
+      <div class="native-banner-mount" id="nativeAdHomeMount">
+        <div class="native-banner-wrap" id="nativeAdUnit">
+          <script async="async" data-cfasync="false" src="https://maddenwiped.com/6724b59b8680ca68d3195556ffa48409/invoke.js"></script>
+          <div id="container-6724b59b8680ca68d3195556ffa48409"></div>
+        </div>
       </div>
+    </section>
+
+    <section class="sponsor-slot sponsor-slot-inline" id="nativeAdCatalogSection" aria-label="Sponsorise catalogue" hidden>
+      <div class="section-head">
+        <h2>Sponsorise</h2>
+        <p>Publicite native - Catalogue</p>
+      </div>
+      <div class="native-banner-mount" id="nativeAdCatalogMount"></div>
     </section>
 
     <section class="catalog-section" id="catalogSection">
@@ -263,6 +273,11 @@
             <button class="btn btn-soft" id="detailDislikeBtn" type="button">Dislike</button>
             <button class="btn btn-soft" id="detailShareBtn" type="button">Partager</button>
           </div>
+
+          <section class="detail-native-ad" id="nativeAdDetailSection" aria-label="Sponsorise detail" hidden>
+            <p class="detail-native-ad-title">Sponsorise</p>
+            <div class="native-banner-mount" id="nativeAdDetailMount"></div>
+          </section>
 
           <div class="series-controls" id="detailSeriesControls" hidden>
             <label class="field">

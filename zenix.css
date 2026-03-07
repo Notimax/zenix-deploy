@@ -1070,6 +1070,15 @@ body.startup-lock {
   box-shadow: var(--shadow-md);
 }
 
+.sponsor-slot-inline {
+  margin-top: 10px;
+}
+
+.native-banner-mount {
+  width: 100%;
+  min-height: 120px;
+}
+
 .native-banner-wrap {
   width: 100%;
   min-height: 120px;
@@ -1084,6 +1093,22 @@ body.startup-lock {
 
 .native-banner-wrap > [id^="container-"] {
   width: 100%;
+}
+
+.detail-native-ad {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.14);
+  display: grid;
+  gap: 8px;
+}
+
+.detail-native-ad-title {
+  margin: 0;
+  color: #a9aebb;
+  font-size: 0.78rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
 }
 
 .catalog-section.search-mode {
