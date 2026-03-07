@@ -14,6 +14,7 @@ const ANIME_SAMA_SEARCH_ENDPOINT = `${ANIME_SAMA_BASE}/template-php/defaut/fetch
 const PROXY_TIMEOUT_MS = 16000;
 const CALENDAR_CACHE_MS = 6 * 60 * 1000;
 const ANIME_SIBNET_CACHE_MS = 12 * 60 * 1000;
+const ZENIX_OWNED_SOURCES_CACHE_MS = 5000;
 const WEBHOOK_TIMEOUT_MS = 10000;
 const DISCORD_WEBHOOK_FALLBACK_B64 =
   "aHR0cHM6Ly9kaXNjb3JkLmNvbS9hcGkvd2ViaG9va3MvMTQ3OTI2OTg4ODM3OTA2MDMxNi9ISGRVbTVYZkhpeENPXy0yRUhXYXJ1SjJDcHIweXl1eWdHNkRWLVp4Y0JLQWg4N0RNRzNvNnYzbTQzd29VMmZwenpBUw==";
@@ -32,9 +33,24 @@ const ANALYTICS_MIN_EVENT_MS = 10 * 1000;
 const HLS_PROXY_USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36";
 const DISCORD_STATS_STATE_FILE = path.join(ROOT, ".discord-stats-state.json");
+const ZENIX_OWNED_SOURCES_FILE = path.resolve(
+  ROOT,
+  path.isAbsolute(String(process.env.ZENIX_OWNED_SOURCES_FILE || "").trim())
+    ? String(process.env.ZENIX_OWNED_SOURCES_FILE || "").trim()
+    : String(process.env.ZENIX_OWNED_SOURCES_FILE || "zenix-owned-sources.json").trim()
+);
 const proxyCache = new Map();
 const calendarCache = new Map();
 const animeSibnetCache = new Map();
+const zenixOwnedSourcesCache = {
+  loadedAt: 0,
+  mtimeMs: 0,
+  data: {
+    movies: {},
+    tv: {},
+    series: {},
+  },
+};
 const analyticsClients = new Map();
 const analyticsEvents = [];
 let analyticsTotalSeen = 0;
@@ -970,6 +986,226 @@ function isAllowedProxyPath(pathname) {
   );
 }
 
+function createEmptyOwnedSourcesData() {
+  return {
+    movies: {},
+    tv: {},
+    series: {},
+  };
+}
+
+function readOwnedSourceArray(value) {
+  if (Array.isArray(value)) {
+    return value;
+  }
+  if (value && typeof value === "object" && Array.isArray(value.sources)) {
+    return value.sources;
+  }
+  return [];
+}
+
+function normalizeOwnedSourceLanguage(value) {
+  const raw = String(value || "").trim().toUpperCase();
+  if (!raw) {
+    return "";
+  }
+  if (raw === "FR" || raw === "FRENCH" || raw === "1" || raw === "VF") {
+    return "VF";
+  }
+  if (raw.includes("VOST") || raw.includes("SUB")) {
+    return "VOSTFR";
+  }
+  if (raw.includes("MULTI") || raw.includes("DUAL")) {
+    return "MULTI";
+  }
+  if (raw === "VO" || raw.includes("ORIGINAL")) {
+    return "VO";
+  }
+  return raw.slice(0, 16);
+}
+
+function inferOwnedSourceFormat(url, hint = "") {
+  const rawHint = String(hint || "").trim().toLowerCase();
+  if (rawHint.includes("embed") || rawHint.includes("iframe")) {
+    return "embed";
+  }
+  if (rawHint.includes("m3u8") || rawHint.includes("hls")) {
+    return "hls";
+  }
+  if (rawHint.includes("mp4")) {
+    return "mp4";
+  }
+  if (rawHint.includes("webm")) {
+    return "webm";
+  }
+  if (rawHint.includes("mpd") || rawHint.includes("dash")) {
+    return "dash";
+  }
+
+  const cleanUrl = String(url || "").split("#")[0].split("?")[0].toLowerCase();
+  if (/video\.sibnet\.ru\/shell\.php/i.test(cleanUrl) || /\/embed[-_/]/i.test(cleanUrl)) {
+    return "embed";
+  }
+  if (cleanUrl.endsWith(".m3u8")) {
+    return "hls";
+  }
+  if (cleanUrl.endsWith(".mp4")) {
+    return "mp4";
+  }
+  if (cleanUrl.endsWith(".webm")) {
+    return "webm";
+  }
+  if (cleanUrl.endsWith(".mpd")) {
+    return "dash";
+  }
+  return "unknown";
+}
+
+function normalizeOwnedSourceEntry(entry, index = 0) {
+  const url = String(entry?.stream_url || entry?.url || entry?.file || "").trim();
+  if (!url) {
+    return null;
+  }
+  const parsed = parseSafeRemoteUrl(url);
+  if (!parsed) {
+    return null;
+  }
+
+  return {
+    stream_url: parsed.href,
+    source_name: String(entry?.source_name || entry?.name || "Zenix Source").trim() || "Zenix Source",
+    quality: String(entry?.quality || entry?.resolution || "Zenix").trim() || "Zenix",
+    language: normalizeOwnedSourceLanguage(entry?.language || entry?.lang || ""),
+    format: inferOwnedSourceFormat(parsed.href, entry?.format || entry?.type || ""),
+    priority: toInt(entry?.priority, Math.max(0, 1000 - index), -100000, 100000),
+  };
+}
+
+function loadZenixOwnedSourcesData() {
+  const now = Date.now();
+  const ttl = zenixOwnedSourcesCache.loadedAt + ZENIX_OWNED_SOURCES_CACHE_MS;
+  if (zenixOwnedSourcesCache.loadedAt > 0 && ttl > now) {
+    return zenixOwnedSourcesCache.data;
+  }
+
+  let nextData = createEmptyOwnedSourcesData();
+  let nextMtime = 0;
+  try {
+    const stats = fs.statSync(ZENIX_OWNED_SOURCES_FILE);
+    if (stats.isFile()) {
+      nextMtime = Number(stats.mtimeMs || 0);
+      if (nextMtime !== Number(zenixOwnedSourcesCache.mtimeMs || 0)) {
+        const raw = fs.readFileSync(ZENIX_OWNED_SOURCES_FILE, "utf8");
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === "object") {
+          nextData = {
+            ...createEmptyOwnedSourcesData(),
+            ...parsed,
+          };
+        }
+      } else {
+        nextData = zenixOwnedSourcesCache.data;
+      }
+    }
+  } catch {
+    nextData = createEmptyOwnedSourcesData();
+    nextMtime = 0;
+  }
+
+  zenixOwnedSourcesCache.loadedAt = now;
+  zenixOwnedSourcesCache.mtimeMs = nextMtime;
+  zenixOwnedSourcesCache.data = nextData;
+  return nextData;
+}
+
+function readOwnedMediaNode(collection, mediaId) {
+  const map = collection && typeof collection === "object" ? collection : {};
+  return map[String(mediaId)] || map[Number(mediaId)] || null;
+}
+
+function resolveOwnedTvSources(mediaNode, season, episode) {
+  if (!mediaNode || typeof mediaNode !== "object") {
+    return [];
+  }
+
+  const safeSeason = Math.max(1, Number(season || 1));
+  const safeEpisode = Math.max(1, Number(episode || 1));
+  const seasonKey = String(safeSeason);
+  const episodeKey = String(safeEpisode);
+
+  const seasonNode =
+    mediaNode[seasonKey] ||
+    mediaNode?.seasons?.[seasonKey] ||
+    mediaNode?.season?.[seasonKey] ||
+    null;
+
+  const exactCandidates = [
+    seasonNode?.[episodeKey],
+    seasonNode?.episodes?.[episodeKey],
+    seasonNode?.episode?.[episodeKey],
+    mediaNode?.episodes?.[episodeKey],
+    mediaNode?.episode?.[episodeKey],
+  ];
+  for (const candidate of exactCandidates) {
+    const rows = readOwnedSourceArray(candidate);
+    if (rows.length > 0) {
+      return rows;
+    }
+  }
+
+  const fallbackCandidates = [
+    seasonNode?.default,
+    seasonNode?.fallback,
+    mediaNode?.default,
+    mediaNode?.fallback,
+    mediaNode,
+  ];
+  for (const candidate of fallbackCandidates) {
+    const rows = readOwnedSourceArray(candidate);
+    if (rows.length > 0) {
+      return rows;
+    }
+  }
+  return [];
+}
+
+function resolveOwnedSources(type, mediaId, season, episode) {
+  const safeType = String(type || "movie").toLowerCase() === "tv" ? "tv" : "movie";
+  const safeId = Math.max(1, Number(mediaId || 0));
+  if (!safeId) {
+    return [];
+  }
+
+  const data = loadZenixOwnedSourcesData();
+  const movies = data?.movies && typeof data.movies === "object" ? data.movies : {};
+  const tv = data?.tv && typeof data.tv === "object" ? data.tv : {};
+  const series = data?.series && typeof data.series === "object" ? data.series : {};
+
+  let rawRows = [];
+  if (safeType === "movie") {
+    const movieNode = readOwnedMediaNode(movies, safeId);
+    rawRows = readOwnedSourceArray(movieNode);
+  } else {
+    const tvNode = readOwnedMediaNode(tv, safeId) || readOwnedMediaNode(series, safeId);
+    rawRows = resolveOwnedTvSources(tvNode, season, episode);
+  }
+
+  const normalized = rawRows
+    .map((entry, index) => normalizeOwnedSourceEntry(entry, index))
+    .filter(Boolean)
+    .sort((left, right) => Number(right?.priority || 0) - Number(left?.priority || 0));
+
+  const dedupe = new Set();
+  return normalized.filter((entry) => {
+    const key = String(entry?.stream_url || "").trim();
+    if (!key || dedupe.has(key)) {
+      return false;
+    }
+    dedupe.add(key);
+    return true;
+  });
+}
+
 async function fetchRemote(target, extraHeaders = {}) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), PROXY_TIMEOUT_MS);
@@ -1874,6 +2110,40 @@ async function handleAnimeSibnet(req, res, requestUrl) {
   }
 }
 
+async function handleZenixOwnedSource(req, res, requestUrl) {
+  if (requestUrl.pathname !== "/api/zenix-source") {
+    return false;
+  }
+  if (req.method !== "GET") {
+    sendJson(res, 405, { error: "Method Not Allowed" });
+    return true;
+  }
+
+  const mediaId = toInt(requestUrl.searchParams.get("mediaId"), 0, 0, 999999999);
+  if (mediaId <= 0) {
+    sendJson(res, 400, { error: "Missing mediaId" });
+    return true;
+  }
+  const type = String(requestUrl.searchParams.get("type") || "movie").toLowerCase() === "tv" ? "tv" : "movie";
+  const season = toInt(requestUrl.searchParams.get("season"), 1, 1, 500);
+  const episode = toInt(requestUrl.searchParams.get("episode"), 1, 1, 50000);
+
+  const sources = resolveOwnedSources(type, mediaId, season, episode);
+  sendJson(res, 200, {
+    apiVersion: "zenix-owned-source-v1",
+    type: "success",
+    data: {
+      mediaId,
+      mediaType: type,
+      season: type === "tv" ? season : 1,
+      episode: type === "tv" ? episode : 1,
+      count: sources.length,
+      sources,
+    },
+  });
+  return true;
+}
+
 async function handleApiProxy(req, res, requestUrl) {
   if (!requestUrl.pathname.startsWith("/api/")) {
     return false;
@@ -2042,6 +2312,12 @@ const server = http.createServer((req, res) => {
     })
     .then((handledAnimeSibnet) => {
       if (handledAnimeSibnet) {
+        return true;
+      }
+      return handleZenixOwnedSource(req, res, requestUrl);
+    })
+    .then((handledOwnedSource) => {
+      if (handledOwnedSource) {
         return true;
       }
       return handleApiProxy(req, res, requestUrl);

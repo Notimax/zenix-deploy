@@ -53,6 +53,7 @@ const STREAM_PROXY_PREFETCH_TIMEOUT_MS = 4200;
 const STREAM_DIRECT_TIMEOUT_MS = 5200;
 const STREAM_DIRECT_PREFETCH_TIMEOUT_MS = 3600;
 const ANIME_SIBNET_TIMEOUT_MS = 11000;
+const ZENIX_OWNED_SOURCE_TIMEOUT_MS = 7000;
 const EPISODE_SOON_VERIFY_TTL_MS = 3 * 60 * 1000;
 const EPISODE_SOON_VERIFY_LIMIT = 40;
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
@@ -5119,7 +5120,8 @@ async function syncDetailLanguageOptions(id, season, episode) {
     };
   }
   const payload = await fetchStreamJson(`/stream/${id}/episode?season=${season}&episode=${episode}`);
-  const sources = extractSources(payload);
+  const baseSources = extractSources(payload);
+  const sources = await appendZenixOwnedSources(item, season, episode, baseSources);
   const languages = getAvailableLanguages(sources);
   const selected = resolvePreferredLanguage(id, refs.detailLanguageSelect?.value || "", languages);
   populateLanguageSelect(refs.detailLanguageSelect, languages, selected);
@@ -5514,7 +5516,8 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
   }
 
   clearManualSourceLock();
-  state.sourcePool = extractSources(payload);
+  const baseMovieSources = extractSources(payload);
+  state.sourcePool = await appendZenixOwnedSources(item, 1, 1, baseMovieSources);
   state.allEpisodeSources = state.sourcePool.slice();
   state.sourceRetryAttempts.clear();
   if (state.sourcePool.length === 0) {
@@ -5538,7 +5541,8 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
       return;
     }
     clearManualSourceLock();
-    state.sourcePool = extractSources(refreshedPayload);
+    const refreshedMovieSources = extractSources(refreshedPayload);
+    state.sourcePool = await appendZenixOwnedSources(item, 1, 1, refreshedMovieSources);
     state.allEpisodeSources = state.sourcePool.slice();
     state.sourceRetryAttempts.clear();
     if (state.sourcePool.length === 0) {
@@ -5588,11 +5592,12 @@ async function loadEpisodeStream(
   const applyEpisodeSourcePayload = async (nextPayload, preferredLanguageInput = "") => {
     clearManualSourceLock();
     const baseSources = extractSources(nextPayload);
+    const ownedMergedSources = await appendZenixOwnedSources(item, season, episode, baseSources);
     state.allEpisodeSources = await appendAnimeSibnetSource(
       item,
       season,
       episode,
-      baseSources,
+      ownedMergedSources,
       preferredLanguageInput
     );
     state.availableLanguages = getAvailableLanguages(state.allEpisodeSources);
@@ -5704,6 +5709,70 @@ async function switchPlayerEpisode(season, episode, options = {}) {
 function toAnimeSibnetLanguageToken(language) {
   const raw = String(language || "").trim().toUpperCase();
   return raw === "VF" ? "vf" : "vostfr";
+}
+
+function getOwnedSourceMediaType(item) {
+  return String(item?.type || "").toLowerCase() === "tv" ? "tv" : "movie";
+}
+
+async function appendZenixOwnedSources(item, season, episode, sources) {
+  const base = Array.isArray(sources) ? sources.slice() : [];
+  const mediaId = Number(item?.id || 0);
+  if (!item || mediaId <= 0) {
+    return base;
+  }
+
+  const mediaType = getOwnedSourceMediaType(item);
+  const safeSeason = Math.max(1, Number(season || 1));
+  const safeEpisode = Math.max(1, Number(episode || 1));
+  const params = new URLSearchParams({
+    mediaId: String(mediaId),
+    type: mediaType,
+    season: String(safeSeason),
+    episode: String(safeEpisode),
+  });
+
+  try {
+    const payload = await fetchJson(`${API_BASE}/zenix-source?${params.toString()}`, {
+      timeoutMs: ZENIX_OWNED_SOURCE_TIMEOUT_MS,
+      retryDelays: [260],
+    });
+    const raw = Array.isArray(payload?.data?.sources) ? payload.data.sources : [];
+    if (raw.length === 0) {
+      return base;
+    }
+
+    const existing = new Set(base.map((entry) => String(entry?.url || "").trim()).filter(Boolean));
+    const owned = raw
+      .map((entry, index) =>
+        normalizeSourceEntry(
+          {
+            ...entry,
+            source_name: String(entry?.source_name || entry?.name || "Zenix Source").trim() || "Zenix Source",
+          },
+          index
+        )
+      )
+      .filter((entry) => {
+        if (!entry) {
+          return false;
+        }
+        const key = String(entry.url || "").trim();
+        if (!key || existing.has(key)) {
+          return false;
+        }
+        existing.add(key);
+        return true;
+      });
+
+    if (owned.length === 0) {
+      return base;
+    }
+
+    return owned.concat(base);
+  } catch {
+    return base;
+  }
 }
 
 async function appendAnimeSibnetSource(item, season, episode, sources, language = "") {
