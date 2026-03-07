@@ -6,9 +6,9 @@ const FAVORITES_BACKUP_KEY = "zenix-favorites-backup-v1";
 const LANGUAGE_PREFS_KEY = "zenix-language-prefs-v1";
 const CATALOG_CACHE_KEY = "zenix-catalog-cache-v2";
 const CLEANUP_KEY = "zenix-sw-cleaned-v4";
-const REFRESH_FEED_MS = 10 * 60 * 1000;
-const REFRESH_TOP_MS = 60 * 60 * 1000;
-const ACTIVE_VIEW_SYNC_MS = 2 * 60 * 1000;
+const REFRESH_FEED_MS = 4 * 60 * 1000;
+const REFRESH_TOP_MS = 20 * 60 * 1000;
+const ACTIVE_VIEW_SYNC_MS = 45 * 1000;
 const REQUEST_TIMEOUT_MS = 15000;
 const RETRY_DELAYS_MS = [350, 900];
 const SEARCH_DEBOUNCE_MS = 180;
@@ -41,9 +41,10 @@ const CRITICAL_COVER_PRIME_MOBILE = 140;
 const CRITICAL_COVER_PRIME_DESKTOP = 84;
 const CRITICAL_COVER_PRIME_WAIT_MS = 700;
 const LIVE_RENDER_INTERACTION_GRACE_MS = 1200;
-const SCROLL_SYNC_THRESHOLD_PX = 900;
-const SCROLL_SYNC_DEBOUNCE_MS = 140;
-const SCROLL_SYNC_MIN_INTERVAL_MS = 420;
+const SCROLL_SYNC_THRESHOLD_PX = 1800;
+const SCROLL_SYNC_DEBOUNCE_MS = 80;
+const SCROLL_SYNC_MIN_INTERVAL_MS = 220;
+const HIDE_BROWSE_PANELS = true;
 const SEARCH_ASSIST_STEP_PAGES = 6;
 const SEARCH_ASSIST_MAX_STEPS = 3;
 const SEARCH_ASSIST_COOLDOWN_MS = 1200;
@@ -1540,21 +1541,21 @@ function getCatalogSyncProfile(view = resolveCatalogViewForSearch()) {
     };
   };
   const defaults = compact
-    ? { initialPages: 4, activeBatch: 5, manualBatch: 8, scrollBatch: 6 }
-    : { initialPages: 3, activeBatch: 4, manualBatch: 7, scrollBatch: 5 };
+    ? { initialPages: 6, activeBatch: 8, manualBatch: 12, scrollBatch: 10 }
+    : { initialPages: 5, activeBatch: 7, manualBatch: 11, scrollBatch: 9 };
 
   if (view === "movie" || view === "tv" || view === "anime") {
     return tune(
       compact
-      ? { initialPages: 6, activeBatch: 7, manualBatch: 10, scrollBatch: 9 }
-      : { initialPages: 5, activeBatch: 6, manualBatch: 9, scrollBatch: 8 }
+      ? { initialPages: 8, activeBatch: 10, manualBatch: 14, scrollBatch: 12 }
+      : { initialPages: 7, activeBatch: 9, manualBatch: 13, scrollBatch: 11 }
     );
   }
   if (view === "latest" || view === "popular") {
     return tune(
       compact
-      ? { initialPages: 5, activeBatch: 6, manualBatch: 9, scrollBatch: 8 }
-      : { initialPages: 4, activeBatch: 5, manualBatch: 8, scrollBatch: 7 }
+      ? { initialPages: 7, activeBatch: 9, manualBatch: 13, scrollBatch: 11 }
+      : { initialPages: 6, activeBatch: 8, manualBatch: 12, scrollBatch: 10 }
     );
   }
   return tune(defaults);
@@ -1930,6 +1931,7 @@ async function syncCatalogBatch(reason = "active", options = {}) {
 function scheduleScrollDrivenCatalogSync(options = {}) {
   const immediate = options.immediate === true;
   const force = options.force === true;
+  const nearBottom = isNearCatalogBottom();
   const run = () => {
     state.scrollSyncTimer = 0;
     syncCatalogForScroll({ force })
@@ -1939,7 +1941,7 @@ function scheduleScrollDrivenCatalogSync(options = {}) {
   };
 
   if (state.scrollSyncTimer) {
-    if (immediate) {
+    if (immediate || nearBottom) {
       clearTimeout(state.scrollSyncTimer);
       state.scrollSyncTimer = 0;
       run();
@@ -1947,7 +1949,7 @@ function scheduleScrollDrivenCatalogSync(options = {}) {
     return;
   }
 
-  if (immediate) {
+  if (immediate || nearBottom) {
     run();
     return;
   }
@@ -2796,6 +2798,15 @@ function startAutoRefresh() {
 }
 
 function renderFilterChips() {
+  if (HIDE_BROWSE_PANELS) {
+    if (refs.filtersPanel) {
+      refs.filtersPanel.hidden = true;
+    }
+    if (refs.filterChips) {
+      refs.filterChips.innerHTML = "";
+    }
+    return;
+  }
   const chips = [
     { id: "all", label: "Tous" },
     { id: "recent", label: "Recents" },
@@ -3243,8 +3254,8 @@ function renderAll() {
   setHidden(refs.heroSection, !showBrowseView);
   setHidden(refs.statusStrip, isInfoView || isCalendarView);
   setHidden(refs.quickLinksSection, true);
-  setHidden(refs.filtersPanel, isInfoView || isCalendarView || isTopView || isListView);
-  setHidden(refs.communityPanel, isInfoView || isCalendarView || isTopView || isListView);
+  setHidden(refs.filtersPanel, HIDE_BROWSE_PANELS || isInfoView || isCalendarView || isTopView || isListView);
+  setHidden(refs.communityPanel, HIDE_BROWSE_PANELS || isInfoView || isCalendarView || isTopView || isListView);
   setHidden(refs.infoSection, !isInfoView);
   setHidden(refs.calendarSection, !isCalendarView);
 
@@ -3672,6 +3683,15 @@ function renderFeatureRail(items) {
 }
 
 function renderCommunityStats() {
+  if (HIDE_BROWSE_PANELS) {
+    if (refs.communityPanel) {
+      refs.communityPanel.hidden = true;
+    }
+    if (refs.communityStats) {
+      refs.communityStats.innerHTML = "";
+    }
+    return;
+  }
   const total = state.catalog.length;
   const movies = state.catalog.filter((item) => item.type === "movie" && !item.isAnime).length;
   const series = state.catalog.filter((item) => item.type === "tv" && !item.isAnime).length;

@@ -864,6 +864,7 @@ body.startup-lock {
   border: 1px solid rgba(255, 255, 255, 0.12);
   background: rgba(255, 255, 255, 0.03);
   padding: 10px;
+  display: none !important;
 }
 
 .chip-row {
@@ -897,6 +898,7 @@ body.startup-lock {
   padding: 12px;
   display: grid;
   gap: 12px;
+  display: none !important;
 }
 
 .community-stats {
