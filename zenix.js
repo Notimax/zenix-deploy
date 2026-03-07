@@ -83,6 +83,7 @@ const SOURCE_FAILURE_PENALTY = 22;
 const SOURCE_SUCCESS_BONUS = 8;
 const SOURCE_RETRY_PER_INDEX = 1;
 const FILTER_PREMIUM_SOURCES = false;
+const AUTO_PREMIUM_FALLBACK = false;
 
 const FALLBACK_ITEMS = [
   {
@@ -5539,7 +5540,7 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
     await playFromSourcePoolWithRescue(resumeTime, token, {
       startIndex: 0,
       skipPremiumFallback: true,
-      allowPremiumRescue: true,
+      allowPremiumRescue: false,
     });
   } catch (firstError) {
     if (token !== state.playToken) {
@@ -5564,7 +5565,7 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
     await playFromSourcePoolWithRescue(resumeTime, token, {
       startIndex: 0,
       skipPremiumFallback: true,
-      allowPremiumRescue: true,
+      allowPremiumRescue: false,
     });
     showToast("Source film actualisee automatiquement.");
   }
@@ -5643,7 +5644,7 @@ async function loadEpisodeStream(
       await playFromSourcePoolWithRescue(resumeTime, token, {
         startIndex: 0,
         skipPremiumFallback: true,
-        allowPremiumRescue: true,
+        allowPremiumRescue: false,
       });
     } catch (error) {
       if (state.allEpisodeSources.length <= state.sourcePool.length) {
@@ -5657,7 +5658,7 @@ async function loadEpisodeStream(
       await playFromSourcePoolWithRescue(resumeTime, token, {
         startIndex: 0,
         skipPremiumFallback: true,
-        allowPremiumRescue: true,
+        allowPremiumRescue: false,
       });
       showToast("Bascule auto vers une source plus compatible.");
     }
@@ -5745,7 +5746,6 @@ function toZenixRelayUrl(source) {
   if (isEmbedSource(source, absolute)) {
     return "";
   }
-
   const isHls = String(source?.format || "").toLowerCase() === "hls" || /m3u8(?:$|\?)/i.test(absolute);
   if (isHls) {
     return `${API_BASE}/hls-proxy?url=${encodeURIComponent(absolute)}`;
@@ -6150,7 +6150,7 @@ async function trySwitchToNextSource() {
   const currentSource = state.sourcePool[state.sourceIndex] || null;
   const avoidPremiumAuto = !currentSource?.premiumHint;
   let nextIndex = getNextAutomaticSourceIndex(state.sourceIndex, avoidPremiumAuto);
-  if (nextIndex < 0) {
+  if (nextIndex < 0 && AUTO_PREMIUM_FALLBACK) {
     nextIndex = getFallbackSourceIndex(state.sourceIndex);
   }
   if (nextIndex < 0 || nextIndex >= state.sourcePool.length) {
@@ -6159,7 +6159,7 @@ async function trySwitchToNextSource() {
       state.sourceRetryAttempts.clear();
       state.sourceIndex = -1;
       nextIndex = getNextAutomaticSourceIndex(-1, avoidPremiumAuto);
-      if (nextIndex < 0) {
+      if (nextIndex < 0 && AUTO_PREMIUM_FALLBACK) {
         nextIndex = getFallbackSourceIndex(-1);
       }
       showToast("Bascule automatique vers une autre langue/source.");
@@ -6626,6 +6626,27 @@ function showPlayerEmbedFrame(url) {
   refs.playerEmbedFrame.setAttribute("src", String(url || "").trim());
 }
 
+function extractProxyTargetUrl(url) {
+  const raw = String(url || "").trim();
+  if (!raw) {
+    return "";
+  }
+  try {
+    const parsed = new URL(raw, window.location.href);
+    if (!/\/api\/hls-proxy$/i.test(parsed.pathname)) {
+      return "";
+    }
+    const target = String(parsed.searchParams.get("url") || "").trim();
+    if (!target) {
+      return "";
+    }
+    const absolute = new URL(target, window.location.href).href;
+    return /^https?:\/\//i.test(absolute) ? absolute : "";
+  } catch {
+    return "";
+  }
+}
+
 function buildPlayableSourceCandidates(source, options = {}) {
   const raw = String(source?.url || "").trim();
   if (!raw) {
@@ -6648,6 +6669,19 @@ function buildPlayableSourceCandidates(source, options = {}) {
   const isRemoteHttp = /^https?:\/\//i.test(absolute);
   const looksLikeHls = source?.format === "hls" || /m3u8/i.test(absolute);
   const proxyUrl = !isProxied && isRemoteHttp ? `${API_BASE}/hls-proxy?url=${encodeURIComponent(absolute)}` : "";
+  const proxiedTarget = isProxied ? extractProxyTargetUrl(absolute) : "";
+
+  if (looksLikeHls && isProxied) {
+    if (options.preferDirectHls && proxiedTarget) {
+      candidates.push(proxiedTarget, absolute);
+    } else {
+      candidates.push(absolute);
+      if (proxiedTarget) {
+        candidates.push(proxiedTarget);
+      }
+    }
+    return Array.from(new Set(candidates.filter(Boolean)));
+  }
 
   if (looksLikeHls && options.preferDirectHls) {
     candidates.push(absolute);
