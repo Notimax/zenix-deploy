@@ -1096,14 +1096,41 @@ function extractAnimePanels(catalogHtml) {
   return panels;
 }
 
+function inferAnimePanelLanguage(panel) {
+  const path = String(panel?.path || "").trim().toLowerCase();
+  const label = String(panel?.label || "").trim().toLowerCase();
+  const probe = `${path} ${label}`;
+  if (/(^|\/|\s)vostfr($|\/|\s)/i.test(probe)) {
+    return "vostfr";
+  }
+  if (/(^|\/|\s)vf($|\/|\s)/i.test(probe)) {
+    return "vf";
+  }
+  if (/(^|\/|\s)vo($|\/|\s)/i.test(probe)) {
+    return "vo";
+  }
+  return "";
+}
+
 function chooseAnimePanelPath(panels, season = 1, language = "vostfr") {
   const rows = Array.isArray(panels) ? panels.filter(Boolean) : [];
   if (rows.length === 0) {
-    return "";
+    return null;
   }
   const safeSeason = Math.max(1, Number(season || 1));
   const safeLang = String(language || "vostfr").toLowerCase() === "vf" ? "vf" : "vostfr";
   const seasonToken = `saison${safeSeason}`;
+  const toResult = (panel, matchedRequested = false) => {
+    if (!panel) {
+      return null;
+    }
+    return {
+      path: String(panel.path || "").trim(),
+      label: String(panel.label || "").trim(),
+      language: inferAnimePanelLanguage(panel) || safeLang,
+      matchedRequested: Boolean(matchedRequested),
+    };
+  };
 
   const withSeason = rows.filter((entry) => String(entry.path || "").toLowerCase().includes(seasonToken));
   const seasonAndLang = withSeason.find((entry) => {
@@ -1111,19 +1138,19 @@ function chooseAnimePanelPath(panels, season = 1, language = "vostfr") {
     return value.endsWith(`/${safeLang}`) || value.includes(`/${safeLang}/`) || value.endsWith(safeLang);
   });
   if (seasonAndLang) {
-    return seasonAndLang.path;
+    return toResult(seasonAndLang, true);
   }
   if (withSeason.length > 0) {
-    return withSeason[0].path;
+    return toResult(withSeason[0], false);
   }
   const langOnly = rows.find((entry) => {
     const value = String(entry.path || "").toLowerCase();
     return value.endsWith(`/${safeLang}`) || value.includes(`/${safeLang}/`) || value.endsWith(safeLang);
   });
   if (langOnly) {
-    return langOnly.path;
+    return toResult(langOnly, true);
   }
-  return rows[0].path;
+  return toResult(rows[0], false);
 }
 
 function extractEpisodesScriptUrl(pageHtml, pageUrl) {
@@ -1228,10 +1255,12 @@ async function resolveAnimeSibnetSource(title, season, episode, language = "vost
     throw new Error("Anime page unavailable");
   }
   const panels = extractAnimePanels(catalogResponse.body);
-  const selectedPanelPath = chooseAnimePanelPath(panels, safeSeason, safeLanguage);
-  if (!selectedPanelPath) {
+  const selectedPanel = chooseAnimePanelPath(panels, safeSeason, safeLanguage);
+  if (!selectedPanel || !selectedPanel.path) {
     throw new Error("Anime panel unavailable");
   }
+  const selectedPanelPath = selectedPanel.path;
+  const resolvedLanguage = String(selectedPanel.language || safeLanguage).toLowerCase();
 
   const baseCatalogUrl = catalogUrl.endsWith("/") ? catalogUrl : `${catalogUrl}/`;
   const seasonPageUrl = new URL(`${selectedPanelPath.replace(/^\/+/, "")}/`, baseCatalogUrl).href;
@@ -1259,12 +1288,16 @@ async function resolveAnimeSibnetSource(title, season, episode, language = "vost
     title: safeTitle,
     season: safeSeason,
     episode: safeEpisode,
-    language: safeLanguage,
+    requestedLanguage: safeLanguage,
+    language: resolvedLanguage,
+    matchedRequestedLanguage: Boolean(selectedPanel.matchedRequested),
     catalogUrl,
     seasonPageUrl,
     episodesScriptUrl,
     sourceUrl,
     sourceArray: picked.name,
+    panelPath: selectedPanelPath,
+    panelLabel: selectedPanel.label,
   };
 
   animeSibnetCache.set(cacheKey, {

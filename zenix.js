@@ -5723,7 +5723,7 @@ async function appendAnimeSibnetSource(item, season, episode, sources, language 
   const safeSeason = Math.max(1, Number(season || 1));
   const safeEpisode = Math.max(1, Number(episode || 1));
   const langToken = toAnimeSibnetLanguageToken(language);
-  const sourceLanguage = langToken === "vf" ? "VF" : "VOSTFR";
+  const fallbackLanguage = langToken === "vf" ? "VF" : "VOSTFR";
   const params = new URLSearchParams({
     title: safeTitle,
     season: String(safeSeason),
@@ -5740,6 +5740,8 @@ async function appendAnimeSibnetSource(item, season, episode, sources, language 
     if (!sourceUrl) {
       return base;
     }
+    const resolvedLanguage = normalizeLanguageLabel(payload?.data?.language || "");
+    const sourceLanguage = resolvedLanguage || fallbackLanguage;
     const sibnetEntry = normalizeSourceEntry(
       {
         stream_url: sourceUrl,
