@@ -86,6 +86,8 @@ const SOURCE_SUCCESS_BONUS = 8;
 const SOURCE_RETRY_PER_INDEX = 1;
 const FILTER_PREMIUM_SOURCES = false;
 const AUTO_PREMIUM_FALLBACK = true;
+const SKIP_INTRO_SECONDS = 85;
+const SKIP_RECAP_SECONDS = 45;
 const INTEREST_QUERY_MAX = 40;
 const INTEREST_SEED_MAX = 40;
 const INTEREST_HOME_LIMIT = 10;
@@ -334,6 +336,7 @@ const refs = {
   playerForwardBtn: document.getElementById("playerForwardBtn"),
   playerRetryBtn: document.getElementById("playerRetryBtn"),
   playerSkipIntroBtn: document.getElementById("playerSkipIntroBtn"),
+  playerSkipRecapBtn: document.getElementById("playerSkipRecapBtn"),
   playerFullscreenBtn: document.getElementById("playerFullscreenBtn"),
   playerPipBtn: document.getElementById("playerPipBtn"),
   playerSpeedSelect: document.getElementById("playerSpeedSelect"),
@@ -1289,7 +1292,12 @@ function bindEvents() {
   });
   bindFastPress(refs.playerSkipIntroBtn, () => {
     const duration = Number(refs.playerVideo.duration || 0);
-    const next = Number(refs.playerVideo.currentTime || 0) + 85;
+    const next = Number(refs.playerVideo.currentTime || 0) + SKIP_INTRO_SECONDS;
+    refs.playerVideo.currentTime = Number.isFinite(duration) && duration > 0 ? Math.min(duration, next) : next;
+  });
+  bindFastPress(refs.playerSkipRecapBtn, () => {
+    const duration = Number(refs.playerVideo.duration || 0);
+    const next = Number(refs.playerVideo.currentTime || 0) + SKIP_RECAP_SECONDS;
     refs.playerVideo.currentTime = Number.isFinite(duration) && duration > 0 ? Math.min(duration, next) : next;
   });
   bindFastPress(refs.playerFullscreenBtn, () => {
@@ -4216,6 +4224,7 @@ function renderTopDaily() {
     const runtime = item.runtime ? toHumanRuntime(item.runtime) : item.type === "tv" ? "Episodes" : "Film";
     const year = getYear(item.releaseDate) || "-";
     const languageLabel = resolveDetailLanguageLabel(details, item.id);
+    const isComingSoonRelease = isComingSoon(item);
     const isNewRelease = isRecentlyReleased(item, NEW_RELEASE_DAYS);
     const hasResume = Number(state.progress?.[item.id]?.time || 0) > 45;
 
@@ -4245,7 +4254,8 @@ function renderTopDaily() {
         <button type="button" class="title-link top-title-link" data-top-open="${item.id}">${escapeHtml(item.title)}</button>
         <p class="top-meta">
           <span class="meta-pill">${escapeHtml(getItemTypeLabel(item))}</span>
-          ${isNewRelease ? '<span class="meta-pill meta-pill-new">Nouveau</span>' : ""}
+          ${isComingSoonRelease ? '<span class="meta-pill meta-pill-soon">Bientot dispo</span>' : ""}
+          ${!isComingSoonRelease && isNewRelease ? '<span class="meta-pill meta-pill-new">Nouveau</span>' : ""}
           ${hasResume ? '<span class="meta-pill meta-pill-resume">Reprise</span>' : ""}
           <span class="meta-dot" aria-hidden="true"></span>
           <span>${escapeHtml(runtime)}</span>
@@ -4537,6 +4547,7 @@ function buildMediaCard(item, resume = false, progressEntry = null, position = 0
   const languageLabel = resolveDetailLanguageLabel(details, item.id);
   const favorite = isFavorite(item.id);
   const progress = progressEntry || state.progress[item.id] || null;
+  const isComingSoonRelease = isComingSoon(item);
   const isNewRelease = isRecentlyReleased(item, NEW_RELEASE_DAYS);
   const hasResume = Number(progress?.time || 0) > 45;
   const ratioRaw = progress && Number(progress.duration || 0) > 0
@@ -4577,9 +4588,10 @@ function buildMediaCard(item, resume = false, progressEntry = null, position = 0
     </div>
     <div class="media-body">
       <button type="button" class="title-link media-title-link" data-card-open="${item.id}">${escapeHtml(item.title)}</button>
-      <p class="media-meta">
+        <p class="media-meta">
         <span class="meta-pill">${escapeHtml(typeLabel)}</span>
-        ${isNewRelease ? '<span class="meta-pill meta-pill-new">Nouveau</span>' : ""}
+        ${isComingSoonRelease ? '<span class="meta-pill meta-pill-soon">Bientot dispo</span>' : ""}
+        ${!isComingSoonRelease && isNewRelease ? '<span class="meta-pill meta-pill-new">Nouveau</span>' : ""}
         ${hasResume ? '<span class="meta-pill meta-pill-resume">Reprise</span>' : ""}
         <span class="meta-dot" aria-hidden="true"></span>
         <span>${escapeHtml(runtime)}</span>
@@ -7628,8 +7640,20 @@ function isRecentlyReleased(item, days = NEW_RELEASE_DAYS) {
   if (!ts) {
     return false;
   }
+  const now = Date.now();
+  if (ts > now) {
+    return false;
+  }
   const limit = Math.max(1, Number(days || NEW_RELEASE_DAYS)) * 24 * 60 * 60 * 1000;
-  return Date.now() - ts <= limit;
+  return now - ts <= limit;
+}
+
+function isComingSoon(item) {
+  const ts = parseReleaseDate(item?.releaseDate || "");
+  if (!ts) {
+    return false;
+  }
+  return ts > Date.now();
 }
 
 function toHumanRuntime(minutes) {

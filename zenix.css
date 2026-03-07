@@ -1527,6 +1527,12 @@ body.startup-lock {
   color: #fff0c7;
 }
 
+.meta-pill-soon {
+  border-color: rgba(179, 139, 255, 0.62);
+  background: rgba(179, 139, 255, 0.2);
+  color: #f0e4ff;
+}
+
 .meta-pill-resume {
   border-color: rgba(142, 208, 255, 0.56);
   background: rgba(142, 208, 255, 0.18);
