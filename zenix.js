@@ -4424,39 +4424,70 @@ function renderHomeInterest() {
     return;
   }
 
-  const continueIds = new Set(
-    getContinueEntries(6)
-      .map((entry) => Number(entry?.id || 0))
-      .filter((id) => id > 0)
-  );
+  const collectRatedIds = (targetRating) => {
+    const ids = new Set();
+    Object.entries(state.ratings || {}).forEach(([idRaw, row]) => {
+      const id = Number(idRaw || row?.id || 0);
+      if (id <= 0) {
+        return;
+      }
+      const rating = normalizeRatingValue(row?.value || row);
+      if (rating === targetRating) {
+        ids.add(id);
+      }
+    });
+    return ids;
+  };
+
+  const collectSeenIds = () => {
+    const ids = new Set();
+    Object.values(state.progress || {}).forEach((entry) => {
+      const id = Number(entry?.id || 0);
+      if (id <= 0) {
+        return;
+      }
+      const time = Number(entry?.time || 0);
+      const lastPlayed = Number(entry?.lastPlayed || 0);
+      if (time > 0 || lastPlayed > 0) {
+        ids.add(id);
+      }
+    });
+    return ids;
+  };
+
+  const likedIds = collectRatedIds(1);
+  const dislikedIds = collectRatedIds(-1);
+  const seenIds = collectSeenIds();
+  const blockedIds = new Set([...likedIds, ...dislikedIds, ...seenIds]);
   const ranked = getInterestCatalog();
   const picks = [];
-  const seenIds = new Set();
+  const pickedIds = new Set();
 
-  for (const item of ranked) {
-    const id = Number(item?.id || 0);
-    if (id <= 0 || seenIds.has(id) || continueIds.has(id)) {
-      continue;
+  const appendFromPool = (pool) => {
+    for (const item of pool) {
+      const id = Number(item?.id || 0);
+      if (id <= 0 || pickedIds.has(id) || blockedIds.has(id)) {
+        continue;
+      }
+      pickedIds.add(id);
+      picks.push(item);
+      if (picks.length >= INTEREST_HOME_LIMIT) {
+        return;
+      }
     }
-    seenIds.add(id);
-    picks.push(item);
-    if (picks.length >= INTEREST_HOME_LIMIT) {
-      break;
-    }
+  };
+
+  appendFromPool(ranked);
+
+  if (picks.length < INTEREST_HOME_LIMIT) {
+    appendFromPool(getPopularCatalog());
   }
 
   if (picks.length < INTEREST_HOME_LIMIT) {
-    for (const item of ranked) {
-      const id = Number(item?.id || 0);
-      if (id <= 0 || seenIds.has(id)) {
-        continue;
-      }
-      seenIds.add(id);
-      picks.push(item);
-      if (picks.length >= INTEREST_HOME_LIMIT) {
-        break;
-      }
-    }
+    const recentCatalog = state.catalog
+      .slice()
+      .sort((a, b) => parseReleaseDate(b.releaseDate) - parseReleaseDate(a.releaseDate));
+    appendFromPool(recentCatalog);
   }
 
   const finalPicks = picks.slice(0, INTEREST_HOME_LIMIT);

@@ -1,11 +1,11 @@
-$ErrorActionPreference = "Stop"
-
 param(
   [string]$Message = "chore: update live site",
   [string[]]$Remotes = @("origin", "deploypublic"),
   [string]$Branch = "main",
   [switch]$SkipCommit
 )
+
+$ErrorActionPreference = "Stop"
 
 function Invoke-GitChecked {
   param(
