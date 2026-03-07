@@ -5896,13 +5896,28 @@ function formatSourceLabel(source, index, total) {
   if (source?.format && source.format !== "unknown") {
     chunks.push(source.format.toUpperCase());
   }
-  if (source?.host) {
-    chunks.push(source.host);
-  }
   if (source?.premiumHint) {
     chunks.push("Premium");
   }
   return chunks.join(" - ");
+}
+
+function isUnplayablePlayError(error) {
+  const name = String(error?.name || "").toLowerCase();
+  const message = String(error?.message || "").toLowerCase();
+  if (name.includes("notsupported")) {
+    return true;
+  }
+  if (message.includes("no supported sources")) {
+    return true;
+  }
+  if (message.includes("media could not be loaded")) {
+    return true;
+  }
+  if (message.includes("decoding") && message.includes("failed")) {
+    return true;
+  }
+  return false;
 }
 
 function isPremiumLikeSource(source) {
@@ -6114,6 +6129,10 @@ async function startPlayerSource(source, resumeTime, token) {
           return;
         }
 
+        if (video.error && Number(video.error.code || 0) > 0) {
+          throw new Error(`Video error code ${Number(video.error.code || 0)}`);
+        }
+
         if (resumeTime > 5 && Number.isFinite(video.duration) && resumeTime < video.duration - 8) {
           video.currentTime = resumeTime;
         }
@@ -6121,7 +6140,10 @@ async function startPlayerSource(source, resumeTime, token) {
         try {
           await video.play();
           setPlayerStatus("Lecture en cours.");
-        } catch {
+        } catch (playError) {
+          if (isUnplayablePlayError(playError)) {
+            throw playError;
+          }
           setPlayerStatus("Clique sur Play dans le lecteur pour demarrer.");
         }
         sourceStarted = true;
