@@ -4796,6 +4796,70 @@ function getFirstPlayableEpisode(episodes) {
   return row ? Number(row.episode || 1) : Number(episodes?.[0]?.episode || 1);
 }
 
+function findFirstPlayableSeasonEpisode(seasons) {
+  const rows = Array.isArray(seasons) ? seasons : [];
+  for (const seasonRow of rows) {
+    const episodes = Array.isArray(seasonRow?.episodes) ? seasonRow.episodes : [];
+    const playable = episodes.find((entry) => !entry?.isSoon);
+    if (playable) {
+      return {
+        season: Number(seasonRow.season || 0),
+        episode: Number(playable.episode || 1),
+      };
+    }
+  }
+  return null;
+}
+
+function resolveSeasonEpisodeForPlayback(seasons, preferredSeason, preferredEpisode) {
+  const rows = Array.isArray(seasons) ? seasons : [];
+  if (rows.length === 0) {
+    return { season: 0, episode: 0, episodes: [], episodeMeta: null };
+  }
+
+  let season = Number(preferredSeason || rows[0].season || 1);
+  if (!rows.some((entry) => entry.season === season)) {
+    season = Number(rows[0].season || 1);
+  }
+
+  let episodes = getEpisodesForSeason(rows, season);
+  if (episodes.length === 0) {
+    const fallbackSeason = rows.find((entry) => Array.isArray(entry?.episodes) && entry.episodes.length > 0);
+    if (fallbackSeason) {
+      season = Number(fallbackSeason.season || season);
+      episodes = getEpisodesForSeason(rows, season);
+    }
+  }
+
+  if (episodes.length === 0) {
+    return { season, episode: 0, episodes: [], episodeMeta: null };
+  }
+
+  let episode = Number(preferredEpisode || getFirstPlayableEpisode(episodes) || episodes[0]?.episode || 1);
+  if (!episodes.some((entry) => entry.episode === episode)) {
+    episode = getFirstPlayableEpisode(episodes);
+  }
+
+  let episodeMeta = episodes.find((entry) => entry.episode === episode) || null;
+  if (episodeMeta?.isSoon) {
+    const sameSeasonPlayable = episodes.find((entry) => !entry?.isSoon) || null;
+    if (sameSeasonPlayable) {
+      episode = Number(sameSeasonPlayable.episode || episode);
+      episodeMeta = sameSeasonPlayable;
+    } else {
+      const crossSeason = findFirstPlayableSeasonEpisode(rows);
+      if (crossSeason) {
+        season = crossSeason.season;
+        episodes = getEpisodesForSeason(rows, season);
+        episode = crossSeason.episode;
+        episodeMeta = episodes.find((entry) => entry.episode === episode) || null;
+      }
+    }
+  }
+
+  return { season, episode, episodes, episodeMeta };
+}
+
 function populateSeasonSelect(select, seasons, selectedSeason) {
   select.innerHTML = "";
   seasons.forEach((entry) => {
@@ -5332,31 +5396,29 @@ async function openPlayer(id, options = {}) {
         return;
       }
 
-      let season = Number(options.season || resume?.season || seasons[0].season);
-      if (!seasons.some((entry) => entry.season === season)) {
-        season = seasons[0].season;
-      }
-
-      const episodes = getEpisodesForSeason(seasons, season);
+      let { season, episode, episodes, episodeMeta } = resolveSeasonEpisodeForPlayback(
+        seasons,
+        Number(options.season || resume?.season || seasons[0].season),
+        Number(options.episode || resume?.episode || 0)
+      );
       if (episodes.length === 0) {
         throw new Error("No episode for selected season");
       }
 
-      let firstPlayable = getFirstPlayableEpisode(episodes);
-      let episode = Number(options.episode || resume?.episode || firstPlayable);
-      if (!episodes.some((entry) => entry.episode === episode)) {
-        episode = firstPlayable;
-      }
-      let foundEpisode = episodes.find((entry) => entry.episode === episode);
-      if (foundEpisode?.isSoon && isGenericEpisodePlaceholderName(foundEpisode?.name, foundEpisode?.episode)) {
+      if (episodeMeta?.isSoon && isGenericEpisodePlaceholderName(episodeMeta?.name, episodeMeta?.episode)) {
         const selectedPlayable = await isEpisodePlayableByStream(id, season, episode);
         if (selectedPlayable) {
-          foundEpisode.isSoon = false;
-          firstPlayable = getFirstPlayableEpisode(episodes);
+          episodeMeta.isSoon = false;
         }
       }
-      if (foundEpisode?.isSoon) {
-        episode = firstPlayable;
+      if (episodeMeta?.isSoon) {
+        const fallback = resolveSeasonEpisodeForPlayback(seasons, season, 0);
+        if (fallback.episodes.length > 0) {
+          season = fallback.season;
+          episode = fallback.episode;
+          episodes = fallback.episodes;
+          episodeMeta = fallback.episodeMeta;
+        }
       }
 
       populateSeasonSelect(refs.playerSeasonSelect, seasons, season);
