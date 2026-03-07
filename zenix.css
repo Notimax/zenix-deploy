@@ -1394,6 +1394,38 @@ body.startup-lock {
   color: #fff;
 }
 
+.continue-remove-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 7;
+  width: 32px;
+  height: 32px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 999px;
+  background: rgba(10, 12, 19, 0.76);
+  color: #f3f6ff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.34);
+}
+
+.continue-remove-btn svg {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+}
+
+.continue-remove-btn:hover,
+.continue-remove-btn:focus-visible {
+  border-color: rgba(255, 105, 117, 0.88);
+  background: rgba(44, 14, 20, 0.88);
+  color: #ffe6eb;
+}
+
 .progress-track {
   position: absolute;
   left: 0;

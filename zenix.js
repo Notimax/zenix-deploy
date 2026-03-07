@@ -144,6 +144,7 @@ const state = {
   sourceHostHealth: loadSourceHostHealth(),
   sourceLoading: false,
   sourceLoadTicket: 0,
+  lastPlaybackHardRefreshAt: 0,
   playbackHealthTimer: 0,
   playbackGuardTimer: 0,
   allEpisodeSources: [],
@@ -4321,6 +4322,19 @@ function renderContinue() {
   observeMediaCards(refs.continueGrid);
 }
 
+function removeContinueProgressEntry(id, options = {}) {
+  const mediaId = Number(id || 0);
+  if (mediaId <= 0 || !state.progress || !state.progress[mediaId]) {
+    return false;
+  }
+  delete state.progress[mediaId];
+  saveProgress(state.progress);
+  if (options.render !== false) {
+    renderAll();
+  }
+  return true;
+}
+
 function buildMediaCard(item, resume = false, progressEntry = null, position = 0, imageProfile = null) {
   const card = document.createElement("article");
   card.className = "media-card";
@@ -4343,6 +4357,11 @@ function buildMediaCard(item, resume = false, progressEntry = null, position = 0
     ? (Number(progress.time || 0) / Number(progress.duration || 1)) * 100
     : 0;
   const ratio = Math.max(0, Math.min(100, Math.round(ratioRaw)));
+  const removeContinueButton = resume
+    ? `<button type="button" class="continue-remove-btn" data-card-remove-progress="${item.id}" aria-label="Retirer ${escapeHtml(item.title)} de Continuer">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18.3 5.71 12 12l6.3 6.29-1.41 1.41L10.59 13.4 4.29 19.7 2.88 18.29 9.17 12 2.88 5.71 4.29 4.29l6.3 6.3 6.29-6.3z"></path></svg>
+      </button>`
+    : "";
 
   card.innerHTML = `
     <div class="media-shell">
@@ -4366,6 +4385,7 @@ function buildMediaCard(item, resume = false, progressEntry = null, position = 0
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5c-1.8-2.1-5-2.4-7.1-.4-2.4 2.2-2.5 6-.2 8.4l7.3 7.5 7.3-7.5c2.3-2.4 2.2-6.2-.2-8.4-2.1-2-5.3-1.7-7.1.4z"></path></svg>
         </button>
       </div>
+      ${removeContinueButton}
       <button type="button" class="media-open" data-card-open="${item.id}" aria-label="Voir la fiche de ${escapeHtml(item.title)}"></button>
       ${ratio > 0 ? `<div class="progress-track"><span style="width:${ratio}%"></span></div>` : ""}
     </div>
@@ -4394,6 +4414,7 @@ function buildMediaCard(item, resume = false, progressEntry = null, position = 0
   const play = card.querySelector(`[data-card-play="${item.id}"]`);
   const info = card.querySelector(`[data-card-info="${item.id}"]`);
   const fav = card.querySelector(`[data-card-fav="${item.id}"]`);
+  const removeContinue = card.querySelector(`[data-card-remove-progress="${item.id}"]`);
   const openButtons = card.querySelectorAll(`[data-card-open="${item.id}"]`);
 
   if (play) {
@@ -4428,6 +4449,14 @@ function buildMediaCard(item, resume = false, progressEntry = null, position = 0
       const nowFavorite = isFavorite(item.id);
       fav.classList.toggle("active", nowFavorite);
       fav.setAttribute("aria-label", nowFavorite ? "Retirer de ma liste" : "Ajouter a ma liste");
+    });
+  }
+
+  if (removeContinue) {
+    bindFastPress(removeContinue, () => {
+      if (removeContinueProgressEntry(item.id, { render: true })) {
+        showToast("Retire de Continuer.");
+      }
     });
   }
   openButtons.forEach((button) => {
@@ -6084,10 +6113,18 @@ function schedulePlaybackHealthMonitor(token, step = 0) {
 
 async function retryCurrentSource(options = {}) {
   if (!state.sourcePool.length || state.sourceIndex < 0) {
+    const recovered = await hardRefreshCurrentPlayback(false);
+    if (recovered) {
+      return;
+    }
     throw new Error("No active source");
   }
   const source = state.sourcePool[state.sourceIndex] || null;
   if (!source) {
+    const recovered = await hardRefreshCurrentPlayback(false);
+    if (recovered) {
+      return;
+    }
     throw new Error("No active source");
   }
   const token = ++state.playToken;
@@ -6198,11 +6235,19 @@ async function trySwitchToNextSource() {
       }
       showToast("Bascule automatique vers une autre langue/source.");
     } else {
+      const recovered = await hardRefreshCurrentPlayback();
+      if (recovered) {
+        return;
+      }
       setPlayerStatus("Source indisponible. Aucun secours disponible.", true);
       return;
     }
   }
   if (nextIndex < 0) {
+    const recovered = await hardRefreshCurrentPlayback();
+    if (recovered) {
+      return;
+    }
     setPlayerStatus("Source libre indisponible. Choisis une autre source.", true);
     return;
   }
@@ -6211,6 +6256,44 @@ async function trySwitchToNextSource() {
   const resumeTime = Number(refs.playerVideo.currentTime || 0);
   await playFromSourcePool(resumeTime, token, nextIndex);
   showToast("Source alternative active.");
+}
+
+async function hardRefreshCurrentPlayback(showRecoveredToast = true) {
+  const nowPlaying = state.nowPlaying;
+  if (!nowPlaying || refs.playerOverlay.hidden) {
+    return false;
+  }
+  const now = Date.now();
+  if (now - Number(state.lastPlaybackHardRefreshAt || 0) < 15000) {
+    return false;
+  }
+  state.lastPlaybackHardRefreshAt = now;
+
+  const item =
+    findItemById(Number(nowPlaying.id || 0)) ||
+    (await buildItemFromDetails(Number(nowPlaying.id || 0)));
+  if (!item || Number(item.id || 0) <= 0) {
+    return false;
+  }
+
+  const token = ++state.playToken;
+  setPlayerStatus("Resynchronisation complete des sources...");
+  try {
+    if (String(nowPlaying.type || "") === "tv") {
+      const season = Math.max(1, Number(nowPlaying.season || 1));
+      const episode = Math.max(1, Number(nowPlaying.episode || 1));
+      const language = String(nowPlaying.language || "");
+      await loadEpisodeStream(item, season, episode, 0, token, language, false);
+    } else {
+      await loadMovieStream(item, 0, token, false);
+    }
+    if (showRecoveredToast) {
+      showToast("Lecture recuperee apres resynchronisation.");
+    }
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function playFromSourcePool(resumeTime, token, startIndex = 0, options = {}) {
