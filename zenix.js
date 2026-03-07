@@ -3,6 +3,7 @@ const STREAM_API_BASE = "https://api.purstream.co/api/v1";
 const STORAGE_KEY = "zenix-progress-v4";
 const FAVORITES_KEY = "zenix-favorites-v1";
 const FAVORITES_BACKUP_KEY = "zenix-favorites-backup-v1";
+const RATINGS_KEY = "zenix-ratings-v1";
 const LANGUAGE_PREFS_KEY = "zenix-language-prefs-v1";
 const CATALOG_CACHE_KEY = "zenix-catalog-cache-v2";
 const CLEANUP_KEY = "zenix-sw-cleaned-v4";
@@ -69,6 +70,7 @@ const HEARTBEAT_REQUEST_TIMEOUT_MS = 9000;
 const HEARTBEAT_KEY = "zenix-client-id-v1";
 const UI_PREFS_KEY = "zenix-ui-prefs-v1";
 const RECENT_SEARCHES_KEY = "zenix-recent-searches-v1";
+const SEARCH_SIGNALS_KEY = "zenix-search-signals-v1";
 const BROWSE_STATE_KEY = "zenix-browse-state-v1";
 const VIEW_SCROLL_KEY = "zenix-view-scroll-v1";
 const SOURCE_HOST_HEALTH_KEY = "zenix-source-health-v1";
@@ -84,6 +86,10 @@ const SOURCE_SUCCESS_BONUS = 8;
 const SOURCE_RETRY_PER_INDEX = 1;
 const FILTER_PREMIUM_SOURCES = false;
 const AUTO_PREMIUM_FALLBACK = true;
+const INTEREST_QUERY_MAX = 40;
+const INTEREST_SEED_MAX = 40;
+const SEARCH_SIGNAL_MAX = 220;
+const SEARCH_SIGNAL_MAX_AGE_MS = 180 * 24 * 60 * 60 * 1000;
 
 const FALLBACK_ITEMS = [
   {
@@ -137,6 +143,8 @@ const state = {
   seasonsCache: new Map(),
   progress: loadProgress(),
   favorites: loadFavorites(),
+  ratings: loadRatings(),
+  searchSignals: loadSearchSignals(),
   nowPlaying: null,
   sourcePool: [],
   sourceIndex: -1,
@@ -295,6 +303,8 @@ const refs = {
   detailPlayBtn: document.getElementById("detailPlayBtn"),
   detailTrailerBtn: document.getElementById("detailTrailerBtn"),
   detailFavoriteBtn: document.getElementById("detailFavoriteBtn"),
+  detailLikeBtn: document.getElementById("detailLikeBtn"),
+  detailDislikeBtn: document.getElementById("detailDislikeBtn"),
   detailShareBtn: document.getElementById("detailShareBtn"),
   detailSeriesControls: document.getElementById("detailSeriesControls"),
   detailSeasonSelect: document.getElementById("detailSeasonSelect"),
@@ -1015,6 +1025,22 @@ function bindEvents() {
     updateDetailFavoriteButton(state.selectedDetailId);
   });
 
+  bindFastPress(refs.detailLikeBtn, () => {
+    if (!state.selectedDetailId) {
+      return;
+    }
+    toggleLike(state.selectedDetailId);
+    updateDetailRatingButtons(state.selectedDetailId);
+  });
+
+  bindFastPress(refs.detailDislikeBtn, () => {
+    if (!state.selectedDetailId) {
+      return;
+    }
+    toggleDislike(state.selectedDetailId);
+    updateDetailRatingButtons(state.selectedDetailId);
+  });
+
   bindFastPress(refs.detailShareBtn, () => {
     copyCurrentLink().catch(() => {
       showToast("Impossible de copier le lien.", true);
@@ -1570,7 +1596,7 @@ function isCatalogCategoryView(view) {
 }
 
 function isCatalogBrowseView(view) {
-  return view === "all" || view === "latest" || view === "popular" || isCatalogCategoryView(view);
+  return view === "all" || view === "interest" || view === "latest" || view === "popular" || isCatalogCategoryView(view);
 }
 
 function getCatalogSyncProfile(view = resolveCatalogViewForSearch()) {
@@ -1598,7 +1624,7 @@ function getCatalogSyncProfile(view = resolveCatalogViewForSearch()) {
       : { initialPages: 7, activeBatch: 9, manualBatch: 13, scrollBatch: 11 }
     );
   }
-  if (view === "latest" || view === "popular") {
+  if (view === "latest" || view === "popular" || view === "interest") {
     return tune(
       compact
       ? { initialPages: 7, activeBatch: 9, manualBatch: 13, scrollBatch: 11 }
@@ -1617,7 +1643,7 @@ function resolveCatalogViewForSearch() {
   if (query.length === 0) {
     return state.view;
   }
-  if (state.view === "all" || isCatalogCategoryView(state.view)) {
+  if (state.view === "all" || state.view === "interest" || isCatalogCategoryView(state.view)) {
     return state.view;
   }
   return "all";
@@ -1722,12 +1748,64 @@ function rememberSearchQuery(value) {
   if (query.length < 2) {
     return;
   }
+  trackSearchSignal(query);
   const next = [query, ...state.recentSearches.filter((entry) => entry.toLowerCase() !== query.toLowerCase())].slice(
     0,
     RECENT_SEARCHES_LIMIT
   );
   state.recentSearches = next;
   saveRecentSearches(next);
+}
+
+function pruneSearchSignalsStore(store) {
+  const source = store && typeof store === "object" ? store : {};
+  const now = Date.now();
+  const rows = Object.entries(source)
+    .map(([key, value]) => {
+      const normalizedKey = normalizeTitleKey(key);
+      return {
+        key: normalizedKey,
+        query: String(value?.query || key || "").trim(),
+        count: Math.max(0, Number(value?.count || 0)),
+        lastAt: Math.max(0, Number(value?.lastAt || 0)),
+      };
+    })
+    .filter((entry) => entry.key.length >= 2 && entry.count > 0)
+    .filter((entry) => now - entry.lastAt <= SEARCH_SIGNAL_MAX_AGE_MS)
+    .sort((left, right) => {
+      if (left.lastAt !== right.lastAt) {
+        return right.lastAt - left.lastAt;
+      }
+      return right.count - left.count;
+    })
+    .slice(0, SEARCH_SIGNAL_MAX);
+
+  const next = {};
+  rows.forEach((entry) => {
+    next[entry.key] = {
+      query: entry.query || entry.key,
+      count: entry.count,
+      lastAt: entry.lastAt,
+    };
+  });
+  return next;
+}
+
+function trackSearchSignal(value) {
+  const query = String(value || "").trim();
+  const key = normalizeTitleKey(query);
+  if (key.length < 2) {
+    return;
+  }
+  const current = state.searchSignals?.[key];
+  const nextCount = Math.min(999, Number(current?.count || 0) + 1);
+  state.searchSignals[key] = {
+    query: query.slice(0, 140) || key,
+    count: nextCount,
+    lastAt: Date.now(),
+  };
+  state.searchSignals = pruneSearchSignalsStore(state.searchSignals);
+  saveSearchSignals(state.searchSignals);
 }
 
 function renderSearchSuggestions(value = "") {
@@ -1862,7 +1940,7 @@ function isCompactViewport() {
 
 function shouldBoostCoverLoading() {
   const activeView = resolveCatalogViewForSearch();
-  return state.query.trim().length === 0 && isCatalogCategoryView(activeView);
+  return state.query.trim().length === 0 && (isCatalogCategoryView(activeView) || activeView === "interest");
 }
 
 function getCardImageProfile() {
@@ -2773,6 +2851,7 @@ async function syncCurrentViewData(reason = "interval") {
   const activeView = resolveCatalogViewForSearch();
   const shouldSyncCatalog =
     activeView === "all" ||
+    activeView === "interest" ||
     isCatalogCategoryView(activeView) ||
     activeView === "latest" ||
     activeView === "popular" ||
@@ -2786,7 +2865,7 @@ async function syncCurrentViewData(reason = "interval") {
     });
   }
 
-  if (state.view === "top" || state.view === "all") {
+  if (state.view === "top" || state.view === "all" || state.view === "interest") {
     await loadTopDaily().catch(() => {
       // retry next interval
     });
@@ -3357,6 +3436,8 @@ function getVisibleCatalog() {
     list = state.topDaily.slice();
   } else if (activeView === "list") {
     list = getFavoriteCatalog();
+  } else if (activeView === "interest") {
+    list = getInterestCatalog();
   } else if (activeView === "latest") {
     list.sort((a, b) => parseReleaseDate(b.releaseDate) - parseReleaseDate(a.releaseDate));
   } else if (activeView === "popular") {
@@ -3528,6 +3609,7 @@ function updateCatalogHeading(hasQuery, resultCount) {
 
   const titleByView = {
     all: "Streaming",
+    interest: "Interesse",
     movie: "Films",
     tv: "Series",
     anime: "Anime",
@@ -3549,6 +3631,12 @@ function updateCatalogHeading(hasQuery, resultCount) {
   }
   if (state.view === "popular") {
     refs.catalogSubtitle.textContent = appendActiveFilterSummary("Titres les plus regardes par la communaute.");
+    return;
+  }
+  if (state.view === "interest") {
+    refs.catalogSubtitle.textContent = appendActiveFilterSummary(
+      "Suggestions personnalisees selon tes lectures, tes likes/dislikes et tes recherches."
+    );
     return;
   }
   refs.catalogSubtitle.textContent = appendActiveFilterSummary("Catalogue fusionne films, series et anime.");
@@ -3756,6 +3844,8 @@ function renderCommunityStats() {
   const anime = state.catalog.filter((item) => item.isAnime).length;
   const favorites = Object.keys(state.favorites).length;
   const activeWatch = Object.values(state.progress).filter((entry) => Number(entry?.time || 0) > 0).length;
+  const likes = Object.values(state.ratings || {}).filter((entry) => normalizeRatingValue(entry?.value || entry) > 0).length;
+  const dislikes = Object.values(state.ratings || {}).filter((entry) => normalizeRatingValue(entry?.value || entry) < 0).length;
 
   const stats = [
     { label: "Titres", value: total },
@@ -3763,6 +3853,8 @@ function renderCommunityStats() {
     { label: "Series", value: series },
     { label: "Anime", value: anime },
     { label: "Ma liste", value: favorites },
+    { label: "Likes", value: likes },
+    { label: "Dislikes", value: dislikes },
     { label: "En cours", value: activeWatch },
   ];
 
@@ -4350,6 +4442,7 @@ function buildMediaCard(item, resume = false, progressEntry = null, position = 0
   const typeLabel = getItemTypeLabel(item);
   const languageLabel = resolveDetailLanguageLabel(details, item.id);
   const favorite = isFavorite(item.id);
+  const rating = getUserRating(item.id);
   const progress = progressEntry || state.progress[item.id] || null;
   const isNewRelease = isRecentlyReleased(item, NEW_RELEASE_DAYS);
   const hasResume = Number(progress?.time || 0) > 45;
@@ -4384,6 +4477,12 @@ function buildMediaCard(item, resume = false, progressEntry = null, position = 0
         <button type="button" class="card-action-btn card-action-fav${favorite ? " active" : ""}" data-card-fav="${item.id}" aria-label="${favorite ? "Retirer de ma liste" : "Ajouter a ma liste"}">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5c-1.8-2.1-5-2.4-7.1-.4-2.4 2.2-2.5 6-.2 8.4l7.3 7.5 7.3-7.5c2.3-2.4 2.2-6.2-.2-8.4-2.1-2-5.3-1.7-7.1.4z"></path></svg>
         </button>
+        <button type="button" class="card-action-btn card-action-like${rating === 1 ? " active" : ""}" data-card-like="${item.id}" aria-label="${rating === 1 ? "Retirer le like" : "Liker ce titre"}">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 21h4V9H2v12zm20-11c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L13.17 1 6.59 7.59A2 2 0 0 0 6 9v10a2 2 0 0 0 2 2h9c.82 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z"></path></svg>
+        </button>
+        <button type="button" class="card-action-btn card-action-dislike${rating === -1 ? " active" : ""}" data-card-dislike="${item.id}" aria-label="${rating === -1 ? "Retirer le dislike" : "Disliker ce titre"}">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 3H6c-.82 0-1.54.5-1.84 1.22L1.14 11.27c-.09.23-.14.47-.14.73v2c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L10.83 23l6.58-6.59c.37-.36.59-.86.59-1.41V5a2 2 0 0 0-2-2zm3 0v12h4V3h-4z"></path></svg>
+        </button>
       </div>
       ${removeContinueButton}
       <button type="button" class="media-open" data-card-open="${item.id}" aria-label="Voir la fiche de ${escapeHtml(item.title)}"></button>
@@ -4414,6 +4513,8 @@ function buildMediaCard(item, resume = false, progressEntry = null, position = 0
   const play = card.querySelector(`[data-card-play="${item.id}"]`);
   const info = card.querySelector(`[data-card-info="${item.id}"]`);
   const fav = card.querySelector(`[data-card-fav="${item.id}"]`);
+  const like = card.querySelector(`[data-card-like="${item.id}"]`);
+  const dislike = card.querySelector(`[data-card-dislike="${item.id}"]`);
   const removeContinue = card.querySelector(`[data-card-remove-progress="${item.id}"]`);
   const openButtons = card.querySelectorAll(`[data-card-open="${item.id}"]`);
 
@@ -4449,6 +4550,18 @@ function buildMediaCard(item, resume = false, progressEntry = null, position = 0
       const nowFavorite = isFavorite(item.id);
       fav.classList.toggle("active", nowFavorite);
       fav.setAttribute("aria-label", nowFavorite ? "Retirer de ma liste" : "Ajouter a ma liste");
+    });
+  }
+
+  if (like) {
+    bindFastPress(like, () => {
+      toggleLike(item.id);
+    });
+  }
+
+  if (dislike) {
+    bindFastPress(dislike, () => {
+      toggleDislike(item.id);
     });
   }
 
@@ -5223,6 +5336,7 @@ async function openDetails(id, options = {}) {
   });
   refs.detailTrailerBtn.disabled = true;
   updateDetailFavoriteButton(id);
+  updateDetailRatingButtons(id);
   refs.detailSeriesControls.hidden = true;
   refs.detailLanguageSelect.innerHTML = "";
   refs.detailLanguageSelect.disabled = true;
@@ -5308,6 +5422,7 @@ async function openDetails(id, options = {}) {
 
   refs.detailTrailerBtn.disabled = trailers.length === 0;
   updateDetailFavoriteButton(id);
+  updateDetailRatingButtons(id);
 
   refs.detailLanguageSelect.innerHTML = "";
   refs.detailLanguageSelect.disabled = true;
@@ -5419,6 +5534,7 @@ async function openPlayer(id, options = {}) {
   if (!item) {
     throw new Error("Item not found");
   }
+  ensureDetails(id).catch(() => null);
 
   const token = ++state.playToken;
   const resume = state.progress[id] || null;
@@ -7529,6 +7645,404 @@ function onImageFallbackError(event) {
   }
 }
 
+function normalizeRatingValue(value) {
+  const numeric = Number(value || 0);
+  if (numeric > 0) {
+    return 1;
+  }
+  if (numeric < 0) {
+    return -1;
+  }
+  return 0;
+}
+
+function getUserRating(id) {
+  const mediaId = Number(id || 0);
+  if (mediaId <= 0) {
+    return 0;
+  }
+  const row = state.ratings?.[mediaId];
+  return normalizeRatingValue(row?.value || row);
+}
+
+function setUserRating(id, value, options = {}) {
+  const mediaId = Number(id || 0);
+  if (mediaId <= 0) {
+    return false;
+  }
+  const normalized = normalizeRatingValue(value);
+  const current = getUserRating(mediaId);
+  if (normalized === current) {
+    return false;
+  }
+
+  if (normalized === 0) {
+    delete state.ratings[mediaId];
+  } else {
+    const item = findItemById(mediaId);
+    state.ratings[mediaId] = {
+      id: mediaId,
+      value: normalized,
+      type: item?.type === "tv" ? "tv" : "movie",
+      isAnime: Boolean(item?.isAnime),
+      title: String(item?.title || ""),
+      updatedAt: Date.now(),
+    };
+  }
+  saveRatings(state.ratings);
+  if (state.selectedDetailId === mediaId) {
+    updateDetailRatingButtons(mediaId);
+  }
+  if (options.render !== false) {
+    renderAll();
+  }
+  return true;
+}
+
+function toggleLike(id) {
+  const mediaId = Number(id || 0);
+  if (mediaId <= 0) {
+    return;
+  }
+  const current = getUserRating(mediaId);
+  if (current === 1) {
+    setUserRating(mediaId, 0, { render: true });
+    showToast("Like retire.");
+    return;
+  }
+  setUserRating(mediaId, 1, { render: true });
+  showToast("Like enregistre.");
+}
+
+function toggleDislike(id) {
+  const mediaId = Number(id || 0);
+  if (mediaId <= 0) {
+    return;
+  }
+  const current = getUserRating(mediaId);
+  if (current === -1) {
+    setUserRating(mediaId, 0, { render: true });
+    showToast("Dislike retire.");
+    return;
+  }
+  setUserRating(mediaId, -1, { render: true });
+  showToast("Dislike enregistre.");
+}
+
+function updateDetailRatingButtons(id) {
+  if (!refs.detailLikeBtn || !refs.detailDislikeBtn) {
+    return;
+  }
+  const rating = getUserRating(id);
+  refs.detailLikeBtn.classList.toggle("is-active", rating === 1);
+  refs.detailDislikeBtn.classList.toggle("is-active", rating === -1);
+  refs.detailDislikeBtn.classList.toggle("is-negative", rating === -1);
+  refs.detailLikeBtn.textContent = rating === 1 ? "Like: ON" : "Like";
+  refs.detailDislikeBtn.textContent = rating === -1 ? "Dislike: ON" : "Dislike";
+}
+
+function normalizeThemeToken(value) {
+  return normalizeTitleKey(value).slice(0, 80);
+}
+
+function splitNormalizedTokens(value) {
+  return normalizeTitleKey(value)
+    .split(" ")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length >= 3);
+}
+
+function getItemTypeBucket(item) {
+  if (!item) {
+    return "movie";
+  }
+  if (item.isAnime) {
+    return "anime";
+  }
+  return item.type === "tv" ? "tv" : "movie";
+}
+
+function getItemThemeTokens(item) {
+  const tokens = new Set();
+  if (!item) {
+    return tokens;
+  }
+
+  const typeBucket = getItemTypeBucket(item);
+  if (typeBucket === "anime") {
+    tokens.add("anime");
+  } else if (typeBucket === "tv") {
+    tokens.add("serie");
+  } else {
+    tokens.add("film");
+  }
+
+  const details = state.detailsCache.get(Number(item.id || 0));
+  const categories = Array.isArray(details?.categories) ? details.categories : [];
+  categories.forEach((category) => {
+    const name = normalizeThemeToken(category?.name || "");
+    if (!name) {
+      return;
+    }
+    tokens.add(name);
+    splitNormalizedTokens(name).forEach((token) => {
+      tokens.add(token);
+    });
+  });
+  return tokens;
+}
+
+function getSearchSignalRows(limit = INTEREST_QUERY_MAX) {
+  const now = Date.now();
+  const rows = Object.entries(state.searchSignals || {})
+    .map(([key, value]) => {
+      const normalizedKey = normalizeTitleKey(key);
+      const count = Number(value?.count || 0);
+      const lastAt = Number(value?.lastAt || 0);
+      const age = Math.max(0, now - lastAt);
+      const decay = Math.exp(-age / (45 * 24 * 60 * 60 * 1000));
+      const score = Math.max(0, count) * decay;
+      return {
+        key: normalizedKey,
+        count,
+        lastAt,
+        score,
+        rawQuery: String(value?.query || key || "").trim(),
+        tokens: splitNormalizedTokens(normalizedKey),
+      };
+    })
+    .filter((entry) => entry.key.length >= 2 && entry.score > 0.05)
+    .sort((left, right) => right.score - left.score);
+  return rows.slice(0, Math.max(1, Number(limit || INTEREST_QUERY_MAX)));
+}
+
+function buildInterestProfile() {
+  const typeWeights = {
+    movie: 0,
+    tv: 0,
+    anime: 0,
+  };
+  const themeWeights = new Map();
+  const titleTokenWeights = new Map();
+  const likedIds = new Set();
+  const dislikedIds = new Set();
+  let hasSignals = false;
+
+  const addTypeWeight = (item, weight) => {
+    if (!item || !Number.isFinite(weight) || weight === 0) {
+      return;
+    }
+    const key = getItemTypeBucket(item);
+    typeWeights[key] = Number(typeWeights[key] || 0) + weight;
+  };
+
+  const addThemeWeight = (item, weight) => {
+    if (!item || !Number.isFinite(weight) || weight === 0) {
+      return;
+    }
+    const tokens = getItemThemeTokens(item);
+    tokens.forEach((token) => {
+      const safe = normalizeThemeToken(token);
+      if (!safe) {
+        return;
+      }
+      themeWeights.set(safe, Number(themeWeights.get(safe) || 0) + weight);
+    });
+  };
+
+  const ratingRows = Object.entries(state.ratings || {}).slice(0, INTEREST_SEED_MAX * 2);
+  ratingRows.forEach(([idRaw, row]) => {
+    const id = Number(idRaw || 0);
+    if (id <= 0) {
+      return;
+    }
+    const rating = normalizeRatingValue(row?.value || row);
+    if (rating === 0) {
+      return;
+    }
+    hasSignals = true;
+    const item = findItemById(id);
+    if (rating > 0) {
+      likedIds.add(id);
+      addTypeWeight(item, 4.2);
+      addThemeWeight(item, 4.6);
+    } else {
+      dislikedIds.add(id);
+      addTypeWeight(item, -3.1);
+      addThemeWeight(item, -5.2);
+    }
+  });
+
+  const progressRows = Object.values(state.progress || {})
+    .sort((left, right) => Number(right?.lastPlayed || 0) - Number(left?.lastPlayed || 0))
+    .slice(0, INTEREST_SEED_MAX);
+  progressRows.forEach((row, index) => {
+    const id = Number(row?.id || 0);
+    if (id <= 0) {
+      return;
+    }
+    const item = findItemById(id);
+    if (!item) {
+      return;
+    }
+    hasSignals = true;
+    const recencyAge = Math.max(0, Date.now() - Number(row?.lastPlayed || 0));
+    const recencyBoost = Math.exp(-recencyAge / (35 * 24 * 60 * 60 * 1000));
+    const duration = Number(row?.duration || 0);
+    const time = Number(row?.time || 0);
+    const completion = duration > 0 ? Math.max(0, Math.min(1, time / duration)) : Math.min(1, time / 3600);
+    const positionPenalty = Math.max(0, 1 - index / INTEREST_SEED_MAX);
+    const weight = 0.9 + recencyBoost * 1.8 + completion * 1.2 + positionPenalty * 0.8;
+    addTypeWeight(item, weight);
+    addThemeWeight(item, weight * 1.25);
+  });
+
+  Object.keys(state.favorites || {})
+    .map((entry) => Number(entry))
+    .filter((id) => id > 0)
+    .slice(0, INTEREST_SEED_MAX)
+    .forEach((id) => {
+      const item = findItemById(id);
+      if (!item) {
+        return;
+      }
+      hasSignals = true;
+      addTypeWeight(item, 0.9);
+      addThemeWeight(item, 1.1);
+    });
+
+  const searchRows = getSearchSignalRows(INTEREST_QUERY_MAX);
+  if (searchRows.length > 0) {
+    hasSignals = true;
+  }
+  const genreHints = [
+    { key: "action", tags: ["action", "combat", "guerre"] },
+    { key: "horreur", tags: ["horreur", "horror", "epouvante"] },
+    { key: "comedie", tags: ["comedie", "comedy", "humour"] },
+    { key: "drame", tags: ["drame", "drama"] },
+    { key: "romance", tags: ["romance", "romantique", "love"] },
+    { key: "thriller", tags: ["thriller", "suspense"] },
+    { key: "science fiction", tags: ["science fiction", "sci fi", "sf"] },
+    { key: "animation", tags: ["animation", "dessin anime"] },
+    { key: "documentaire", tags: ["documentaire", "docu"] },
+  ];
+
+  searchRows.forEach((row) => {
+    row.tokens.forEach((token) => {
+      const next = Number(titleTokenWeights.get(token) || 0) + row.score;
+      titleTokenWeights.set(token, next);
+    });
+    genreHints.forEach((hint) => {
+      if (hint.tags.some((tag) => row.key.includes(normalizeTitleKey(tag)))) {
+        const themeKey = normalizeThemeToken(hint.key);
+        themeWeights.set(themeKey, Number(themeWeights.get(themeKey) || 0) + row.score * 2.4);
+      }
+    });
+  });
+
+  return {
+    typeWeights,
+    themeWeights,
+    titleTokenWeights,
+    searchRows,
+    likedIds,
+    dislikedIds,
+    hasSignals,
+  };
+}
+
+function getInterestCatalog() {
+  const base = Array.isArray(state.catalog) ? state.catalog.slice() : [];
+  if (base.length === 0) {
+    return [];
+  }
+
+  const profile = buildInterestProfile();
+  if (!profile.hasSignals) {
+    return getPopularCatalog();
+  }
+
+  const topRankById = new Map();
+  state.topDaily.forEach((entry, index) => {
+    const id = Number(entry?.id || 0);
+    if (id > 0 && !topRankById.has(id)) {
+      topRankById.set(id, index);
+    }
+  });
+
+  const scored = [];
+  base.forEach((item) => {
+    const id = Number(item?.id || 0);
+    if (id <= 0) {
+      return;
+    }
+    if (profile.dislikedIds.has(id)) {
+      return;
+    }
+
+    let score = 0;
+    if (profile.likedIds.has(id)) {
+      score += 220;
+    }
+    if (isFavorite(id)) {
+      score += 18;
+    }
+
+    const progress = state.progress?.[id];
+    if (progress) {
+      const age = Math.max(0, Date.now() - Number(progress?.lastPlayed || 0));
+      const recency = Math.exp(-age / (28 * 24 * 60 * 60 * 1000));
+      score += 18 + recency * 28;
+      if (isItemMostlyWatched(item)) {
+        score -= 14;
+      }
+    }
+
+    const typeBucket = getItemTypeBucket(item);
+    score += Number(profile.typeWeights[typeBucket] || 0) * 14;
+
+    const themeTokens = getItemThemeTokens(item);
+    themeTokens.forEach((token) => {
+      score += Number(profile.themeWeights.get(token) || 0) * 7.6;
+    });
+
+    const titleKey = item.titleKey || normalizeTitleKey(item.title || "");
+    profile.searchRows.forEach((row) => {
+      if (titleKey.includes(row.key)) {
+        score += row.score * 20;
+        return;
+      }
+      if (row.tokens.some((token) => token.length >= 3 && titleKey.includes(token))) {
+        score += row.score * 4.4;
+      }
+    });
+
+    splitNormalizedTokens(titleKey).forEach((token) => {
+      score += Number(profile.titleTokenWeights.get(token) || 0) * 2.8;
+    });
+
+    const rank = topRankById.get(id);
+    if (Number.isInteger(rank)) {
+      score += Math.max(0, 20 - rank * 2);
+    }
+    if (isRecentlyReleased(item, 70)) {
+      score += 10;
+    }
+
+    scored.push({ item, score });
+  });
+
+  scored.sort((left, right) => {
+    const delta = Number(right.score || 0) - Number(left.score || 0);
+    if (Math.abs(delta) > 0.001) {
+      return delta;
+    }
+    return parseReleaseDate(right.item?.releaseDate) - parseReleaseDate(left.item?.releaseDate);
+  });
+
+  return scored.map((entry) => entry.item);
+}
+
 function isFavorite(id) {
   return Boolean(state.favorites[id]);
 }
@@ -7747,7 +8261,19 @@ function applySavedBrowseState() {
     return;
   }
 
-  const allowedViews = new Set(["all", "calendar", "top", "movie", "tv", "anime", "latest", "popular", "list", "info"]);
+  const allowedViews = new Set([
+    "all",
+    "interest",
+    "calendar",
+    "top",
+    "movie",
+    "tv",
+    "anime",
+    "latest",
+    "popular",
+    "list",
+    "info",
+  ]);
   const allowedChips = new Set(["all", "recent", "movie", "tv", "anime"]);
   const allowedSort = new Set([
     "featured",
@@ -7792,7 +8318,19 @@ function applyBrowseStateFromRoute() {
   const sort = String(url.searchParams.get("sort") || "");
   const query = String(url.searchParams.get("q") || "").trim();
 
-  const allowedViews = new Set(["all", "calendar", "top", "movie", "tv", "anime", "latest", "popular", "list", "info"]);
+  const allowedViews = new Set([
+    "all",
+    "interest",
+    "calendar",
+    "top",
+    "movie",
+    "tv",
+    "anime",
+    "latest",
+    "popular",
+    "list",
+    "info",
+  ]);
   const allowedChips = new Set(["all", "recent", "movie", "tv", "anime"]);
   const allowedSort = new Set([
     "featured",
@@ -8285,6 +8823,95 @@ function saveRecentSearches(values) {
   } catch {
     // ignore
   }
+}
+
+function loadSearchSignals() {
+  try {
+    const raw = localStorage.getItem(SEARCH_SIGNALS_KEY);
+    if (!raw) {
+      return {};
+    }
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") {
+      return {};
+    }
+    return pruneSearchSignalsStore(parsed);
+  } catch {
+    return {};
+  }
+}
+
+function saveSearchSignals(value) {
+  try {
+    const safe = pruneSearchSignalsStore(value);
+    localStorage.setItem(SEARCH_SIGNALS_KEY, JSON.stringify(safe));
+  } catch {
+    // ignore
+  }
+}
+
+function normalizeStoredRating(entry) {
+  if (!entry || typeof entry !== "object") {
+    return null;
+  }
+  const id = Number(entry.id || 0);
+  if (!Number.isInteger(id) || id <= 0) {
+    return null;
+  }
+  const value = normalizeRatingValue(entry.value);
+  if (value === 0) {
+    return null;
+  }
+  return {
+    id,
+    value,
+    type: entry.type === "tv" ? "tv" : "movie",
+    isAnime: Boolean(entry.isAnime),
+    title: String(entry.title || "").slice(0, 180),
+    updatedAt: Number(entry.updatedAt || Date.now()) || Date.now(),
+  };
+}
+
+function loadRatings() {
+  try {
+    const raw = localStorage.getItem(RATINGS_KEY) || sessionStorage.getItem(RATINGS_KEY);
+    if (!raw) {
+      return {};
+    }
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") {
+      return {};
+    }
+    const next = {};
+    Object.entries(parsed).forEach(([idRaw, value]) => {
+      const normalized = normalizeStoredRating({
+        ...(value && typeof value === "object" ? value : { value }),
+        id: Number(idRaw || value?.id || 0),
+      });
+      if (!normalized) {
+        return;
+      }
+      next[normalized.id] = normalized;
+    });
+    return next;
+  } catch {
+    return {};
+  }
+}
+
+function saveRatings(value) {
+  const safeSource = value && typeof value === "object" ? value : {};
+  const safe = {};
+  Object.values(safeSource).forEach((entry) => {
+    const normalized = normalizeStoredRating(entry);
+    if (!normalized) {
+      return;
+    }
+    safe[normalized.id] = normalized;
+  });
+  const payload = JSON.stringify(safe);
+  localStorage.setItem(RATINGS_KEY, payload);
+  sessionStorage.setItem(RATINGS_KEY, payload);
 }
 
 function loadViewScrollPositions() {

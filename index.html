@@ -22,8 +22,8 @@
   <link rel="dns-prefetch" href="//image.tmdb.org" />
   <link rel="dns-prefetch" href="//cdn.jsdelivr.net" />
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Instrument+Serif:ital@0;1&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/zenix.css?v=20260307-c86" />
-    <script defer src="/zenix.js?v=20260307-c86"></script>
+    <link rel="stylesheet" href="/zenix.css?v=20260307-c87" />
+    <script defer src="/zenix.js?v=20260307-c87"></script>
 </head>
 <body>
   <div class="startup-splash" id="startupSplash" aria-hidden="true">
@@ -48,6 +48,7 @@
 
     <nav class="main-nav" aria-label="Navigation principale">
       <button class="nav-pill active" data-view="all" type="button">Accueil</button>
+      <button class="nav-pill" data-view="interest" type="button">Interesse</button>
       <button class="nav-pill" data-view="calendar" type="button">Calendrier</button>
       <button class="nav-pill" data-view="latest" type="button">Nouveautes</button>
       <button class="nav-pill" data-view="popular" type="button">Populaires</button>
@@ -235,6 +236,8 @@
             <button class="btn btn-primary" id="detailPlayBtn" type="button">Demarrer</button>
             <button class="btn btn-ghost" id="detailTrailerBtn" type="button">Bande-annonce</button>
             <button class="btn btn-soft" id="detailFavoriteBtn" type="button">Ajouter a ma liste</button>
+            <button class="btn btn-soft" id="detailLikeBtn" type="button">Like</button>
+            <button class="btn btn-soft" id="detailDislikeBtn" type="button">Dislike</button>
             <button class="btn btn-soft" id="detailShareBtn" type="button">Partager</button>
           </div>
 
