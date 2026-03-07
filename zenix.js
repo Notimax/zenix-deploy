@@ -59,9 +59,9 @@ const HLS_JS_URL = "https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js";
 const HLS_JS_FALLBACK_URLS = ["/hls.min.js", HLS_JS_URL, "https://unpkg.com/hls.js@1.5.17/dist/hls.min.js"];
 const HLS_MIME = "application/vnd.apple.mpegurl";
 const DASH_MIME = "application/dash+xml";
-const VIDEO_READY_TIMEOUT_MS = 26000;
-const HLS_READY_TIMEOUT_MS = 36000;
-const HLS_MANIFEST_TIMEOUT_MS = 38000;
+const VIDEO_READY_TIMEOUT_MS = 12000;
+const HLS_READY_TIMEOUT_MS = 14000;
+const HLS_MANIFEST_TIMEOUT_MS = 15000;
 const HEARTBEAT_INTERVAL_MS = 30 * 1000;
 const HEARTBEAT_REQUEST_TIMEOUT_MS = 9000;
 const HEARTBEAT_KEY = "zenix-client-id-v1";
@@ -142,6 +142,7 @@ const state = {
   sourceLoading: false,
   sourceLoadTicket: 0,
   playbackHealthTimer: 0,
+  playbackGuardTimer: 0,
   allEpisodeSources: [],
   availableLanguages: [],
   languagePreferences: loadLanguagePrefs(),
@@ -5402,6 +5403,7 @@ async function openPlayer(id, options = {}) {
   populateLanguageSelect(refs.playerLanguageSelect, [], "");
   refs.playerLanguageSelect.disabled = true;
   updateBodyScrollLock();
+  startPlaybackGuard(token);
   try {
     if (item.type === "tv") {
       const seasons = await ensureSeasons(id);
@@ -5741,6 +5743,41 @@ function clearPlaybackHealthMonitor() {
     clearTimeout(state.playbackHealthTimer);
     state.playbackHealthTimer = 0;
   }
+}
+
+function clearPlaybackGuard() {
+  if (state.playbackGuardTimer) {
+    clearInterval(state.playbackGuardTimer);
+    state.playbackGuardTimer = 0;
+  }
+}
+
+function startPlaybackGuard(token) {
+  clearPlaybackGuard();
+  state.playbackGuardTimer = window.setInterval(() => {
+    if (token !== state.playToken || refs.playerOverlay.hidden) {
+      clearPlaybackGuard();
+      return;
+    }
+    if (state.sourceLoading || state.sourceIndex < 0 || state.manualSourceLock) {
+      return;
+    }
+    const video = refs.playerVideo;
+    if (!video || video.ended || video.seeking) {
+      return;
+    }
+    const errorCode = Number(video.error?.code || 0);
+    const currentTime = Number(video.currentTime || 0);
+    const readyState = Number(video.readyState || 0);
+    const blockedAtStart = video.paused && currentTime < 1.2 && readyState >= 2;
+    if (errorCode <= 0 && !blockedAtStart) {
+      return;
+    }
+    clearPlaybackGuard();
+    trySwitchToNextSource().catch(() => {
+      setPlayerStatus("Erreur video detectee. Choisis une autre source.", true);
+    });
+  }, 2400);
 }
 
 function schedulePlaybackHealthMonitor(token, step = 0) {
@@ -6608,6 +6645,7 @@ function setPlayerStatus(message, isError = false) {
 
 function closePlayer(options = {}) {
   activatePostCloseTapGuard(1400);
+  clearPlaybackGuard();
   refs.playerOverlay.hidden = true;
   refs.playerSeriesControls.hidden = true;
   saveNowPlayingProgress({ force: true });
