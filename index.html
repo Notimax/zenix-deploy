@@ -265,9 +265,10 @@
     <div class="player-panel" id="playerPanel">
       <div class="player-shell">
         <div class="player-head">
-          <div>
+          <div class="player-head-main">
             <p class="player-kicker">Lecture</p>
             <h3 id="playerTitle">Titre</h3>
+            <p class="player-subtitle" id="playerSubTitle"></p>
           </div>
           <button class="modal-close" id="playerCloseBtn" type="button" aria-label="Fermer le lecteur">Fermer</button>
         </div>
@@ -289,42 +290,52 @@
           </div>
 
           <aside class="player-side">
-            <div class="player-pills" id="playerPills">
-              <span class="player-pill" id="playerTypePill">Film</span>
-              <span class="player-pill" id="playerLanguagePill">Auto</span>
-              <span class="player-pill" id="playerQualityPill">Qualite auto</span>
+            <div class="player-side-section">
+              <div class="player-pills" id="playerPills">
+                <span class="player-pill" id="playerTypePill">Film</span>
+                <span class="player-pill" id="playerLanguagePill">Auto</span>
+                <span class="player-pill" id="playerQualityPill">Qualite auto</span>
+              </div>
             </div>
-            <div class="player-source-control" id="playerSourceControl">
-              <label class="field" for="playerSourceSelect">
-                Source
-                <select id="playerSourceSelect"></select>
-              </label>
-              <button class="btn btn-soft btn-compact" id="playerSourceApplyBtn" type="button">Changer la source</button>
+            <div class="player-side-section">
+              <p class="player-side-title">Flux</p>
+              <div class="player-source-control" id="playerSourceControl">
+                <label class="field" for="playerSourceSelect">
+                  Source
+                  <select id="playerSourceSelect"></select>
+                </label>
+                <button class="btn btn-soft btn-compact" id="playerSourceApplyBtn" type="button">Appliquer</button>
+              </div>
             </div>
-            <label class="field" for="playerSpeedSelect">
-              Vitesse
-              <select id="playerSpeedSelect">
-                <option value="0.75">0.75x</option>
-                <option value="1" selected>1x (normal)</option>
-                <option value="1.25">1.25x</option>
-                <option value="1.5">1.5x</option>
-                <option value="1.75">1.75x</option>
-                <option value="2">2x</option>
-              </select>
-            </label>
-            <div class="series-controls" id="playerSeriesControls" hidden>
-              <label class="field">
-                Saison
-                <select id="playerSeasonSelect"></select>
+            <div class="player-side-section">
+              <label class="field" for="playerSpeedSelect">
+                Vitesse
+                <select id="playerSpeedSelect">
+                  <option value="0.75">0.75x</option>
+                  <option value="1" selected>1x (normal)</option>
+                  <option value="1.25">1.25x</option>
+                  <option value="1.5">1.5x</option>
+                  <option value="1.75">1.75x</option>
+                  <option value="2">2x</option>
+                </select>
               </label>
-              <label class="field">
-                Episode
-                <select id="playerEpisodeSelect"></select>
-              </label>
-              <label class="field">
-                Langue
-                <select id="playerLanguageSelect"></select>
-              </label>
+            </div>
+            <div class="player-side-section player-series-section" id="playerSeriesControls" hidden>
+              <p class="player-side-title">Episodes</p>
+              <div class="series-controls">
+                <label class="field">
+                  Saison
+                  <select id="playerSeasonSelect"></select>
+                </label>
+                <label class="field">
+                  Episode
+                  <select id="playerEpisodeSelect"></select>
+                </label>
+                <label class="field">
+                  Langue
+                  <select id="playerLanguageSelect"></select>
+                </label>
+              </div>
             </div>
 
             <p class="player-status" id="playerStatus">Preparation de la lecture...</p>

@@ -80,6 +80,7 @@ const SOURCE_HOST_HEALTH_MAX = 140;
 const SOURCE_FAILURE_PENALTY = 22;
 const SOURCE_SUCCESS_BONUS = 8;
 const SOURCE_RETRY_PER_INDEX = 1;
+const FILTER_PREMIUM_SOURCES = false;
 
 const FALLBACK_ITEMS = [
   {
@@ -299,6 +300,7 @@ const refs = {
   playerPanel: document.getElementById("playerPanel"),
   playerCloseBtn: document.getElementById("playerCloseBtn"),
   playerTitle: document.getElementById("playerTitle"),
+  playerSubTitle: document.getElementById("playerSubTitle"),
   playerSeriesControls: document.getElementById("playerSeriesControls"),
   playerSeasonSelect: document.getElementById("playerSeasonSelect"),
   playerEpisodeSelect: document.getElementById("playerEpisodeSelect"),
@@ -4980,12 +4982,28 @@ function resolvePreferredLanguage(mediaId, requestedLanguage, availableLanguages
 }
 
 function filterSourcesByLanguage(sources, language) {
+  const rows = Array.isArray(sources) ? sources.slice() : [];
   const selected = String(language || "").trim().toUpperCase();
   if (!selected) {
-    return (sources || []).slice();
+    return rows;
   }
-  const filtered = (sources || []).filter((entry) => entry.language === selected);
-  return filtered.length > 0 ? filtered : (sources || []).slice();
+  const direct = rows.filter((entry) => entry.language === selected);
+  if (selected === "MULTI") {
+    return direct.length > 0 ? direct : rows;
+  }
+
+  const multi = rows.filter((entry) => entry.language === "MULTI");
+  const merged = [];
+  const seen = new Set();
+  for (const entry of direct.concat(multi)) {
+    const key = String(entry?.url || "").trim();
+    if (!key || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    merged.push(entry);
+  }
+  return merged.length > 0 ? merged : rows;
 }
 
 async function syncDetailLanguageOptions(id, season, episode) {
@@ -5216,7 +5234,7 @@ async function openDetails(id, options = {}) {
 }
 
 function closeDetails(options = {}) {
-  activatePostCloseTapGuard(900);
+  activatePostCloseTapGuard(1400);
   refs.detailModal.hidden = true;
   refs.trailerWrap.hidden = true;
   refs.trailerFrame.src = "";
@@ -5276,6 +5294,9 @@ async function openPlayer(id, options = {}) {
   );
   refs.playerOverlay.hidden = false;
   refs.playerTitle.textContent = item.title;
+  if (refs.playerSubTitle) {
+    refs.playerSubTitle.textContent = item.type === "tv" ? "Serie / anime" : "Film";
+  }
   setPlayerPill(refs.playerTypePill, formatPlayerKind(item), true);
   setPlayerPill(refs.playerLanguagePill, item.type === "tv" ? "Langue auto" : "Auto");
   setPlayerPill(refs.playerQualityPill, "Qualite auto");
@@ -5415,6 +5436,7 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
     season: 1,
     episode: 1,
   };
+  setPlayerSubTitle("Film");
   if (syncRoute) {
     setAppRoute({ watch: item.id }, { replace: true });
   }
@@ -5489,6 +5511,7 @@ async function loadEpisodeStream(
     season,
     episode,
   };
+  setPlayerSubTitle(`S${season}E${episode}${language ? ` - ${language}` : ""}`);
   if (syncRoute) {
     setAppRoute({ watch: item.id, season, episode }, { replace: true });
   }
@@ -5548,7 +5571,11 @@ function extractSources(payload) {
     }
     return Number(right?.score || 0) - Number(left?.score || 0);
   });
-  return deduped;
+  if (!FILTER_PREMIUM_SOURCES) {
+    return deduped;
+  }
+  const freeOnly = deduped.filter((entry) => !entry?.premiumHint);
+  return freeOnly.length > 0 ? freeOnly : deduped;
 }
 
 function clearManualSourceLock() {
@@ -5995,7 +6022,6 @@ async function switchPlayerSource(index) {
   if (safeIndex === state.sourceIndex) {
     return;
   }
-  const previousIndex = Number(state.sourceIndex);
   state.manualSourceLock = true;
   state.manualSourceLockedIndex = safeIndex;
   const token = ++state.playToken;
@@ -6004,12 +6030,9 @@ async function switchPlayerSource(index) {
     await playFromSourcePool(resumeTime, token, safeIndex, { strictIndex: true });
     showToast("Source changee.");
   } catch (error) {
-    state.manualSourceLock = false;
-    state.manualSourceLockedIndex = -1;
-    if (Number.isInteger(previousIndex) && previousIndex >= 0 && previousIndex < state.sourcePool.length) {
-      state.sourceIndex = previousIndex;
-      renderPlayerSourceOptions();
-    }
+    state.sourceIndex = safeIndex;
+    renderPlayerSourceOptions();
+    setPlayerStatus("Source selectionnee indisponible. Essaie une autre source.", true);
     throw error;
   }
 }
@@ -6031,6 +6054,13 @@ function setPlayerPill(target, value, accent = false) {
   const text = String(value || "").trim();
   target.textContent = text || "Auto";
   target.classList.toggle("accent", Boolean(accent));
+}
+
+function setPlayerSubTitle(value = "") {
+  if (!refs.playerSubTitle) {
+    return;
+  }
+  refs.playerSubTitle.textContent = String(value || "").trim();
 }
 
 function parseLanguageFromSourceName(value) {
@@ -6416,7 +6446,7 @@ function setPlayerStatus(message, isError = false) {
 }
 
 function closePlayer(options = {}) {
-  activatePostCloseTapGuard(900);
+  activatePostCloseTapGuard(1400);
   refs.playerOverlay.hidden = true;
   refs.playerSeriesControls.hidden = true;
   saveNowPlayingProgress({ force: true });
@@ -6430,6 +6460,7 @@ function closePlayer(options = {}) {
   if (refs.playerSourceMeta) {
     refs.playerSourceMeta.textContent = "";
   }
+  setPlayerSubTitle("");
   setPlayerPill(refs.playerTypePill, "Lecture", true);
   setPlayerPill(refs.playerLanguagePill, "Auto");
   setPlayerPill(refs.playerQualityPill, "Qualite auto");

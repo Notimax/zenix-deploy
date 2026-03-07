@@ -1625,13 +1625,14 @@ body.startup-lock {
 .player-overlay {
   position: fixed;
   inset: 0;
-  z-index: 95;
+  z-index: 210;
   display: grid;
   place-items: start center;
   padding: 16px;
   background: rgba(0, 0, 0, 0.78);
   backdrop-filter: blur(8px);
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .detail-panel,
@@ -1778,6 +1779,23 @@ body.startup-lock {
   padding: 10px;
 }
 
+.player-side-section {
+  display: grid;
+  gap: 8px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  padding: 9px;
+}
+
+.player-side-title {
+  margin: 0;
+  color: #b6bdd0;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .player-source-control {
   display: grid;
   gap: 8px;
@@ -1785,6 +1803,11 @@ body.startup-lock {
 
 .player-source-control .field {
   gap: 6px;
+}
+
+.player-source-control .btn {
+  width: 100%;
+  justify-content: center;
 }
 
 .player-pills {
@@ -2031,6 +2054,11 @@ body.startup-lock {
   padding: 10px 12px;
 }
 
+.player-head-main {
+  display: grid;
+  gap: 2px;
+}
+
 .player-kicker {
   margin: 0 0 4px;
   text-transform: uppercase;
@@ -2043,6 +2071,13 @@ body.startup-lock {
   margin: 0;
   font-size: clamp(1.2rem, 2.4vw, 1.65rem);
   line-height: 1.1;
+}
+
+.player-subtitle {
+  margin: 0;
+  color: #d6deef;
+  font-size: 0.82rem;
+  letter-spacing: 0.03em;
 }
 
 .player-status {
@@ -2462,6 +2497,10 @@ body.compact-cards .top-meta {
 
   .player-head .modal-close {
     margin-left: 0;
+  }
+
+  .player-side-section {
+    padding: 8px;
   }
 
   .player-quickbar .btn {
