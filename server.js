@@ -2114,16 +2114,6 @@ async function handleSuggestionSubmit(req, res, requestUrl) {
     return true;
   }
 
-  const remoteIp = getRemoteAddress(req);
-  const rateLimit = checkSuggestionRateLimit(remoteIp);
-  if (rateLimit.limited) {
-    sendJson(res, 429, {
-      error: "Too many requests, please try again in a moment.",
-      retryAfterMs: rateLimit.retryAfterMs,
-    });
-    return true;
-  }
-
   let payload;
   try {
     payload = await readJsonBody(req, 24 * 1024);
@@ -2146,6 +2136,16 @@ async function handleSuggestionSubmit(req, res, requestUrl) {
   }
   if (contactEmailRaw && !contactEmail) {
     sendJson(res, 400, { error: "Invalid email" });
+    return true;
+  }
+
+  const remoteIp = getRemoteAddress(req);
+  const rateLimit = checkSuggestionRateLimit(remoteIp);
+  if (rateLimit.limited) {
+    sendJson(res, 429, {
+      error: "Too many requests, please try again in a moment.",
+      retryAfterMs: rateLimit.retryAfterMs,
+    });
     return true;
   }
 
