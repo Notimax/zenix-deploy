@@ -1604,6 +1604,13 @@ body.startup-lock {
   box-shadow: 0 8px 20px rgba(168, 12, 27, 0.25);
 }
 
+.btn-soft.is-positive {
+  color: #ecfff5;
+  border-color: rgba(44, 201, 126, 0.72);
+  background: linear-gradient(135deg, rgba(19, 166, 103, 0.34), rgba(11, 122, 77, 0.24));
+  box-shadow: 0 8px 20px rgba(10, 95, 60, 0.28);
+}
+
 .btn-soft.is-negative {
   color: #ffecef;
   border-color: rgba(240, 58, 88, 0.75);

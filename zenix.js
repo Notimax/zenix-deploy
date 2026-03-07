@@ -4532,7 +4532,6 @@ function buildMediaCard(item, resume = false, progressEntry = null, position = 0
   const typeLabel = getItemTypeLabel(item);
   const languageLabel = resolveDetailLanguageLabel(details, item.id);
   const favorite = isFavorite(item.id);
-  const rating = getUserRating(item.id);
   const progress = progressEntry || state.progress[item.id] || null;
   const isNewRelease = isRecentlyReleased(item, NEW_RELEASE_DAYS);
   const hasResume = Number(progress?.time || 0) > 45;
@@ -4567,12 +4566,6 @@ function buildMediaCard(item, resume = false, progressEntry = null, position = 0
         <button type="button" class="card-action-btn card-action-fav${favorite ? " active" : ""}" data-card-fav="${item.id}" aria-label="${favorite ? "Retirer de ma liste" : "Ajouter a ma liste"}">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5c-1.8-2.1-5-2.4-7.1-.4-2.4 2.2-2.5 6-.2 8.4l7.3 7.5 7.3-7.5c2.3-2.4 2.2-6.2-.2-8.4-2.1-2-5.3-1.7-7.1.4z"></path></svg>
         </button>
-        <button type="button" class="card-action-btn card-action-like${rating === 1 ? " active" : ""}" data-card-like="${item.id}" aria-label="${rating === 1 ? "Retirer le like" : "Liker ce titre"}">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 21h4V9H2v12zm20-11c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L13.17 1 6.59 7.59A2 2 0 0 0 6 9v10a2 2 0 0 0 2 2h9c.82 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z"></path></svg>
-        </button>
-        <button type="button" class="card-action-btn card-action-dislike${rating === -1 ? " active" : ""}" data-card-dislike="${item.id}" aria-label="${rating === -1 ? "Retirer le dislike" : "Disliker ce titre"}">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 3H6c-.82 0-1.54.5-1.84 1.22L1.14 11.27c-.09.23-.14.47-.14.73v2c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L10.83 23l6.58-6.59c.37-.36.59-.86.59-1.41V5a2 2 0 0 0-2-2zm3 0v12h4V3h-4z"></path></svg>
-        </button>
       </div>
       ${removeContinueButton}
       <button type="button" class="media-open" data-card-open="${item.id}" aria-label="Voir la fiche de ${escapeHtml(item.title)}"></button>
@@ -4603,8 +4596,6 @@ function buildMediaCard(item, resume = false, progressEntry = null, position = 0
   const play = card.querySelector(`[data-card-play="${item.id}"]`);
   const info = card.querySelector(`[data-card-info="${item.id}"]`);
   const fav = card.querySelector(`[data-card-fav="${item.id}"]`);
-  const like = card.querySelector(`[data-card-like="${item.id}"]`);
-  const dislike = card.querySelector(`[data-card-dislike="${item.id}"]`);
   const removeContinue = card.querySelector(`[data-card-remove-progress="${item.id}"]`);
   const openButtons = card.querySelectorAll(`[data-card-open="${item.id}"]`);
 
@@ -4640,18 +4631,6 @@ function buildMediaCard(item, resume = false, progressEntry = null, position = 0
       const nowFavorite = isFavorite(item.id);
       fav.classList.toggle("active", nowFavorite);
       fav.setAttribute("aria-label", nowFavorite ? "Retirer de ma liste" : "Ajouter a ma liste");
-    });
-  }
-
-  if (like) {
-    bindFastPress(like, () => {
-      toggleLike(item.id);
-    });
-  }
-
-  if (dislike) {
-    bindFastPress(dislike, () => {
-      toggleDislike(item.id);
     });
   }
 
@@ -7824,11 +7803,16 @@ function updateDetailRatingButtons(id) {
     return;
   }
   const rating = getUserRating(id);
-  refs.detailLikeBtn.classList.toggle("is-active", rating === 1);
-  refs.detailDislikeBtn.classList.toggle("is-active", rating === -1);
-  refs.detailDislikeBtn.classList.toggle("is-negative", rating === -1);
-  refs.detailLikeBtn.textContent = rating === 1 ? "Like: ON" : "Like";
-  refs.detailDislikeBtn.textContent = rating === -1 ? "Dislike: ON" : "Dislike";
+  const likeActive = rating === 1;
+  const dislikeActive = rating === -1;
+  refs.detailLikeBtn.classList.toggle("is-positive", likeActive);
+  refs.detailLikeBtn.classList.toggle("is-active", false);
+  refs.detailLikeBtn.classList.toggle("is-negative", false);
+  refs.detailDislikeBtn.classList.toggle("is-negative", dislikeActive);
+  refs.detailDislikeBtn.classList.toggle("is-active", false);
+  refs.detailDislikeBtn.classList.toggle("is-positive", false);
+  refs.detailLikeBtn.textContent = "Like";
+  refs.detailDislikeBtn.textContent = "Dislike";
 }
 
 function normalizeThemeToken(value) {
