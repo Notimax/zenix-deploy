@@ -235,6 +235,8 @@ const refs = {
   suggestionMessage: document.getElementById("suggestionMessage"),
   suggestionContact: document.getElementById("suggestionContact"),
   suggestionName: document.getElementById("suggestionName"),
+  suggestionWebsite: document.getElementById("suggestionWebsite"),
+  suggestionClientTs: document.getElementById("suggestionClientTs"),
   suggestionSubmitBtn: document.getElementById("suggestionSubmitBtn"),
   suggestionStatus: document.getElementById("suggestionStatus"),
 
@@ -460,6 +462,7 @@ async function init() {
     // cleanup best effort only
   });
   bindEvents();
+  refreshSuggestionClientTimestamp();
   hydrateLanguagePrefsMap();
   initCalendarControls();
   state.analyticsClientId = getOrCreateAnalyticsClientId();
@@ -7708,6 +7711,12 @@ function setSuggestionStatus(message = "", isError = false) {
   refs.suggestionStatus.classList.toggle("error", Boolean(isError));
 }
 
+function refreshSuggestionClientTimestamp() {
+  if (refs.suggestionClientTs) {
+    refs.suggestionClientTs.value = String(Date.now());
+  }
+}
+
 function setSuggestionSubmitting(isSubmitting) {
   state.suggestionSubmitting = Boolean(isSubmitting);
   if (refs.suggestionSubmitBtn) {
@@ -7737,6 +7746,8 @@ async function submitSuggestionFromInfo(event) {
   const message = String(refs.suggestionMessage?.value || "").trim();
   const email = String(refs.suggestionContact?.value || "").trim();
   const name = String(refs.suggestionName?.value || "").trim();
+  const website = String(refs.suggestionWebsite?.value || "").trim();
+  const clientTs = Number(refs.suggestionClientTs?.value || 0);
 
   if (message.length < 12) {
     setSuggestionStatus("Message trop court (minimum 12 caracteres).", true);
@@ -7765,6 +7776,8 @@ async function submitSuggestionFromInfo(event) {
         message,
         email,
         name,
+        website,
+        clientTs,
         page: window.location.pathname,
       }),
     });
@@ -7784,13 +7797,17 @@ async function submitSuggestionFromInfo(event) {
     }
 
     refs.suggestionForm?.reset();
-    setSuggestionStatus("Suggestion envoyee a seekosint@gmail.com.");
+    refreshSuggestionClientTimestamp();
+    setSuggestionStatus("Suggestion envoyee.");
     showToast("Suggestion envoyee. Merci !");
   } catch (error) {
     const safeError = String(error?.message || "Envoi impossible pour le moment.");
     setSuggestionStatus(safeError, true);
     showToast(safeError, true);
   } finally {
+    if (!refs.suggestionClientTs?.value) {
+      refreshSuggestionClientTimestamp();
+    }
     setSuggestionSubmitting(false);
   }
 }

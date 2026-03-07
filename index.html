@@ -27,8 +27,8 @@
   <link rel="dns-prefetch" href="//image.tmdb.org" />
   <link rel="dns-prefetch" href="//cdn.jsdelivr.net" />
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Instrument+Serif:ital@0;1&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/zenix.css?v=20260307-c96" />
-    <script defer src="/zenix.js?v=20260307-c96"></script>
+    <link rel="stylesheet" href="/zenix.css?v=20260307-c97" />
+    <script defer src="/zenix.js?v=20260307-c97"></script>
 </head>
 <body>
   <div class="startup-splash" id="startupSplash" aria-hidden="true">
@@ -253,6 +253,11 @@
         <h4>Suggestion</h4>
         <p>Tu peux proposer une amelioration ou demander l'ajout d'un film, d'une serie ou d'un anime.</p>
         <form class="suggestion-form" id="suggestionForm">
+          <label class="suggestion-hp" for="suggestionWebsite" aria-hidden="true">
+            Site web
+            <input id="suggestionWebsite" type="text" maxlength="120" tabindex="-1" autocomplete="off" />
+          </label>
+          <input id="suggestionClientTs" type="hidden" value="" />
           <div class="suggestion-grid">
             <label class="field" for="suggestionType">
               Type

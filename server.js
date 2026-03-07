@@ -1,6 +1,7 @@
 ﻿const fs = require("node:fs");
 const path = require("node:path");
 const http = require("node:http");
+const crypto = require("node:crypto");
 const { Readable } = require("node:stream");
 
 const ROOT = __dirname;
@@ -41,6 +42,11 @@ const SUGGESTIONS_RELAY_BASE = String(process.env.SUGGESTIONS_RELAY_BASE || "htt
 const SUGGESTIONS_RATE_LIMIT_MS = Math.max(5000, Number(process.env.SUGGESTIONS_RATE_LIMIT_MS || 45 * 1000));
 const SUGGESTIONS_MAX_MESSAGE_CHARS = Math.max(300, Number(process.env.SUGGESTIONS_MAX_MESSAGE_CHARS || 1600));
 const SUGGESTIONS_MIN_MESSAGE_CHARS = Math.max(8, Number(process.env.SUGGESTIONS_MIN_MESSAGE_CHARS || 12));
+const SUGGESTIONS_MIN_SUBMIT_MS = Math.max(500, Number(process.env.SUGGESTIONS_MIN_SUBMIT_MS || 2500));
+const SUGGESTIONS_DUPLICATE_TTL_MS = Math.max(
+  60 * 1000,
+  Number(process.env.SUGGESTIONS_DUPLICATE_TTL_MS || 6 * 60 * 60 * 1000)
+);
 const HLS_PROXY_USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36";
 const DISCORD_STATS_STATE_FILE = path.join(ROOT, ".discord-stats-state.json");
@@ -65,6 +71,7 @@ const zenixOwnedSourcesCache = {
 const analyticsClients = new Map();
 const analyticsEvents = [];
 const suggestionRateLimitMap = new Map();
+const suggestionFingerprintMap = new Map();
 let analyticsTotalSeen = 0;
 let analyticsLastPushAt = 0;
 let discordStatsMessageId = "";
@@ -242,6 +249,50 @@ function checkSuggestionRateLimit(ip, now = Date.now()) {
     }
   }
   return { limited: false, retryAfterMs: 0 };
+}
+
+function buildSuggestionFingerprint(payload) {
+  const raw = JSON.stringify(payload || {});
+  return crypto.createHash("sha256").update(raw).digest("hex");
+}
+
+function checkSuggestionDuplicate(fingerprint, now = Date.now()) {
+  const key = String(fingerprint || "").trim();
+  if (!key) {
+    return { duplicate: false, retryAfterMs: 0 };
+  }
+
+  const staleBefore = now - SUGGESTIONS_DUPLICATE_TTL_MS * 2;
+  for (const [entryKey, entryValue] of suggestionFingerprintMap.entries()) {
+    if (Number(entryValue || 0) < staleBefore) {
+      suggestionFingerprintMap.delete(entryKey);
+    }
+  }
+
+  const last = Number(suggestionFingerprintMap.get(key) || 0);
+  if (last > 0 && now - last < SUGGESTIONS_DUPLICATE_TTL_MS) {
+    return {
+      duplicate: true,
+      retryAfterMs: Math.max(0, SUGGESTIONS_DUPLICATE_TTL_MS - (now - last)),
+    };
+  }
+  return { duplicate: false, retryAfterMs: 0 };
+}
+
+function rememberSuggestionFingerprint(fingerprint, now = Date.now()) {
+  const key = String(fingerprint || "").trim();
+  if (!key) {
+    return;
+  }
+  suggestionFingerprintMap.set(key, now);
+}
+
+function parseJsonSafe(value) {
+  try {
+    return JSON.parse(String(value || ""));
+  } catch {
+    return null;
+  }
 }
 
 function decodeBase64Utf8(value) {
@@ -1377,7 +1428,7 @@ async function fetchRemoteText(target, accept = "text/html") {
   }
 }
 
-async function fetchRemoteForm(target, formData = {}, accept = "text/html") {
+async function fetchRemoteForm(target, formData = {}, accept = "text/html", extraHeaders = {}) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), PROXY_TIMEOUT_MS);
   try {
@@ -1388,6 +1439,7 @@ async function fetchRemoteForm(target, formData = {}, accept = "text/html") {
         Accept: accept,
         "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
         "User-Agent": "Mozilla/5.0 (ZenixStream)",
+        ...extraHeaders,
       },
       body,
       signal: controller.signal,
@@ -2122,6 +2174,13 @@ async function handleSuggestionSubmit(req, res, requestUrl) {
     return true;
   }
 
+  const trapValue = sanitizeSuggestionText(payload?.website, 120);
+  if (trapValue) {
+    // Honeypot: pretend success to silently discard obvious bot submissions.
+    sendJson(res, 200, { type: "success" });
+    return true;
+  }
+
   const type = normalizeSuggestionType(payload?.type);
   const title = sanitizeSuggestionText(payload?.title, 120);
   const message = sanitizeSuggestionText(payload?.message, SUGGESTIONS_MAX_MESSAGE_CHARS);
@@ -2129,6 +2188,7 @@ async function handleSuggestionSubmit(req, res, requestUrl) {
   const contactEmail = normalizeSuggestionEmail(contactEmailRaw);
   const contactName = sanitizeSuggestionText(payload?.name, 80);
   const sourcePage = sanitizeToken(payload?.page, 180);
+  const clientTs = Number(payload?.clientTs || 0);
 
   if (message.length < SUGGESTIONS_MIN_MESSAGE_CHARS) {
     sendJson(res, 400, { error: `Message too short (minimum ${SUGGESTIONS_MIN_MESSAGE_CHARS} chars)` });
@@ -2138,6 +2198,13 @@ async function handleSuggestionSubmit(req, res, requestUrl) {
     sendJson(res, 400, { error: "Invalid email" });
     return true;
   }
+  if (Number.isFinite(clientTs) && clientTs > 0) {
+    const elapsed = Date.now() - clientTs;
+    if (elapsed < SUGGESTIONS_MIN_SUBMIT_MS) {
+      sendJson(res, 429, { error: "Please wait a moment before sending your suggestion." });
+      return true;
+    }
+  }
 
   const remoteIp = getRemoteAddress(req);
   const rateLimit = checkSuggestionRateLimit(remoteIp);
@@ -2145,6 +2212,24 @@ async function handleSuggestionSubmit(req, res, requestUrl) {
     sendJson(res, 429, {
       error: "Too many requests, please try again in a moment.",
       retryAfterMs: rateLimit.retryAfterMs,
+    });
+    return true;
+  }
+
+  const suggestionFingerprint = buildSuggestionFingerprint({
+    ip: sanitizeToken(remoteIp, 80),
+    type,
+    title,
+    message,
+    contactEmail,
+    contactName,
+    sourcePage,
+  });
+  const duplicate = checkSuggestionDuplicate(suggestionFingerprint);
+  if (duplicate.duplicate) {
+    sendJson(res, 429, {
+      error: "Duplicate suggestion detected. Please wait before resending the same message.",
+      retryAfterMs: duplicate.retryAfterMs,
     });
     return true;
   }
@@ -2170,6 +2255,9 @@ async function handleSuggestionSubmit(req, res, requestUrl) {
     message,
   ].filter(Boolean);
 
+  const relayHost = CANONICAL_HOST || normalizeHostName(requestUrl.hostname || req.headers.host || "") || "zenix.best";
+  const relayOrigin = `${CANONICAL_SCHEME}://${relayHost}`;
+
   try {
     const relayResponse = await fetchRemoteForm(
       relayUrl,
@@ -2181,7 +2269,11 @@ async function handleSuggestionSubmit(req, res, requestUrl) {
         email: contactEmail || "noreply@zenix.best",
         message: detailsLines.join("\n"),
       },
-      "application/json, text/plain, */*"
+      "application/json, text/plain, */*",
+      {
+        Origin: relayOrigin,
+        Referer: `${relayOrigin}/`,
+      }
     );
 
     if (relayResponse.status < 200 || relayResponse.status >= 300) {
@@ -2190,6 +2282,19 @@ async function handleSuggestionSubmit(req, res, requestUrl) {
       return true;
     }
 
+    const relayPayload = parseJsonSafe(relayResponse.body);
+    if (relayPayload && String(relayPayload.success || "").toLowerCase() !== "true") {
+      const relayMessage = sanitizeSuggestionText(relayPayload.message, 220);
+      if (/activation|activate form/i.test(relayMessage)) {
+        sendJson(res, 503, { error: "Email relay not activated yet. Check the activation email from FormSubmit." });
+        return true;
+      }
+      console.warn(`[suggestions] Relay rejected payload: ${relayMessage || "unknown reason"}`);
+      sendJson(res, 502, { error: "Suggestions relay rejected request" });
+      return true;
+    }
+
+    rememberSuggestionFingerprint(suggestionFingerprint);
     sendJson(res, 200, { type: "success" });
     return true;
   } catch (error) {

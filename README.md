@@ -63,6 +63,11 @@ Variables d'environnement optionnelles:
 - `SUGGESTIONS_RELAY_BASE` (defaut: `https://formsubmit.co/ajax`)
 - `SUGGESTIONS_RATE_LIMIT_MS` (defaut: `45000`)
 
+Note:
+
+- Au premier usage FormSubmit, un email d'activation peut etre necessaire.
+- Si tu ne recois rien, verifie aussi le dossier spam/indesirables.
+
 ## Source Zenix (legale)
 
 Tu peux forcer des sources que tu controles via le fichier:
