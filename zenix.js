@@ -58,9 +58,9 @@ const HLS_JS_URL = "https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js";
 const HLS_JS_FALLBACK_URLS = ["/hls.min.js", HLS_JS_URL, "https://unpkg.com/hls.js@1.5.17/dist/hls.min.js"];
 const HLS_MIME = "application/vnd.apple.mpegurl";
 const DASH_MIME = "application/dash+xml";
-const VIDEO_READY_TIMEOUT_MS = 15000;
-const HLS_READY_TIMEOUT_MS = 28000;
-const HLS_MANIFEST_TIMEOUT_MS = 30000;
+const VIDEO_READY_TIMEOUT_MS = 26000;
+const HLS_READY_TIMEOUT_MS = 36000;
+const HLS_MANIFEST_TIMEOUT_MS = 38000;
 const HEARTBEAT_INTERVAL_MS = 30 * 1000;
 const HEARTBEAT_REQUEST_TIMEOUT_MS = 9000;
 const HEARTBEAT_KEY = "zenix-client-id-v1";
@@ -5368,12 +5368,13 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
   if (state.sourcePool.length === 0) {
     throw new Error("No movie source");
   }
+  const hasFreeSource = state.sourcePool.some((entry) => !entry?.premiumHint);
   state.sourceIndex = -1;
   renderPlayerSourceOptions();
   await playFromSourcePoolWithRescue(resumeTime, token, {
     startIndex: 0,
     skipPremiumFallback: true,
-    allowPremiumRescue: true,
+    allowPremiumRescue: !hasFreeSource,
   });
   state.nowPlaying = {
     id: item.id,
@@ -5423,11 +5424,12 @@ async function loadEpisodeStream(
   }
   state.sourceIndex = -1;
   renderPlayerSourceOptions();
+  const hasFreeSource = state.sourcePool.some((entry) => !entry?.premiumHint);
   try {
     await playFromSourcePoolWithRescue(resumeTime, token, {
       startIndex: 0,
       skipPremiumFallback: true,
-      allowPremiumRescue: true,
+      allowPremiumRescue: !hasFreeSource,
     });
   } catch (error) {
     if (state.allEpisodeSources.length > state.sourcePool.length) {
@@ -5440,7 +5442,7 @@ async function loadEpisodeStream(
       await playFromSourcePoolWithRescue(resumeTime, token, {
         startIndex: 0,
         skipPremiumFallback: true,
-        allowPremiumRescue: true,
+        allowPremiumRescue: false,
       });
       showToast("Bascule auto vers une source plus compatible.");
     } else {
@@ -5578,6 +5580,23 @@ async function handlePlayerPlaybackError() {
   await trySwitchToNextSource();
 }
 
+function getNextAutomaticSourceIndex(startIndex, avoidPremium = true) {
+  if (!Array.isArray(state.sourcePool) || state.sourcePool.length === 0) {
+    return -1;
+  }
+  const from = Math.max(-1, Number(startIndex || -1)) + 1;
+  if (!avoidPremium) {
+    return from < state.sourcePool.length ? from : -1;
+  }
+
+  for (let index = from; index < state.sourcePool.length; index += 1) {
+    if (!state.sourcePool[index]?.premiumHint) {
+      return index;
+    }
+  }
+  return -1;
+}
+
 async function trySwitchToNextSource() {
   if (state.manualSourceLock) {
     setPlayerStatus("Source selectionnee indisponible. Choisis une autre source.", true);
@@ -5588,18 +5607,24 @@ async function trySwitchToNextSource() {
     return;
   }
 
-  let nextIndex = state.sourceIndex + 1;
-  if (nextIndex >= state.sourcePool.length) {
+  const currentSource = state.sourcePool[state.sourceIndex] || null;
+  const avoidPremiumAuto = !currentSource?.premiumHint;
+  let nextIndex = getNextAutomaticSourceIndex(state.sourceIndex, avoidPremiumAuto);
+  if (nextIndex < 0 || nextIndex >= state.sourcePool.length) {
     if (state.allEpisodeSources.length > state.sourcePool.length) {
       state.sourcePool = state.allEpisodeSources.slice();
       state.sourceRetryAttempts.clear();
       state.sourceIndex = -1;
-      nextIndex = 0;
+      nextIndex = getNextAutomaticSourceIndex(-1, avoidPremiumAuto);
       showToast("Bascule automatique vers une autre langue/source.");
     } else {
       setPlayerStatus("Source indisponible. Aucun secours disponible.", true);
       return;
     }
+  }
+  if (nextIndex < 0) {
+    setPlayerStatus("Source libre indisponible. Choisis une autre source.", true);
+    return;
   }
 
   const token = ++state.playToken;
@@ -6011,20 +6036,13 @@ function buildPlayableSourceCandidates(source) {
   const candidates = [];
   const isProxied = /\/api\/hls-proxy\?url=/i.test(absolute);
   const isRemoteHttp = /^https?:\/\//i.test(absolute);
-  const looksLikeHls = source?.format === "hls" || /m3u8/i.test(absolute);
   const proxyUrl = !isProxied && isRemoteHttp ? `${API_BASE}/hls-proxy?url=${encodeURIComponent(absolute)}` : "";
 
-  if (looksLikeHls) {
-    if (proxyUrl) {
-      candidates.push(proxyUrl);
-    }
-    candidates.push(absolute);
-  } else {
-    candidates.push(absolute);
-    if (proxyUrl) {
-      candidates.push(proxyUrl);
-    }
+  // Proxy first for consistent compatibility between PC and mobile.
+  if (proxyUrl) {
+    candidates.push(proxyUrl);
   }
+  candidates.push(absolute);
 
   return Array.from(new Set(candidates.filter(Boolean)));
 }

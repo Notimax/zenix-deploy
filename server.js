@@ -1,6 +1,7 @@
 ﻿const fs = require("node:fs");
 const path = require("node:path");
 const http = require("node:http");
+const { Readable } = require("node:stream");
 
 const ROOT = __dirname;
 const PORT = Number(process.env.PORT || 4173);
@@ -1165,6 +1166,49 @@ function rewriteHlsPlaylistBody(playlistBody, baseUrl) {
   return rewritten.join("\n");
 }
 
+function pipeUpstreamBodyToResponse(upstream, res) {
+  return new Promise((resolve, reject) => {
+    if (!upstream?.body) {
+      res.end();
+      resolve();
+      return;
+    }
+
+    const source = Readable.fromWeb(upstream.body);
+    let done = false;
+    const settle = (error) => {
+      if (done) {
+        return;
+      }
+      done = true;
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    };
+
+    source.on("error", (error) => {
+      if (!res.headersSent) {
+        try {
+          res.writeHead(502, { "Content-Type": "application/json; charset=utf-8" });
+        } catch {
+          // ignore
+        }
+      }
+      try {
+        res.end();
+      } catch {
+        // ignore
+      }
+      settle(error);
+    });
+    res.on("error", (error) => settle(error));
+    res.on("close", () => settle());
+    source.pipe(res);
+  });
+}
+
 async function handleHlsProxy(req, res, requestUrl) {
   if (requestUrl.pathname !== "/api/hls-proxy") {
     return false;
@@ -1182,7 +1226,7 @@ async function handleHlsProxy(req, res, requestUrl) {
   }
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), Math.max(22000, PROXY_TIMEOUT_MS + 7000));
+  const timeoutId = setTimeout(() => controller.abort(), Math.max(18000, PROXY_TIMEOUT_MS));
   try {
     const range = String(req.headers.range || "").trim();
     const upstreamHeaders = {
@@ -1204,14 +1248,14 @@ async function handleHlsProxy(req, res, requestUrl) {
 
     const status = Number(upstream.status || 502);
     const contentType = String(upstream.headers.get("content-type") || "").toLowerCase();
-    const buffer = Buffer.from(await upstream.arrayBuffer());
-    const bodyText = decodeNumericPlaylistBody(buffer.toString("utf8"));
     const isPlaylist =
       target.pathname.toLowerCase().endsWith(".m3u8") ||
       contentType.includes("mpegurl") ||
-      bodyText.startsWith("#EXTM3U");
+      contentType.includes("vnd.apple.mpegurl");
 
     if (isPlaylist) {
+      const buffer = Buffer.from(await upstream.arrayBuffer());
+      const bodyText = decodeNumericPlaylistBody(buffer.toString("utf8"));
       const rewritten = rewriteHlsPlaylistBody(bodyText, target.href);
       res.writeHead(status, {
         "Content-Type": "application/vnd.apple.mpegurl; charset=utf-8",
@@ -1220,6 +1264,8 @@ async function handleHlsProxy(req, res, requestUrl) {
       res.end(rewritten);
       return true;
     }
+
+    clearTimeout(timeoutId);
 
     const headers = {
       "Content-Type": String(upstream.headers.get("content-type") || "application/octet-stream"),
@@ -1232,9 +1278,12 @@ async function handleHlsProxy(req, res, requestUrl) {
     } else if (upstream.headers.get("accept-ranges")) {
       headers["Accept-Ranges"] = String(upstream.headers.get("accept-ranges"));
     }
-    headers["Content-Length"] = String(buffer.length);
+    const contentLength = upstream.headers.get("content-length");
+    if (contentLength) {
+      headers["Content-Length"] = String(contentLength);
+    }
     res.writeHead(status, headers);
-    res.end(buffer);
+    await pipeUpstreamBodyToResponse(upstream, res);
     return true;
   } catch (error) {
     const code = String(error?.name || "").toLowerCase().includes("abort") ? 504 : 502;
