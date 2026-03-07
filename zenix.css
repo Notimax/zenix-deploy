@@ -349,6 +349,24 @@ body.startup-lock {
   padding: 10px 106px 10px 14px;
 }
 
+.search-input[type="search"] {
+  -webkit-appearance: textfield;
+  appearance: textfield;
+}
+
+.search-input::-webkit-search-decoration,
+.search-input::-webkit-search-cancel-button,
+.search-input::-webkit-search-results-button,
+.search-input::-webkit-search-results-decoration {
+  -webkit-appearance: none;
+  appearance: none;
+  display: none;
+}
+
+.search-input::-ms-clear {
+  display: none;
+}
+
 .search-clear-btn {
   position: absolute;
   right: 8px;
