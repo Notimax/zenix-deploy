@@ -6672,7 +6672,8 @@ function buildPlayableSourceCandidates(source, options = {}) {
 async function startPlayerSource(source, resumeTime, token) {
   const video = refs.playerVideo;
   const streamCandidates = buildPlayableSourceCandidates(source, {
-    preferDirectHls: shouldUseNativeHls(video),
+    // Keep HLS proxy first on every platform to reduce host/referrer variance.
+    preferDirectHls: false,
   });
   if (streamCandidates.length === 0) {
     throw new Error("Missing source URL");
