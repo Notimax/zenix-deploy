@@ -5984,15 +5984,50 @@ function filterMovieSourcesForFrench(sources) {
   if (rows.length <= 1) {
     return rows;
   }
-  const hasFrenchFriendly = rows.some((entry) => {
-    const language = String(entry?.language || "").trim().toUpperCase();
-    return language === "VF" || language === "VOSTFR" || language === "MULTI";
-  });
+  const indexed = rows.map((entry, index) => ({
+    entry,
+    index,
+    language: String(entry?.language || "").trim().toUpperCase(),
+  }));
+  const hasFrenchFriendly = indexed.some(
+    (entry) => entry.language === "VF" || entry.language === "VOSTFR" || entry.language === "MULTI"
+  );
   if (!hasFrenchFriendly) {
     return rows;
   }
-  const withoutVo = rows.filter((entry) => String(entry?.language || "").trim().toUpperCase() !== "VO");
-  return withoutVo.length > 0 ? withoutVo : rows;
+  const withoutVo = indexed.filter((entry) => entry.language !== "VO");
+  const ranked = (withoutVo.length > 0 ? withoutVo : indexed).slice();
+  const languageOrder = new Map([
+    ["VF", 0],
+    ["MULTI", 1],
+    ["VOSTFR", 2],
+    ["VO", 4],
+  ]);
+  ranked.sort((left, right) => {
+    const leftLang = Number(languageOrder.get(left.language) ?? 3);
+    const rightLang = Number(languageOrder.get(right.language) ?? 3);
+    if (leftLang !== rightLang) {
+      return leftLang - rightLang;
+    }
+    const leftPremium = left.entry?.premiumHint ? 1 : 0;
+    const rightPremium = right.entry?.premiumHint ? 1 : 0;
+    if (leftPremium !== rightPremium) {
+      return leftPremium - rightPremium;
+    }
+    return left.index - right.index;
+  });
+
+  const dedupe = new Set();
+  const ordered = [];
+  for (const row of ranked) {
+    const key = String(row.entry?.url || "").trim();
+    if (!key || dedupe.has(key)) {
+      continue;
+    }
+    dedupe.add(key);
+    ordered.push(row.entry);
+  }
+  return ordered.length > 0 ? ordered : rows;
 }
 
 function shouldAllowPremiumRescueForMovie(sources, video) {
@@ -8225,7 +8260,8 @@ async function startPlayerSource(source, resumeTime, token) {
           try {
             await video.play();
             clearAwaitingUserPlay();
-            setPlayerStatus("Lecture en cours.");
+            const forcedFrenchAudio = preferFrenchAudioTrack(video);
+            setPlayerStatus(forcedFrenchAudio ? "Lecture en cours (audio FR)." : "Lecture en cours.");
           } catch (playError) {
             if (isUnplayablePlayError(playError)) {
               throw playError;
@@ -8236,6 +8272,7 @@ async function startPlayerSource(source, resumeTime, token) {
                 video.muted = true;
                 await video.play();
                 mutedRecovery = true;
+                preferFrenchAudioTrack(video);
                 clearAwaitingUserPlay();
                 setPlayerStatus("Lecture en cours (mode muet).");
                 showToast("Lecture demarree en mode muet. Active le son si besoin.");
@@ -8252,6 +8289,7 @@ async function startPlayerSource(source, resumeTime, token) {
             }
           }
           await waitForPlaybackBootstrap(video, token);
+          preferFrenchAudioTrack(video);
         }
         sourceStarted = true;
         state.ignoreVideoErrorUntil = 0;
@@ -8342,6 +8380,49 @@ function shouldUseNativeHls(video) {
   return isIOS || (isDesktopSafari && isAppleWebkit);
 }
 
+function preferFrenchAudioTrack(video) {
+  const tracks = video?.audioTracks;
+  if (!tracks || typeof tracks.length !== "number" || tracks.length <= 0) {
+    return false;
+  }
+
+  let frenchTrackIndex = -1;
+  for (let index = 0; index < tracks.length; index += 1) {
+    const track = tracks[index];
+    if (!track) {
+      continue;
+    }
+    const sample = [track.language, track.label, track.name]
+      .map((entry) => String(entry || "").toLowerCase())
+      .join(" ");
+    if (/\bfr\b|french|fran[cç]ais/.test(sample)) {
+      frenchTrackIndex = index;
+      break;
+    }
+  }
+
+  if (frenchTrackIndex < 0) {
+    return false;
+  }
+
+  let applied = false;
+  for (let index = 0; index < tracks.length; index += 1) {
+    const track = tracks[index];
+    if (!track || typeof track.enabled === "undefined") {
+      continue;
+    }
+    try {
+      track.enabled = index === frenchTrackIndex;
+      if (index === frenchTrackIndex && track.enabled) {
+        applied = true;
+      }
+    } catch {
+      // Ignore read-only track toggles.
+    }
+  }
+  return applied;
+}
+
 function canAttemptHlsPlayback(video) {
   if (shouldUseNativeHls(video)) {
     return true;
@@ -8373,20 +8454,21 @@ async function startHlsPlayback(video, streamUrl, token) {
   if (shouldUseNativeHls(video)) {
     video.src = streamUrl;
     video.load();
+    let nativeError = null;
     try {
       await waitVideoReady(video, Math.min(HLS_READY_TIMEOUT_MS, 5200));
       return;
-    } catch {
+    } catch (error) {
+      nativeError = error;
       // Retry once with a decoded blob playlist for encoded/quirky upstream manifests.
       // This is especially useful on iOS Safari when native HLS rejects rewritten proxy URLs.
       try {
         await tryDecodedHlsBlobPlayback(video, streamUrl, Math.min(HLS_READY_TIMEOUT_MS + 2600, 7600));
         return;
-      } catch {
-        // Keep current stream URL and let upper-level playback guards decide fallback source.
+      } catch (decodedError) {
+        throw decodedError || nativeError || new Error("Native HLS bootstrap failed");
       }
     }
-    return;
   }
 
   const Hls = await loadHlsLibrary();
