@@ -27,7 +27,7 @@
   <link rel="dns-prefetch" href="//image.tmdb.org" />
   <link rel="dns-prefetch" href="//cdn.jsdelivr.net" />
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Instrument+Serif:ital@0;1&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/zenix.css?v=20260308-c101" />
+    <link rel="stylesheet" href="/zenix.css?v=20260308-c102" />
     <script defer src="/zenix.js?v=20260308-c111"></script>
 </head>
 <body>
@@ -414,7 +414,10 @@
               <p class="player-side-title">Flux</p>
               <div class="player-source-control" id="playerSourceControl">
                 <label class="field" for="playerSourceSelect">
-                  Source
+                  <span class="player-source-label">
+                    <span>Source</span>
+                    <span class="player-source-alert">Attention: si la video ne se lance pas, change de source.</span>
+                  </span>
                   <select id="playerSourceSelect"></select>
                 </label>
                 <button class="btn btn-soft btn-compact" id="playerSourceApplyBtn" type="button">Appliquer</button>
