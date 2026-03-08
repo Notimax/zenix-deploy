@@ -168,6 +168,7 @@ const state = {
   selectedLanguageByMedia: new Map(),
   hlsScriptPromise: null,
   hlsInstance: null,
+  hlsPlaylistBlobUrls: [],
   searchAbortController: null,
   apiCache: new Map(),
   streamPayloadCache: new Map(),
@@ -7396,6 +7397,206 @@ function canonicalizeSourceUrl(url) {
   }
 }
 
+function clearHlsPlaylistBlobs() {
+  const rows = Array.isArray(state.hlsPlaylistBlobUrls) ? state.hlsPlaylistBlobUrls.slice() : [];
+  state.hlsPlaylistBlobUrls = [];
+  rows.forEach((entry) => {
+    const url = String(entry || "").trim();
+    if (!url) {
+      return;
+    }
+    try {
+      URL.revokeObjectURL(url);
+    } catch {
+      // ignore cleanup errors
+    }
+  });
+}
+
+function registerHlsPlaylistBlob(blobUrl) {
+  const safe = String(blobUrl || "").trim();
+  if (!safe) {
+    return;
+  }
+  if (!Array.isArray(state.hlsPlaylistBlobUrls)) {
+    state.hlsPlaylistBlobUrls = [];
+  }
+  state.hlsPlaylistBlobUrls.push(safe);
+  while (state.hlsPlaylistBlobUrls.length > 10) {
+    const dropped = String(state.hlsPlaylistBlobUrls.shift() || "").trim();
+    if (!dropped) {
+      continue;
+    }
+    try {
+      URL.revokeObjectURL(dropped);
+    } catch {
+      // ignore cleanup errors
+    }
+  }
+}
+
+function toAbsoluteUrl(raw, fallbackBase = window.location.href) {
+  const text = String(raw || "").trim();
+  if (!text) {
+    return "";
+  }
+  try {
+    return new URL(text, fallbackBase).href;
+  } catch {
+    return text;
+  }
+}
+
+function toHlsProxyUrl(rawUrl) {
+  const absolute = toAbsoluteUrl(rawUrl);
+  if (!absolute) {
+    return "";
+  }
+  if (/\/api\/hls-proxy\?url=/i.test(absolute)) {
+    return absolute;
+  }
+  if (!/^https?:\/\//i.test(absolute)) {
+    return "";
+  }
+  return `${API_BASE}/hls-proxy?url=${encodeURIComponent(absolute)}`;
+}
+
+function decodeNumericPlaylistText(rawBody) {
+  const text = String(rawBody || "").replace(/\u0000/g, "").trim();
+  if (!text) {
+    return "";
+  }
+  if (text.includes("#EXTM3U")) {
+    return text;
+  }
+  const tokens = text
+    .split(/[^0-9]+/)
+    .map((entry) => String(entry || "").trim())
+    .filter(Boolean);
+  if (tokens.length < 6 || tokens.length > 120000) {
+    return text;
+  }
+  if (!tokens.every((entry) => /^\d{1,3}$/.test(entry))) {
+    return text;
+  }
+  const bytes = tokens.map((entry) => Number(entry));
+  if (bytes.some((value) => !Number.isInteger(value) || value < 0 || value > 255)) {
+    return text;
+  }
+  try {
+    const decoder = typeof TextDecoder !== "undefined" ? new TextDecoder("utf-8") : null;
+    const decoded = decoder ? decoder.decode(new Uint8Array(bytes)).trim() : String.fromCharCode(...bytes).trim();
+    return decoded.includes("#EXTM3U") ? decoded : text;
+  } catch {
+    return text;
+  }
+}
+
+function rewritePlaylistLineUriForClient(rawUri, baseUrl) {
+  const value = String(rawUri || "").trim();
+  if (!value || value.startsWith("data:")) {
+    return value;
+  }
+  const absolute = toAbsoluteUrl(value, baseUrl);
+  if (!absolute) {
+    return value;
+  }
+  if (/^blob:/i.test(absolute)) {
+    return absolute;
+  }
+  if (/\/api\/hls-proxy\?url=/i.test(absolute)) {
+    return absolute;
+  }
+  if (/^https?:\/\//i.test(absolute)) {
+    const proxied = toHlsProxyUrl(absolute);
+    return proxied ? toAbsoluteUrl(proxied) : absolute;
+  }
+  return absolute;
+}
+
+function rewritePlaylistTextForClient(playlistText, baseUrl) {
+  const lines = String(playlistText || "").split(/\r?\n/);
+  const rewritten = lines.map((line) => {
+    const rawLine = String(line || "");
+    const trimmed = rawLine.trim();
+    if (!trimmed) {
+      return rawLine;
+    }
+    if (trimmed.startsWith("#")) {
+      if (!rawLine.includes("URI=")) {
+        return rawLine;
+      }
+      return rawLine.replace(/URI="([^"]+)"/g, (_match, uriValue) => {
+        const next = rewritePlaylistLineUriForClient(uriValue, baseUrl);
+        return `URI="${next}"`;
+      });
+    }
+    return rewritePlaylistLineUriForClient(trimmed, baseUrl);
+  });
+  return rewritten.join("\n");
+}
+
+function pickFirstHlsVariantUrl(masterText, baseUrl) {
+  const lines = String(masterText || "").split(/\r?\n/);
+  for (let index = 0; index < lines.length; index += 1) {
+    const current = String(lines[index] || "").trim();
+    if (!current || !current.startsWith("#EXT-X-STREAM-INF")) {
+      continue;
+    }
+    for (let lookAhead = index + 1; lookAhead < lines.length; lookAhead += 1) {
+      const candidate = String(lines[lookAhead] || "").trim();
+      if (!candidate || candidate.startsWith("#")) {
+        continue;
+      }
+      return toAbsoluteUrl(candidate, baseUrl);
+    }
+  }
+  return "";
+}
+
+async function fetchDecodedHlsPlaylistText(url) {
+  const requestUrl = toHlsProxyUrl(url) || toAbsoluteUrl(url);
+  if (!requestUrl) {
+    throw new Error("Missing HLS url");
+  }
+  const response = await fetch(requestUrl, { cache: "no-store" });
+  if (!response.ok) {
+    throw new Error(`Playlist request failed (${response.status})`);
+  }
+  const body = await response.text();
+  return decodeNumericPlaylistText(body);
+}
+
+async function buildDecodedHlsBlobUrl(streamUrl) {
+  const masterText = await fetchDecodedHlsPlaylistText(streamUrl);
+  if (!masterText.includes("#EXTM3U")) {
+    return "";
+  }
+
+  let finalPlaylistText = masterText;
+  let finalBaseUrl = toAbsoluteUrl(streamUrl);
+
+  if (/#EXT-X-STREAM-INF/i.test(masterText)) {
+    const variantUrl = pickFirstHlsVariantUrl(masterText, finalBaseUrl);
+    if (variantUrl) {
+      const variantText = await fetchDecodedHlsPlaylistText(variantUrl);
+      if (variantText.includes("#EXTM3U")) {
+        finalPlaylistText = variantText;
+        finalBaseUrl = variantUrl;
+      }
+    }
+  }
+
+  const rewritten = rewritePlaylistTextForClient(finalPlaylistText, finalBaseUrl);
+  if (!rewritten.includes("#EXTM3U")) {
+    return "";
+  }
+  const blob = new Blob([rewritten], { type: HLS_MIME });
+  const blobUrl = URL.createObjectURL(blob);
+  registerHlsPlaylistBlob(blobUrl);
+  return blobUrl;
+}
+
 function getSourceDedupKey(source) {
   if (!source) {
     return "";
@@ -7661,21 +7862,41 @@ function canAttemptHlsPlayback(video) {
   return false;
 }
 
+async function tryDecodedHlsBlobPlayback(video, streamUrl, timeoutMs = HLS_READY_TIMEOUT_MS + 2600) {
+  const blobUrl = await buildDecodedHlsBlobUrl(streamUrl);
+  if (!blobUrl) {
+    throw new Error("Decoded HLS playlist unavailable");
+  }
+  video.src = blobUrl;
+  video.load();
+  await waitVideoReady(video, timeoutMs);
+}
+
 async function startHlsPlayback(video, streamUrl, token) {
   if (shouldUseNativeHls(video)) {
-    video.src = streamUrl;
-    video.load();
-    await waitVideoReady(video, HLS_READY_TIMEOUT_MS);
-    return;
+    try {
+      video.src = streamUrl;
+      video.load();
+      await waitVideoReady(video, HLS_READY_TIMEOUT_MS);
+      return;
+    } catch (nativeError) {
+      await tryDecodedHlsBlobPlayback(video, streamUrl);
+      return;
+    }
   }
 
   const Hls = await loadHlsLibrary();
   if (!Hls || !Hls.isSupported()) {
     if (video.canPlayType(HLS_MIME)) {
-      video.src = streamUrl;
-      video.load();
-      await waitVideoReady(video, HLS_READY_TIMEOUT_MS);
-      return;
+      try {
+        video.src = streamUrl;
+        video.load();
+        await waitVideoReady(video, HLS_READY_TIMEOUT_MS);
+        return;
+      } catch {
+        await tryDecodedHlsBlobPlayback(video, streamUrl);
+        return;
+      }
     }
     throw new Error("HLS not supported");
   }
@@ -7749,6 +7970,7 @@ function teardownPlayerEngine(video) {
   state.ignoreVideoErrorUntil = Date.now() + 1400;
   clearPlaybackHealthMonitor();
   resetPlayerEmbedFrame();
+  clearHlsPlaylistBlobs();
   destroyHlsInstance();
   video.hidden = false;
   video.controls = true;
