@@ -2082,7 +2082,13 @@ async function handleHlsProxy(req, res, requestUrl) {
         }
       }
       if (!rewritten.includes("#EXTM3U")) {
-        sendJson(res, 502, { error: "Invalid playlist format" });
+        // If proxy-side rewriting still fails, hand off to the upstream playlist
+        // instead of returning a hard 502. This improves iOS native HLS resilience.
+        res.writeHead(302, {
+          Location: target.href,
+          "Cache-Control": "no-cache",
+        });
+        res.end();
         return true;
       }
       res.writeHead(200, {
