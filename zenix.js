@@ -8043,14 +8043,10 @@ async function startHlsPlayback(video, streamUrl, token) {
     video.src = streamUrl;
     video.load();
     try {
-      await waitVideoReady(video, Math.min(HLS_READY_TIMEOUT_MS, 2200));
+      await waitVideoReady(video, Math.min(HLS_READY_TIMEOUT_MS, 5200));
     } catch {
-      // Keep native source active; try decoded fallback best-effort without hard failing startup.
-      try {
-        await tryDecodedHlsBlobPlayback(video, streamUrl, HLS_READY_TIMEOUT_MS + 2600);
-      } catch {
-        // no-op: startPlayerSource will handle play/bootstrap checks next
-      }
+      // On native HLS (iOS/Safari), keep direct/proxied stream URL.
+      // Blob playlist fallback can trigger immediate decode errors on some Apple players.
     }
     return;
   }
