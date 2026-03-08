@@ -17,6 +17,11 @@ Last update: 2026-03-08
   - preferred order: `VF`, `VOSTFR`, `MULTI`, then `VO`
   - avoid pure `VO` when a French-friendly source exists
 - Auto-switch source must trigger when playback is blocked.
+- Added iOS-specific resilience:
+  - if native HLS manifest playback fails, fallback to direct TS segment chain playback.
+  - this is intended to avoid instant playback block in iPhone/WebKit edge cases.
+  - source ordering for movies is now stricter at runtime: `VF`, then `MULTI`, then `VOSTFR`.
+  - when audio tracks are exposed, player attempts to force French track.
 
 ## Mobile robustness
 - Startup splash must never block app forever.
@@ -36,6 +41,7 @@ Last update: 2026-03-08
 - Confirm no mobile toast visible.
 - Confirm startup splash disappears on mobile.
 - Confirm source fallback behavior in player status and source selector.
+- For iOS fallback validation, expect statuses like `Fallback iOS actif...` then `Lecture en cours.` and segment progression.
 
 ## Mandatory test failure loop
 - If a playback test fails (block, freeze, error, micro bug), never stop at diagnostics.

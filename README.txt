@@ -26,12 +26,18 @@ STREAMING/PLAYBACK NOTES
 - HLS proxy endpoint: /api/hls-proxy
 - Some upstream providers return numeric-encoded playlists.
   Server now decodes numeric playlists more robustly before rewriting.
+- iOS fallback: when native HLS manifest bootstrap fails, player now switches to direct TS segment playback
+  (segment chain) to avoid instant block on iPhone/WebKit environments.
+- Movie source ordering for FR audience is now strict:
+  VF first, then MULTI, then VOSTFR (VO removed when FR-friendly sources exist).
+- Player tries to select French audio track automatically when a source exposes multiple audio tracks.
 
 MOBILE DEBUG CHECKLIST
 - Confirm startup splash hidden after load.
 - Confirm no toast shown on mobile.
 - Run 3 x 20s iPhone 13 WebKit playback checks on target content.
 - If playback still fails, inspect source validity upstream and add FR-compatible backups.
+- If iOS WebKit logs show `Fallback iOS actif...` and `Lecture segment X/...`, segment fallback is engaged.
 
 RELEASE QUALITY GATE (MANDATORY)
 - Before closing any streaming fix, run brute tests on BOTH desktop and phone:
