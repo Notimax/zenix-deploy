@@ -95,6 +95,7 @@ const INTEREST_HOME_LIMIT = 10;
 const SEARCH_SIGNAL_MAX = 220;
 const SEARCH_SIGNAL_MAX_AGE_MS = 180 * 24 * 60 * 60 * 1000;
 const LOCK_VISIBLE_ROOT_URL = true;
+const EMBED_FALLBACK_BASE_URLS = ["https://vidsrc.cc/v2/embed", "https://vidsrc.to/embed"];
 
 const FALLBACK_ITEMS = [
   {
@@ -5977,6 +5978,7 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
   const baseMovieSources = extractSources(payload);
   const autoMovieSources = appendAutoZenixRelaySources(baseMovieSources);
   state.sourcePool = await appendZenixOwnedSources(item, 1, 1, autoMovieSources);
+  state.sourcePool = appendEmbedFallbackSources(item, 1, 1, state.sourcePool);
   state.allEpisodeSources = state.sourcePool.slice();
   state.sourceRetryAttempts.clear();
   if (state.sourcePool.length === 0) {
@@ -6003,6 +6005,7 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
     const refreshedMovieSources = extractSources(refreshedPayload);
     const refreshedAutoMovieSources = appendAutoZenixRelaySources(refreshedMovieSources);
     state.sourcePool = await appendZenixOwnedSources(item, 1, 1, refreshedAutoMovieSources);
+    state.sourcePool = appendEmbedFallbackSources(item, 1, 1, state.sourcePool);
     state.allEpisodeSources = state.sourcePool.slice();
     state.sourceRetryAttempts.clear();
     if (state.sourcePool.length === 0) {
@@ -6061,6 +6064,7 @@ async function loadEpisodeStream(
       ownedMergedSources,
       preferredLanguageInput
     );
+    state.allEpisodeSources = appendEmbedFallbackSources(item, season, episode, state.allEpisodeSources);
     state.availableLanguages = getAvailableLanguages(state.allEpisodeSources);
     let nextLanguage = resolvePreferredLanguage(item.id, preferredLanguageInput, state.availableLanguages);
     state.sourcePool = filterSourcesByLanguage(state.allEpisodeSources, nextLanguage);
@@ -6734,12 +6738,20 @@ async function hardRefreshCurrentPlayback(showRecoveredToast = true) {
 async function playFromSourcePool(resumeTime, token, startIndex = 0, options = {}) {
   const strictIndex = Boolean(options?.strictIndex);
   const skipPremiumFallback = Boolean(options?.skipPremiumFallback);
+  const hlsSupported = canAttemptHlsPlayback(refs.playerVideo);
   const startSource = state.sourcePool[startIndex] || null;
   const startIsPremium = Boolean(startSource?.premiumHint);
   const attemptedKeys = new Set();
   let lastError = null;
   for (let index = startIndex; index < state.sourcePool.length; index += 1) {
     const source = state.sourcePool[index];
+    const isHlsSource = source?.format === "hls" || /m3u8/i.test(String(source?.url || ""));
+    if (isHlsSource && !hlsSupported) {
+      if (!lastError) {
+        lastError = new Error("HLS not supported");
+      }
+      continue;
+    }
     const key = getSourceDedupKey(source);
     if (key && attemptedKeys.has(key)) {
       continue;
@@ -7230,6 +7242,109 @@ function getSourceDedupKey(source) {
   return canonicalizeSourceUrl(source.url);
 }
 
+function extractTmdbInfoFromSourceUrl(url) {
+  const raw = String(url || "").trim();
+  if (!raw) {
+    return null;
+  }
+  let pathname = raw;
+  try {
+    pathname = new URL(raw, window.location.href).pathname;
+  } catch {
+    // keep raw
+  }
+
+  const movieMatch = pathname.match(/\/movie\/(\d+)\//i);
+  if (movieMatch) {
+    return {
+      mediaType: "movie",
+      tmdbId: Number(movieMatch[1] || 0),
+      season: 1,
+      episode: 1,
+    };
+  }
+
+  const tvMatch = pathname.match(/\/tv\/(\d+)\/s(\d+)\/e(\d+)\//i);
+  if (tvMatch) {
+    return {
+      mediaType: "tv",
+      tmdbId: Number(tvMatch[1] || 0),
+      season: Number(tvMatch[2] || 1),
+      episode: Number(tvMatch[3] || 1),
+    };
+  }
+
+  return null;
+}
+
+function resolveTmdbFallbackContext(item, season, episode, sources) {
+  const desiredType = String(item?.type || "").toLowerCase() === "tv" ? "tv" : "movie";
+  const rows = Array.isArray(sources) ? sources : [];
+  for (const entry of rows) {
+    const info = extractTmdbInfoFromSourceUrl(entry?.url);
+    if (!info || info.mediaType !== desiredType) {
+      continue;
+    }
+    const tmdbId = Number(info.tmdbId || 0);
+    if (!Number.isFinite(tmdbId) || tmdbId <= 0) {
+      continue;
+    }
+    return {
+      mediaType: desiredType,
+      tmdbId,
+      season: desiredType === "tv" ? Math.max(1, Number(season || info.season || 1)) : 1,
+      episode: desiredType === "tv" ? Math.max(1, Number(episode || info.episode || 1)) : 1,
+    };
+  }
+  return null;
+}
+
+function appendEmbedFallbackSources(item, season, episode, sources) {
+  const base = Array.isArray(sources) ? sources.slice() : [];
+  if (base.length === 0 || base.some((entry) => isEmbedSource(entry))) {
+    return base;
+  }
+
+  const context = resolveTmdbFallbackContext(item, season, episode, base);
+  if (!context) {
+    return base;
+  }
+
+  const existing = new Set(base.map((entry) => getSourceDedupKey(entry)).filter(Boolean));
+  const fallbackRows = [];
+  for (const rawBase of EMBED_FALLBACK_BASE_URLS) {
+    const safeBase = String(rawBase || "").trim().replace(/\/+$/, "");
+    if (!safeBase) {
+      continue;
+    }
+    const fallbackUrl =
+      context.mediaType === "tv"
+        ? `${safeBase}/tv/${context.tmdbId}/${context.season}/${context.episode}`
+        : `${safeBase}/movie/${context.tmdbId}`;
+    const key = canonicalizeSourceUrl(fallbackUrl);
+    if (!key || existing.has(key)) {
+      continue;
+    }
+    const normalized = normalizeSourceEntry(
+      {
+        stream_url: fallbackUrl,
+        format: "embed",
+        quality: "Secours",
+        language: "MULTI",
+        source_name: "Web Fallback",
+      },
+      base.length + fallbackRows.length
+    );
+    if (!normalized) {
+      continue;
+    }
+    existing.add(key);
+    fallbackRows.push(normalized);
+  }
+
+  return fallbackRows.length > 0 ? base.concat(fallbackRows) : base;
+}
+
 function buildPlayableSourceCandidates(source, options = {}) {
   const raw = String(source?.url || "").trim();
   if (!raw) {
@@ -7465,6 +7580,23 @@ function shouldUseNativeHls(video) {
   const isAppleWebkit = /AppleWebKit/i.test(ua);
   const isDesktopSafari = /Safari/i.test(ua) && !/Chrome|Chromium|Edg|OPR|Firefox/i.test(ua);
   return isIOS || (isDesktopSafari && isAppleWebkit);
+}
+
+function canAttemptHlsPlayback(video) {
+  if (shouldUseNativeHls(video)) {
+    return true;
+  }
+  if (typeof window.MediaSource !== "undefined" && window.MediaSource) {
+    return true;
+  }
+  if (window.Hls && typeof window.Hls.isSupported === "function") {
+    try {
+      return Boolean(window.Hls.isSupported());
+    } catch {
+      return false;
+    }
+  }
+  return false;
 }
 
 async function startHlsPlayback(video, streamUrl, token) {
