@@ -58,6 +58,7 @@ const ANIME_SIBNET_TIMEOUT_MS = 11000;
 const ZENIX_OWNED_SOURCE_TIMEOUT_MS = 7000;
 const PIDOOV_SOURCE_TIMEOUT_MS = 14000;
 const NOTARIELLES_SOURCE_TIMEOUT_MS = 14000;
+const RENDEZVOUS_SOURCE_TIMEOUT_MS = 14000;
 const EPISODE_SOON_VERIFY_TTL_MS = 3 * 60 * 1000;
 const EPISODE_SOON_VERIFY_LIMIT = 40;
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
@@ -6229,7 +6230,8 @@ async function syncDetailLanguageOptions(id, season, episode) {
   const autoSources = appendAutoZenixRelaySources(baseSources);
   const ownedSources = await appendZenixOwnedSources(item, season, episode, autoSources);
   const notariellesSources = await appendNotariellesSources(item, season, episode, ownedSources);
-  const sources = await appendPidoovSources(item, season, episode, notariellesSources);
+  const pidoovSources = await appendPidoovSources(item, season, episode, notariellesSources);
+  const sources = await appendRendezvousSources(item, season, episode, pidoovSources);
   const languages = getAvailableLanguages(sources);
   const selected = resolvePreferredLanguage(id, refs.detailLanguageSelect?.value || "", languages);
   populateLanguageSelect(refs.detailLanguageSelect, languages, selected);
@@ -6635,7 +6637,8 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
   const autoMovieSources = appendAutoZenixRelaySources(baseMovieSources);
   const ownedMovieSources = await appendZenixOwnedSources(item, 1, 1, autoMovieSources);
   const pidoovMovieSources = await appendPidoovSources(item, 1, 1, ownedMovieSources);
-  state.sourcePool = filterMovieSourcesForFrench(pidoovMovieSources);
+  const rendezvousMovieSources = await appendRendezvousSources(item, 1, 1, pidoovMovieSources);
+  state.sourcePool = filterMovieSourcesForFrench(rendezvousMovieSources);
   state.allEpisodeSources = state.sourcePool.slice();
   state.sourceRetryAttempts.clear();
   if (state.sourcePool.length === 0) {
@@ -6664,7 +6667,13 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
     const refreshedAutoMovieSources = appendAutoZenixRelaySources(refreshedMovieSources);
     const refreshedOwnedMovieSources = await appendZenixOwnedSources(item, 1, 1, refreshedAutoMovieSources);
     const refreshedPidoovMovieSources = await appendPidoovSources(item, 1, 1, refreshedOwnedMovieSources);
-    state.sourcePool = filterMovieSourcesForFrench(refreshedPidoovMovieSources);
+    const refreshedRendezvousMovieSources = await appendRendezvousSources(
+      item,
+      1,
+      1,
+      refreshedPidoovMovieSources
+    );
+    state.sourcePool = filterMovieSourcesForFrench(refreshedRendezvousMovieSources);
     state.allEpisodeSources = state.sourcePool.slice();
     state.sourceRetryAttempts.clear();
     if (state.sourcePool.length === 0) {
@@ -6718,11 +6727,12 @@ async function loadEpisodeStream(
     const ownedMergedSources = await appendZenixOwnedSources(item, season, episode, autoMergedSources);
     const notariellesMergedSources = await appendNotariellesSources(item, season, episode, ownedMergedSources);
     const pidoovMergedSources = await appendPidoovSources(item, season, episode, notariellesMergedSources);
+    const rendezvousMergedSources = await appendRendezvousSources(item, season, episode, pidoovMergedSources);
     state.allEpisodeSources = await appendAnimeSibnetSource(
       item,
       season,
       episode,
-      pidoovMergedSources,
+      rendezvousMergedSources,
       preferredLanguageInput
     );
     state.availableLanguages = getAvailableLanguages(state.allEpisodeSources);
@@ -7121,6 +7131,74 @@ async function appendNotariellesSources(item, season, episode, sources) {
       return base;
     }
     return notariellesSources.concat(base);
+  } catch {
+    return base;
+  }
+}
+
+async function appendRendezvousSources(item, season, episode, sources) {
+  const base = Array.isArray(sources) ? sources.slice() : [];
+  if (!item || item.isAnime) {
+    return base;
+  }
+
+  const title = String(item?.title || "").trim();
+  if (title.length < 2) {
+    return base;
+  }
+
+  const mediaType = getOwnedSourceMediaType(item);
+  const safeSeason = Math.max(1, Number(season || 1));
+  const safeEpisode = Math.max(1, Number(episode || 1));
+  const year = getItemReleaseYear(item);
+  const params = new URLSearchParams({
+    title,
+    type: mediaType,
+    season: String(safeSeason),
+    episode: String(safeEpisode),
+  });
+  if (year > 0) {
+    params.set("year", String(year));
+  }
+
+  try {
+    const payload = await fetchJson(`${API_BASE}/rendezvous-source?${params.toString()}`, {
+      timeoutMs: RENDEZVOUS_SOURCE_TIMEOUT_MS,
+      retryDelays: [450, 1100],
+    });
+    const raw = Array.isArray(payload?.data?.sources) ? payload.data.sources : [];
+    if (raw.length === 0) {
+      return base;
+    }
+
+    const existing = new Set(base.map((entry) => getSourceDedupKey(entry)).filter(Boolean));
+    const rendezvousSources = raw
+      .map((entry, index) =>
+        normalizeSourceEntry(
+          {
+            ...entry,
+            source_name: String(entry?.source_name || entry?.name || "Rendezvous").trim() || "Rendezvous",
+          },
+          index
+        )
+      )
+      .filter((entry) => {
+        if (!entry) {
+          return false;
+        }
+        const key = getSourceDedupKey(entry);
+        if (!key || existing.has(key)) {
+          return false;
+        }
+        existing.add(key);
+        return true;
+      });
+
+    if (rendezvousSources.length === 0) {
+      return base;
+    }
+    // Keep existing source priority, add rendezvous as extra fallback pool.
+    return base.concat(rendezvousSources);
   } catch {
     return base;
   }

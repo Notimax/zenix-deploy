@@ -68,6 +68,36 @@ const NOTARIELLES_FETCH_HEADERS = {
   Referer: `${NOTARIELLES_BASE}/`,
   "Accept-Language": DEFAULT_ACCEPT_LANGUAGE,
 };
+const RENDEZVOUS_BASE = "https://rendezvousmusical.fr";
+const RENDEZVOUS_HOST = "rendezvousmusical.fr";
+const RENDEZVOUS_SITEMAP_INDEX_URL = `${RENDEZVOUS_BASE}/sitemaps.xml`;
+const RENDEZVOUS_INDEX_CACHE_MS = Math.max(
+  5 * 60 * 1000,
+  Number(process.env.RENDEZVOUS_INDEX_CACHE_MS || 30 * 60 * 1000)
+);
+const RENDEZVOUS_SEARCH_CACHE_MS = Math.max(
+  60 * 1000,
+  Number(process.env.RENDEZVOUS_SEARCH_CACHE_MS || 15 * 60 * 1000)
+);
+const RENDEZVOUS_PAGE_CACHE_MS = Math.max(
+  60 * 1000,
+  Number(process.env.RENDEZVOUS_PAGE_CACHE_MS || 20 * 60 * 1000)
+);
+const RENDEZVOUS_MAX_SITEMAPS = Math.max(1, toInt(process.env.RENDEZVOUS_MAX_SITEMAPS, 40, 1, 90));
+const RENDEZVOUS_PAGE_PROBE_COUNT = Math.max(2, toInt(process.env.RENDEZVOUS_PAGE_PROBE_COUNT, 10, 2, 30));
+const RENDEZVOUS_FETCH_CONCURRENCY = Math.max(
+  1,
+  toInt(process.env.RENDEZVOUS_FETCH_CONCURRENCY, 4, 1, 8)
+);
+const RENDEZVOUS_MAX_MATCH_CANDIDATES = Math.max(
+  1,
+  toInt(process.env.RENDEZVOUS_MAX_MATCH_CANDIDATES, 4, 1, 8)
+);
+const RENDEZVOUS_SEED_PATHS = ["/", "/films-gratuit/", "/telecharger-series/", "/page/2/"];
+const RENDEZVOUS_FETCH_HEADERS = {
+  Referer: `${RENDEZVOUS_BASE}/`,
+  "Accept-Language": DEFAULT_ACCEPT_LANGUAGE,
+};
 const ANIME_PLANNING_URL = "https://anime-sama.tv/planning/";
 const ANIME_SAMA_BASE = "https://anime-sama.to";
 const ANIME_SAMA_SEARCH_ENDPOINT = `${ANIME_SAMA_BASE}/template-php/defaut/fetch.php`;
@@ -124,12 +154,19 @@ const NOTARIELLES_STATIC_SOURCES_FILE = path.resolve(
     ? String(process.env.NOTARIELLES_STATIC_SOURCES_FILE || "").trim()
     : String(process.env.NOTARIELLES_STATIC_SOURCES_FILE || "notarielles-static-sources.json").trim()
 );
+const RENDEZVOUS_STATIC_SOURCES_FILE = path.resolve(
+  ROOT,
+  path.isAbsolute(String(process.env.RENDEZVOUS_STATIC_SOURCES_FILE || "").trim())
+    ? String(process.env.RENDEZVOUS_STATIC_SOURCES_FILE || "").trim()
+    : String(process.env.RENDEZVOUS_STATIC_SOURCES_FILE || "rendezvous-static-sources.json").trim()
+);
 const proxyCache = new Map();
 const calendarCache = new Map();
 const animeSibnetCache = new Map();
 const pidoovDetailCache = new Map();
 const pidoovLookupCache = new Map();
 const notariellesPageCache = new Map();
+const rendezvousPageCache = new Map();
 const zenixOwnedSourcesCache = {
   loadedAt: 0,
   mtimeMs: 0,
@@ -150,12 +187,22 @@ const notariellesIndexCache = {
   entries: [],
   inFlight: null,
 };
+const rendezvousIndexCache = {
+  loadedAt: 0,
+  entries: [],
+  inFlight: null,
+};
 const pidoovStaticCache = {
   loadedAt: 0,
   mtimeMs: 0,
   entries: [],
 };
 const notariellesStaticCache = {
+  loadedAt: 0,
+  mtimeMs: 0,
+  entries: [],
+};
+const rendezvousStaticCache = {
   loadedAt: 0,
   mtimeMs: 0,
   entries: [],
@@ -1305,6 +1352,77 @@ function loadNotariellesStaticEntries() {
   return entries;
 }
 
+function loadRendezvousStaticEntries() {
+  const now = Date.now();
+  const ttl = 10 * 1000;
+  if (rendezvousStaticCache.loadedAt > 0 && now - rendezvousStaticCache.loadedAt < ttl) {
+    return Array.isArray(rendezvousStaticCache.entries) ? rendezvousStaticCache.entries : [];
+  }
+
+  let entries = [];
+  let mtimeMs = 0;
+  try {
+    const stats = fs.statSync(RENDEZVOUS_STATIC_SOURCES_FILE);
+    if (stats.isFile()) {
+      mtimeMs = Number(stats.mtimeMs || 0);
+      if (mtimeMs !== Number(rendezvousStaticCache.mtimeMs || 0)) {
+        const raw = fs.readFileSync(RENDEZVOUS_STATIC_SOURCES_FILE, "utf8");
+        const parsed = JSON.parse(raw);
+        const list = Array.isArray(parsed?.entries) ? parsed.entries : Array.isArray(parsed) ? parsed : [];
+        entries = list
+          .map((entry) => {
+            const pageUrl =
+              typeof entry === "string"
+                ? entry
+                : String(entry?.pageUrl || entry?.url || "").trim();
+            const baseEntry = parseRendezvousEntryFromUrl(pageUrl);
+            if (!baseEntry) {
+              return null;
+            }
+
+            const normalizedLanguage =
+              normalizePidoovLanguage(entry?.language || entry?.label || "") || baseEntry.language || "VF";
+            const rawSources = Array.isArray(entry?.sources) ? entry.sources : [];
+            const staticSources = rawSources
+              .map((source, index) => {
+                const parsedUrl = parseSafeRemoteUrl(source?.stream_url || source?.url || "");
+                if (!parsedUrl) {
+                  return null;
+                }
+                const format = String(source?.format || "").trim().toLowerCase();
+                const sourceName = String(source?.source_name || source?.name || "Rendezvous").trim() || "Rendezvous";
+                return {
+                  stream_url: parsedUrl.href,
+                  source_name: sourceName,
+                  quality: "Rendezvous",
+                  language: normalizedLanguage,
+                  format: format === "hls" || format === "mp4" || format === "embed" ? format : "embed",
+                  priority: 320 - Math.min(45, index * 5),
+                };
+              })
+              .filter(Boolean);
+            return {
+              ...baseEntry,
+              language: normalizedLanguage,
+              staticSources,
+            };
+          })
+          .filter(Boolean);
+      } else {
+        entries = Array.isArray(rendezvousStaticCache.entries) ? rendezvousStaticCache.entries : [];
+      }
+    }
+  } catch {
+    entries = [];
+    mtimeMs = 0;
+  }
+
+  rendezvousStaticCache.loadedAt = now;
+  rendezvousStaticCache.mtimeMs = mtimeMs;
+  rendezvousStaticCache.entries = entries;
+  return entries;
+}
+
 async function loadPidoovIndex(force = false) {
   const now = Date.now();
   const hasCache = Array.isArray(pidoovIndexCache.entries) && pidoovIndexCache.entries.length > 0;
@@ -2297,6 +2415,736 @@ async function resolveNotariellesSourcesByEpisode(title, season, episode) {
   }
 
   storePidoovLookupCache(`notarielles:${cacheKey}`, merged, NOTARIELLES_SEARCH_CACHE_MS);
+  return merged;
+}
+
+function normalizeRendezvousPath(value) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return "";
+  }
+  let parsed;
+  try {
+    parsed = new URL(raw, `${RENDEZVOUS_BASE}/`);
+  } catch {
+    return "";
+  }
+  if (normalizeHostName(parsed.hostname) !== RENDEZVOUS_HOST) {
+    return "";
+  }
+  return `${parsed.pathname}${parsed.search}`;
+}
+
+function normalizeRendezvousLanguage(value) {
+  const safe = normalizePidoovLanguage(value);
+  if (safe) {
+    return safe;
+  }
+  const raw = String(value || "").trim().toLowerCase();
+  if (!raw) {
+    return "";
+  }
+  if (raw.includes("vostfr")) {
+    return "VOSTFR";
+  }
+  if (raw.includes("vf")) {
+    return "VF";
+  }
+  return "";
+}
+
+function parseRendezvousEntryFromUrl(value) {
+  const rawPath = normalizeRendezvousPath(value);
+  if (!rawPath) {
+    return null;
+  }
+  const parsed = parseSafeRemoteUrl(`${RENDEZVOUS_BASE}${rawPath}`);
+  if (!parsed) {
+    return null;
+  }
+
+  const pathnameRaw = String(parsed.pathname || "");
+  let pathname = pathnameRaw;
+  try {
+    pathname = decodeURIComponent(pathnameRaw);
+  } catch {
+    pathname = pathnameRaw;
+  }
+  const match = pathname.match(/\/vf-(?<id>\d+)-(?<lang>[^/]+)\/stream-(?<slug>[^/?#]+)\.html\/?$/i);
+  if (!match) {
+    return null;
+  }
+
+  const mediaId = toInt(match.groups?.id, 0, 0, 999999999);
+  if (mediaId <= 0) {
+    return null;
+  }
+
+  const languageHint = normalizeRendezvousLanguage(match.groups?.lang || "") || "VF";
+  const slugRaw = String(match.groups?.slug || "").trim();
+  if (!slugRaw) {
+    return null;
+  }
+  let decodedSlug = slugRaw;
+  try {
+    decodedSlug = decodeURIComponent(slugRaw);
+  } catch {
+    decodedSlug = slugRaw;
+  }
+  decodedSlug = decodedSlug.replace(/\+/g, " ");
+
+  const tvMatch = decodedSlug.match(
+    /^(?<title>.+?)-+Saison-(?<season>\d+)-Episode-(?<episode>\d+)-(?<year>(?:19|20)\d{2})$/i
+  );
+  const episodeOnlyMatch = decodedSlug.match(
+    /^(?<title>.+?)-+Episode-(?<episode>\d+)-(?<year>(?:19|20)\d{2})$/i
+  );
+  const movieMatch = decodedSlug.match(/^(?<title>.+)-(?<year>(?:19|20)\d{2})$/i);
+
+  let mediaType = "movie";
+  let season = 0;
+  let episode = 0;
+  let year = 0;
+  let titleRaw = decodedSlug;
+
+  if (tvMatch) {
+    mediaType = "tv";
+    season = toInt(tvMatch.groups?.season, 0, 0, 500);
+    episode = toInt(tvMatch.groups?.episode, 0, 0, 50000);
+    year = toInt(tvMatch.groups?.year, 0, 0, 2099);
+    titleRaw = String(tvMatch.groups?.title || "");
+  } else if (episodeOnlyMatch) {
+    mediaType = "tv";
+    season = 1;
+    episode = toInt(episodeOnlyMatch.groups?.episode, 0, 0, 50000);
+    year = toInt(episodeOnlyMatch.groups?.year, 0, 0, 2099);
+    titleRaw = String(episodeOnlyMatch.groups?.title || "");
+  } else if (movieMatch) {
+    mediaType = "movie";
+    year = toInt(movieMatch.groups?.year, 0, 0, 2099);
+    titleRaw = String(movieMatch.groups?.title || "");
+  } else {
+    year = toInt(parseYearFromText(decodedSlug), 0, 0, 2099);
+    titleRaw = decodedSlug.replace(/-(?:19|20)\d{2}$/i, "");
+  }
+
+  const title = slugToReadableTitle(titleRaw);
+  const titleKey = normalizeTitleKey(title);
+  if (!title || !titleKey) {
+    return null;
+  }
+
+  return {
+    mediaId,
+    title,
+    titleKey,
+    mediaType,
+    year,
+    season,
+    episode,
+    language: languageHint,
+    pageUrl: parsed.href,
+  };
+}
+
+function parseRendezvousEntryUrlsFromHtml(html, baseUrl = `${RENDEZVOUS_BASE}/`) {
+  const source = String(html || "");
+  if (!source) {
+    return [];
+  }
+
+  const urls = [];
+  const seen = new Set();
+  const hrefRegex = /href=["'](?<href>[^"']+)["']/gi;
+  let match = null;
+  while ((match = hrefRegex.exec(source)) !== null) {
+    const rawHref = String(match.groups?.href || "").trim();
+    if (!rawHref) {
+      continue;
+    }
+    if (!/\/vf-\d+-[^/]+\/stream-[^"']+\.html(?:$|[?#])/i.test(rawHref)) {
+      continue;
+    }
+
+    let absolute = rawHref;
+    try {
+      absolute = new URL(rawHref, String(baseUrl || `${RENDEZVOUS_BASE}/`)).href;
+    } catch {
+      absolute = rawHref;
+    }
+    const normalizedPath = normalizeRendezvousPath(absolute);
+    if (!normalizedPath) {
+      continue;
+    }
+    const canonicalUrl = `${RENDEZVOUS_BASE}${normalizedPath}`;
+    if (seen.has(canonicalUrl)) {
+      continue;
+    }
+    seen.add(canonicalUrl);
+    urls.push(canonicalUrl);
+  }
+  return urls;
+}
+
+async function loadRendezvousEntriesFromPages(pageUrls) {
+  const targets = Array.isArray(pageUrls) ? pageUrls.filter(Boolean) : [];
+  if (targets.length === 0) {
+    return [];
+  }
+  const pageRows = await mapWithConcurrency(
+    targets,
+    Math.min(RENDEZVOUS_FETCH_CONCURRENCY, targets.length || 1),
+    async (pageUrl) => {
+      try {
+        const response = await fetchRemoteText(pageUrl, "text/html,application/xhtml+xml", RENDEZVOUS_FETCH_HEADERS);
+        if (response.status < 200 || response.status >= 300) {
+          return [];
+        }
+        const urls = parseRendezvousEntryUrlsFromHtml(response.body, pageUrl);
+        return urls
+          .map((url) => parseRendezvousEntryFromUrl(url))
+          .filter(Boolean);
+      } catch {
+        return [];
+      }
+    }
+  );
+  return pageRows.flat();
+}
+
+function scoreRendezvousCandidate(entry, options = {}) {
+  const queryTitleKey = String(options?.titleKey || "").trim();
+  const mediaType = String(options?.mediaType || "movie").toLowerCase() === "tv" ? "tv" : "movie";
+  const year = toInt(options?.year, 0, 0, 2099);
+  const season = toInt(options?.season, 0, 0, 500);
+  const episode = toInt(options?.episode, 0, 0, 50000);
+  if (!entry || !queryTitleKey) {
+    return -9999;
+  }
+
+  let score = 0;
+  const entryType = String(entry.mediaType || "movie").toLowerCase() === "tv" ? "tv" : "movie";
+  if (entryType === mediaType) {
+    score += 120;
+  } else {
+    score -= 150;
+  }
+
+  const titleKey = String(entry.titleKey || "").trim();
+  if (titleKey === queryTitleKey) {
+    score += 360;
+  } else if (titleKey.includes(queryTitleKey) || queryTitleKey.includes(titleKey)) {
+    score += 170;
+  }
+  const queryTokens = getPidoovTitleTokens(queryTitleKey);
+  const candidateTokens = new Set(getPidoovTitleTokens(titleKey));
+  let overlaps = 0;
+  queryTokens.forEach((token) => {
+    if (candidateTokens.has(token)) {
+      overlaps += 1;
+    }
+  });
+  score += overlaps * 28;
+  if (queryTokens.length > 0) {
+    const ratio = overlaps / queryTokens.length;
+    if (ratio >= 1) {
+      score += 90;
+    } else if (ratio >= 0.7) {
+      score += 40;
+    } else if (ratio < 0.3) {
+      score -= 85;
+    }
+  }
+
+  if (mediaType === "tv") {
+    if (season > 0) {
+      if (Number(entry.season) === season) {
+        score += 240;
+      } else {
+        score -= 180;
+      }
+    }
+    if (episode > 0) {
+      if (Number(entry.episode) === episode) {
+        score += 260;
+      } else {
+        score -= 200;
+      }
+    }
+  } else if (year > 0) {
+    const candidateYear = toInt(entry.year, 0, 0, 2099);
+    if (candidateYear === year) {
+      score += 170;
+    } else if (candidateYear > 0 && Math.abs(candidateYear - year) <= 1) {
+      score += 85;
+    } else if (candidateYear > 0 && Math.abs(candidateYear - year) >= 4) {
+      score -= 40;
+    }
+  }
+
+  const language = String(entry.language || "").trim().toUpperCase();
+  if (language === "VF") {
+    score += 20;
+  } else if (language === "VOSTFR") {
+    score += 12;
+  }
+  return score;
+}
+
+async function loadRendezvousIndex(force = false) {
+  const now = Date.now();
+  if (
+    !force &&
+    rendezvousIndexCache.loadedAt > 0 &&
+    now - rendezvousIndexCache.loadedAt < RENDEZVOUS_INDEX_CACHE_MS &&
+    Array.isArray(rendezvousIndexCache.entries) &&
+    rendezvousIndexCache.entries.length > 0
+  ) {
+    return rendezvousIndexCache.entries;
+  }
+  if (rendezvousIndexCache.inFlight) {
+    return rendezvousIndexCache.inFlight;
+  }
+
+  const task = (async () => {
+    let sitemapUrls = [];
+    try {
+      const indexResponse = await fetchRemoteText(
+        RENDEZVOUS_SITEMAP_INDEX_URL,
+        "application/xml,text/xml",
+        RENDEZVOUS_FETCH_HEADERS
+      );
+      if (indexResponse.status >= 200 && indexResponse.status < 300) {
+        sitemapUrls = parseXmlLocValues(indexResponse.body)
+          .filter((entry) => {
+            const parsed = parseSafeRemoteUrl(entry);
+            return parsed && normalizeHostName(parsed.hostname) === RENDEZVOUS_HOST;
+          })
+          .slice(0, RENDEZVOUS_MAX_SITEMAPS);
+      }
+    } catch {
+      sitemapUrls = [];
+    }
+
+    const sitemapRows =
+      sitemapUrls.length > 0
+        ? await mapWithConcurrency(
+            sitemapUrls,
+            Math.min(RENDEZVOUS_FETCH_CONCURRENCY, sitemapUrls.length || 1),
+            async (sitemapUrl) => {
+              try {
+                const response = await fetchRemoteText(
+                  sitemapUrl,
+                  "application/xml,text/xml",
+                  RENDEZVOUS_FETCH_HEADERS
+                );
+                if (response.status < 200 || response.status >= 300) {
+                  return [];
+                }
+                return parseXmlLocValues(response.body);
+              } catch {
+                return [];
+              }
+            }
+          )
+        : [];
+
+    const dedupe = new Map();
+    const sitemapPageCandidates = [];
+    const sitemapPageSeen = new Set();
+    sitemapRows.forEach((values) => {
+      if (!Array.isArray(values)) {
+        return;
+      }
+      values.forEach((url) => {
+        const normalizedPath = normalizeRendezvousPath(url);
+        if (normalizedPath && /\/page\/\d+\/?$/i.test(normalizedPath)) {
+          const pageUrl = `${RENDEZVOUS_BASE}${normalizedPath}`;
+          if (!sitemapPageSeen.has(pageUrl)) {
+            sitemapPageSeen.add(pageUrl);
+            if (sitemapPageCandidates.length < RENDEZVOUS_PAGE_PROBE_COUNT) {
+              sitemapPageCandidates.push(pageUrl);
+            }
+          }
+        }
+
+        const entry = parseRendezvousEntryFromUrl(url);
+        const key = String(entry?.pageUrl || "").trim();
+        if (entry && key && !dedupe.has(key)) {
+          dedupe.set(key, entry);
+        }
+      });
+    });
+
+    const seedUrls = RENDEZVOUS_SEED_PATHS.map((pathToken) => {
+      try {
+        return new URL(pathToken, `${RENDEZVOUS_BASE}/`).href;
+      } catch {
+        return "";
+      }
+    }).filter(Boolean);
+    const probeUrls = [];
+    const probeSeen = new Set();
+    seedUrls.concat(sitemapPageCandidates).forEach((entry) => {
+      const safeUrl = String(entry || "").trim();
+      if (!safeUrl || probeSeen.has(safeUrl)) {
+        return;
+      }
+      probeSeen.add(safeUrl);
+      probeUrls.push(safeUrl);
+    });
+
+    const seedEntries = await loadRendezvousEntriesFromPages(probeUrls);
+    seedEntries.forEach((entry) => {
+      const key = String(entry?.pageUrl || "").trim();
+      if (!key || dedupe.has(key)) {
+        return;
+      }
+      dedupe.set(key, entry);
+    });
+
+    const staticEntries = loadRendezvousStaticEntries();
+    staticEntries.forEach((entry) => {
+      const key = String(entry?.pageUrl || "").trim();
+      if (!key || dedupe.has(key)) {
+        return;
+      }
+      dedupe.set(key, entry);
+    });
+
+    const entries = Array.from(dedupe.values());
+    rendezvousIndexCache.entries = entries;
+    rendezvousIndexCache.loadedAt = Date.now();
+    return rendezvousIndexCache.entries;
+  })();
+
+  rendezvousIndexCache.inFlight = task;
+  try {
+    return await task;
+  } catch (error) {
+    if (Array.isArray(rendezvousIndexCache.entries) && rendezvousIndexCache.entries.length > 0) {
+      return rendezvousIndexCache.entries;
+    }
+    throw error;
+  } finally {
+    rendezvousIndexCache.inFlight = null;
+  }
+}
+
+function parseRendezvousPlayerRowsFromHtml(html, pageUrl) {
+  const source = String(html || "");
+  if (!source) {
+    return [];
+  }
+  const rows = [];
+  const liRegex = /<li[^>]*class=["'][^"']*(?:nopls|nopl|ser_pl)[^"']*["'][^>]*>/gi;
+  let match = null;
+  while ((match = liRegex.exec(source)) !== null) {
+    const rawTag = String(match[0] || "");
+    const idMatch = rawTag.match(/\sdata-id=["'](?<id>[^"']+)["']/i);
+    const nameMatch = rawTag.match(/\sdata-name=["'](?<name>[^"']+)["']/i);
+    const pLinkMatch = rawTag.match(/\sdata-plink=["'](?<plink>[^"']+)["']/i);
+
+    const rawName = String(nameMatch?.groups?.name || "").trim();
+    const safeName = sanitizeToken(rawName, 80).toLowerCase();
+    const token = sanitizeToken(String(idMatch?.groups?.id || "").trim(), 90);
+    const dataPLink = String(pLinkMatch?.groups?.plink || "").trim();
+    if (dataPLink) {
+      let absolute = dataPLink;
+      try {
+        absolute = new URL(dataPLink, String(pageUrl || `${RENDEZVOUS_BASE}/`)).href;
+      } catch {
+        absolute = dataPLink;
+      }
+      const parsed = parseSafeRemoteUrl(absolute);
+      if (parsed && normalizeHostName(parsed.hostname) === RENDEZVOUS_HOST) {
+        rows.push({
+          type: "plink",
+          name: safeName || "hd",
+          urls: [parsed.href],
+        });
+      }
+    }
+    if (token && safeName) {
+      const candidates = [];
+      [
+        `${RENDEZVOUS_BASE}/go.php?id=${encodeURIComponent(token)}&name=${encodeURIComponent(safeName)}`,
+        `${RENDEZVOUS_BASE}/go.php?name=${encodeURIComponent(safeName)}&id=${encodeURIComponent(token)}`,
+        `${RENDEZVOUS_BASE}/go.php?data=${encodeURIComponent(token)}&name=${encodeURIComponent(safeName)}`,
+      ].forEach((candidate) => {
+        const parsed = parseSafeRemoteUrl(candidate);
+        if (parsed && normalizeHostName(parsed.hostname) === RENDEZVOUS_HOST) {
+          candidates.push(parsed.href);
+        }
+      });
+      if (candidates.length > 0) {
+        rows.push({
+          type: "token",
+          name: safeName,
+          token,
+          urls: candidates,
+        });
+      }
+    }
+  }
+
+  const dedupe = new Set();
+  return rows.filter((row) => {
+    const key = `${row.type}:${row.name}:${(row.urls || []).join("|")}`;
+    if (!key || dedupe.has(key)) {
+      return false;
+    }
+    dedupe.add(key);
+    return true;
+  });
+}
+
+function parseRendezvousStreamUrlsFromHtml(html, baseUrl) {
+  const source = String(html || "");
+  if (!source) {
+    return [];
+  }
+  const urls = [];
+  const seen = new Set();
+
+  const pushCandidate = (rawUrl) => {
+    const value = String(rawUrl || "").trim();
+    if (!value) {
+      return;
+    }
+    let absolute = value;
+    try {
+      absolute = new URL(value, String(baseUrl || `${RENDEZVOUS_BASE}/`)).href;
+    } catch {
+      absolute = value;
+    }
+    const parsed = parseSafeRemoteUrl(absolute);
+    if (!parsed) {
+      return;
+    }
+    const href = parsed.href;
+    if (!href || seen.has(href)) {
+      return;
+    }
+    const pathname = String(parsed.pathname || "").toLowerCase();
+    if (pathname.includes("/universal.mp4") || pathname.includes("/wb.php")) {
+      return;
+    }
+    seen.add(href);
+    urls.push(href);
+  };
+
+  const patterns = [
+    /<iframe[^>]+src=["'](?<url>[^"']+)["']/gi,
+    /<source[^>]+src=["'](?<url>[^"']+)["']/gi,
+    /<meta[^>]+http-equiv=["']refresh["'][^>]+content=["'][^"']*url=(?<url>[^"']+)["']/gi,
+    /(?:window\.)?location(?:\.href)?\s*=\s*["'](?<url>[^"']+)["']/gi,
+    /top\.location\s*=\s*["'](?<url>[^"']+)["']/gi,
+  ];
+
+  patterns.forEach((regex) => {
+    let match = null;
+    while ((match = regex.exec(source)) !== null) {
+      pushCandidate(match.groups?.url || "");
+    }
+  });
+
+  return urls;
+}
+
+async function loadRendezvousEntrySources(entry) {
+  const pageUrl = String(entry?.pageUrl || "").trim();
+  if (!pageUrl) {
+    return [];
+  }
+  const cached = rendezvousPageCache.get(pageUrl);
+  if (cached && Date.now() < Number(cached.expiresAt || 0)) {
+    return Array.isArray(cached.sources) ? cached.sources : [];
+  }
+
+  const language = String(entry?.language || "VF").toUpperCase() || "VF";
+  const sources = [];
+  const seen = new Set();
+  const pushSource = (row) => {
+    const safeUrl = String(row?.stream_url || "").trim();
+    if (!safeUrl || seen.has(safeUrl)) {
+      return;
+    }
+    seen.add(safeUrl);
+    sources.push(row);
+  };
+
+  const staticRows = Array.isArray(entry?.staticSources) ? entry.staticSources : [];
+  staticRows.forEach((sourceRow, index) => {
+    const parsed = parseSafeRemoteUrl(sourceRow?.stream_url || "");
+    if (!parsed) {
+      return;
+    }
+    const format = String(sourceRow?.format || "").trim().toLowerCase();
+    pushSource({
+      stream_url: parsed.href,
+      source_name: String(sourceRow?.source_name || "Rendezvous").trim() || "Rendezvous",
+      quality: "Rendezvous",
+      language,
+      format: format === "hls" || format === "mp4" || format === "embed" ? format : "embed",
+      priority: 350 - Math.min(40, index * 5),
+    });
+  });
+
+  let pageHtml = "";
+  try {
+    const response = await fetchRemoteText(pageUrl, "text/html,application/xhtml+xml", {
+      ...RENDEZVOUS_FETCH_HEADERS,
+      Referer: pageUrl,
+    });
+    if (response.status >= 200 && response.status < 300) {
+      pageHtml = String(response.body || "");
+    }
+  } catch {
+    pageHtml = "";
+  }
+
+  if (pageHtml) {
+    const playerRows = parseRendezvousPlayerRowsFromHtml(pageHtml, pageUrl);
+    const probeTargets = [];
+
+    playerRows.forEach((row, index) => {
+      const rowName = String(row?.name || "").trim().toUpperCase() || "HD";
+      const basePriority = language === "VF" ? 336 : 322;
+      const rowPenalty = Math.min(36, index * 6);
+      (Array.isArray(row?.urls) ? row.urls : []).forEach((url, urlIndex) => {
+        const parsed = parseSafeRemoteUrl(url);
+        if (!parsed) {
+          return;
+        }
+        const href = parsed.href;
+        pushSource({
+          stream_url: href,
+          source_name: rowName ? `Rendezvous ${rowName}` : "Rendezvous",
+          quality: "Rendezvous",
+          language,
+          format: "embed",
+          priority: basePriority - rowPenalty - Math.min(12, urlIndex * 3),
+        });
+        if (probeTargets.length < 7) {
+          probeTargets.push({
+            url: href,
+            sourceName: rowName ? `Rendezvous ${rowName}` : "Rendezvous",
+          });
+        }
+      });
+    });
+
+    const probeRows = await mapWithConcurrency(
+      probeTargets,
+      Math.min(RENDEZVOUS_FETCH_CONCURRENCY, probeTargets.length || 1),
+      async (target) => {
+        try {
+          const response = await fetchRemoteText(target.url, "text/html,application/xhtml+xml", {
+            ...RENDEZVOUS_FETCH_HEADERS,
+            Referer: pageUrl,
+          });
+          if (response.status < 200 || response.status >= 400) {
+            return [];
+          }
+          return parseRendezvousStreamUrlsFromHtml(response.body, target.url).map((streamUrl) => ({
+            stream_url: streamUrl,
+            source_name: target.sourceName,
+          }));
+        } catch {
+          return [];
+        }
+      }
+    );
+
+    probeRows.flat().forEach((row, index) => {
+      const parsed = parseSafeRemoteUrl(row?.stream_url || "");
+      if (!parsed) {
+        return;
+      }
+      const isHls = /\.m3u8(?:$|\?)/i.test(parsed.href);
+      const isMp4 = /\.mp4(?:$|\?)/i.test(parsed.href);
+      pushSource({
+        stream_url: parsed.href,
+        source_name: String(row?.source_name || "Rendezvous Direct").trim() || "Rendezvous Direct",
+        quality: "Rendezvous",
+        language,
+        format: isHls ? "hls" : isMp4 ? "mp4" : "embed",
+        priority: (language === "VF" ? 358 : 344) - Math.min(34, index * 4),
+      });
+    });
+  }
+
+  rendezvousPageCache.set(pageUrl, {
+    sources,
+    expiresAt: Date.now() + RENDEZVOUS_PAGE_CACHE_MS,
+  });
+  prunePidoovTimedCache(rendezvousPageCache, 1600);
+  return sources;
+}
+
+async function resolveRendezvousSourcesByTitle(title, options = {}) {
+  const safeTitle = String(title || "").trim();
+  if (safeTitle.length < 2) {
+    return [];
+  }
+  const mediaType = String(options?.type || "movie").toLowerCase() === "tv" ? "tv" : "movie";
+  const year = toInt(options?.year, 0, 0, 2099);
+  const season = toInt(options?.season, 1, 1, 500);
+  const episode = toInt(options?.episode, 1, 1, 50000);
+
+  const queryTitleKey = normalizeTitleKey(safeTitle);
+  if (!queryTitleKey) {
+    return [];
+  }
+
+  const cacheKey = `${queryTitleKey}|${mediaType}|${year}|${season}|${episode}`;
+  const cached = readPidoovLookupCache(`rendezvous:${cacheKey}`);
+  if (cached) {
+    return cached;
+  }
+
+  const index = await loadRendezvousIndex();
+  const ranked = (Array.isArray(index) ? index : [])
+    .map((entry) => ({
+      entry,
+      score: scoreRendezvousCandidate(entry, {
+        titleKey: queryTitleKey,
+        mediaType,
+        year,
+        season,
+        episode,
+      }),
+    }))
+    .filter((row) => row.score > (mediaType === "tv" ? 130 : 100))
+    .sort((left, right) => right.score - left.score)
+    .slice(0, RENDEZVOUS_MAX_MATCH_CANDIDATES);
+
+  if (ranked.length === 0) {
+    storePidoovLookupCache(`rendezvous:${cacheKey}`, [], RENDEZVOUS_SEARCH_CACHE_MS);
+    return [];
+  }
+
+  const merged = [];
+  const seen = new Set();
+  for (const row of ranked) {
+    let rows = [];
+    try {
+      rows = await loadRendezvousEntrySources(row.entry);
+    } catch {
+      rows = [];
+    }
+    rows.forEach((sourceRow) => {
+      const key = String(sourceRow?.stream_url || "").trim();
+      if (!key || seen.has(key)) {
+        return;
+      }
+      seen.add(key);
+      merged.push(sourceRow);
+    });
+  }
+
+  storePidoovLookupCache(`rendezvous:${cacheKey}`, merged, RENDEZVOUS_SEARCH_CACHE_MS);
   return merged;
 }
 
@@ -4165,6 +5013,67 @@ async function handleNotariellesSource(req, res, requestUrl) {
   }
 }
 
+async function handleRendezvousSource(req, res, requestUrl) {
+  if (requestUrl.pathname !== "/api/rendezvous-source") {
+    return false;
+  }
+  if (req.method !== "GET") {
+    sendJson(res, 405, { error: "Method Not Allowed" });
+    return true;
+  }
+
+  const title = String(requestUrl.searchParams.get("title") || "").trim();
+  if (title.length < 2) {
+    sendJson(res, 400, { error: "Missing title" });
+    return true;
+  }
+
+  const type = String(requestUrl.searchParams.get("type") || "movie").toLowerCase() === "tv" ? "tv" : "movie";
+  const year = toInt(requestUrl.searchParams.get("year"), 0, 0, 2099);
+  const season = toInt(requestUrl.searchParams.get("season"), 1, 1, 500);
+  const episode = toInt(requestUrl.searchParams.get("episode"), 1, 1, 50000);
+  const debugMode = String(requestUrl.searchParams.get("debug") || "").trim() === "1";
+
+  try {
+    const sources = await resolveRendezvousSourcesByTitle(title, {
+      type,
+      year,
+      season,
+      episode,
+    });
+    const payload = {
+      apiVersion: "zenix-rendezvous-source-v1",
+      type: "success",
+      data: {
+        title,
+        mediaType: type,
+        year,
+        season: type === "tv" ? season : 1,
+        episode: type === "tv" ? episode : 1,
+        count: sources.length,
+        sources,
+      },
+    };
+    if (debugMode) {
+      payload.data.debug = {
+        indexSize: Array.isArray(rendezvousIndexCache.entries) ? rendezvousIndexCache.entries.length : 0,
+        loadedAt: Number(rendezvousIndexCache.loadedAt || 0),
+        inFlight: Boolean(rendezvousIndexCache.inFlight),
+        pageCacheSize: rendezvousPageCache.size,
+        staticSize: Array.isArray(loadRendezvousStaticEntries()) ? loadRendezvousStaticEntries().length : 0,
+      };
+    }
+    sendJson(res, 200, payload);
+    return true;
+  } catch (error) {
+    sendJson(res, 502, {
+      error: "Rendezvous source unavailable",
+      reason: sanitizeToken(String(error?.message || ""), 120),
+    });
+    return true;
+  }
+}
+
 async function handleZenixOwnedSource(req, res, requestUrl) {
   if (requestUrl.pathname !== "/api/zenix-source") {
     return false;
@@ -4388,6 +5297,12 @@ const server = http.createServer((req, res) => {
     })
     .then((handledNotariellesSource) => {
       if (handledNotariellesSource) {
+        return true;
+      }
+      return handleRendezvousSource(req, res, requestUrl);
+    })
+    .then((handledRendezvousSource) => {
+      if (handledRendezvousSource) {
         return true;
       }
       return handleZenixOwnedSource(req, res, requestUrl);

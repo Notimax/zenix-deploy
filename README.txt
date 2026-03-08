@@ -100,3 +100,25 @@ NOTARIELLES INTEGRATION (SERIES FALLBACK)
   - `NOTARIELLES_FETCH_CONCURRENCY`
   - `NOTARIELLES_MAX_MATCH_CANDIDATES`
   - `NOTARIELLES_STATIC_SOURCES_FILE`
+
+RENDEZVOUS INTEGRATION (MOVIES + SERIES FALLBACK)
+- New backend endpoint: `/api/rendezvous-source`
+- Target: movies by `title + year` and episodes by `title + season + episode`.
+- Index strategy:
+  - reads `https://rendezvousmusical.fr/sitemaps.xml` when available
+  - extracts stream entry URLs from seed pages (`/`, `/films-gratuit/`, `/telecharger-series/`, `/page/2/`)
+  - probes sitemap pagination pages for fresh links
+  - merges static fallback file `rendezvous-static-sources.json` when live crawl is blocked
+- Frontend injection:
+  - `zenix.js` appends Rendezvous sources as additional fallback for movies and TV non-anime.
+  - Merge order for episodes: Owned -> Notarielles -> Pidoov -> Rendezvous -> Anime Sibnet fallback.
+  - Merge order for movies: existing sources -> Pidoov -> Rendezvous fallback.
+- Server-side cache controls:
+  - `RENDEZVOUS_INDEX_CACHE_MS`
+  - `RENDEZVOUS_SEARCH_CACHE_MS`
+  - `RENDEZVOUS_PAGE_CACHE_MS`
+  - `RENDEZVOUS_MAX_SITEMAPS`
+  - `RENDEZVOUS_PAGE_PROBE_COUNT`
+  - `RENDEZVOUS_FETCH_CONCURRENCY`
+  - `RENDEZVOUS_MAX_MATCH_CANDIDATES`
+  - `RENDEZVOUS_STATIC_SOURCES_FILE`

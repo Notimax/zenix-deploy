@@ -54,6 +54,24 @@ Last update: 2026-03-08
     - `NOTARIELLES_FETCH_CONCURRENCY`
     - `NOTARIELLES_MAX_MATCH_CANDIDATES`
     - `NOTARIELLES_STATIC_SOURCES_FILE`
+- Rendezvous provider integration added (owner-confirmed):
+  - Backend endpoint `/api/rendezvous-source` resolves movie/episode fallback sources by
+    `title + year` (movie) and `title + season + episode` (tv).
+  - Backend index is resilient: uses sitemap when possible and also scrapes stream links from seed pages
+    (`/`, `/films-gratuit/`, `/telecharger-series/`, `/page/2/`) plus sitemap page probes.
+  - Static fallback file `rendezvous-static-sources.json` is merged to keep results when live crawl is blocked upstream.
+  - Frontend injects Rendezvous as additional fallback pool:
+    - movies: appended after existing providers
+    - TV non-anime episodes: after Notarielles/Pidoov, before anime sibnet fallback
+  - Caching/env tuning keys:
+    - `RENDEZVOUS_INDEX_CACHE_MS`
+    - `RENDEZVOUS_SEARCH_CACHE_MS`
+    - `RENDEZVOUS_PAGE_CACHE_MS`
+    - `RENDEZVOUS_MAX_SITEMAPS`
+    - `RENDEZVOUS_PAGE_PROBE_COUNT`
+    - `RENDEZVOUS_FETCH_CONCURRENCY`
+    - `RENDEZVOUS_MAX_MATCH_CANDIDATES`
+    - `RENDEZVOUS_STATIC_SOURCES_FILE`
 
 ## Mobile robustness
 - Startup splash must never block app forever.
