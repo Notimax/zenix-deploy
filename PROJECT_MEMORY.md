@@ -8,6 +8,7 @@ Last update: 2026-03-08
   - target brand query indexing for `zenix` and `zenix stream` with strong title/meta/schema.
   - keep canonical domain set to `zenix.best` (no duplicate host indexing).
   - maintain `robots.txt` + `sitemap.xml` consistency with canonical URL.
+  - keep icon stack coherent with Zenix branding (`favicon.svg`, `favicon.ico`, png icons, `og:image`).
 - Mobile priority: iPhone Safari playback stability
 - Toast notifications: desktop only (no mobile toast)
 - Toast placement: bottom-right on desktop

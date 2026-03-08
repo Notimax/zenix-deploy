@@ -16,6 +16,9 @@ CURRENT PRODUCT RULES
 - Mobile startup splash must never block the app.
 - Toast notifications are DESKTOP ONLY.
 - Toast position on desktop: bottom-right.
+- Brand assets:
+  - app/social icons must always use the Zenix "Z" logo (no Purstream "P" icon).
+  - keep `og:image`, favicon set (`svg/png/ico`) and manifest icons aligned.
 - SEO baseline for brand queries:
   - keep canonical domain at `https://zenix.best`.
   - preserve optimized title/meta/schema in `index.html`.
