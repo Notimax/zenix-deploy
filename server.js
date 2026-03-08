@@ -1730,6 +1730,50 @@ function buildHlsProxyPath(targetUrl) {
   return `/api/hls-proxy?url=${encodeURIComponent(String(targetUrl || "").trim())}`;
 }
 
+function decodeNumericPlaylistTokens(tokens) {
+  if (!Array.isArray(tokens) || tokens.length < 6 || tokens.length > 120000) {
+    return "";
+  }
+  if (!tokens.every((token) => /^\d{1,3}$/.test(String(token || "")))) {
+    return "";
+  }
+  const bytes = tokens.map((token) => Number(token));
+  if (bytes.some((value) => !Number.isInteger(value) || value < 0 || value > 255)) {
+    return "";
+  }
+  try {
+    const decoded = Buffer.from(bytes)
+      .toString("utf8")
+      .replace(/^\uFEFF/, "")
+      .trim();
+    return decoded.includes("#EXTM3U") ? decoded : "";
+  } catch {
+    return "";
+  }
+}
+
+function decodeNumericPlaylistBySeparators(rawBody) {
+  const text = String(rawBody || "").replace(/\u0000/g, "").trim();
+  if (!text) {
+    return "";
+  }
+
+  const perLineTokens = text
+    .split(/\r?\n/)
+    .map((line) => String(line || "").trim())
+    .filter(Boolean);
+  const lineDecoded = decodeNumericPlaylistTokens(perLineTokens);
+  if (lineDecoded) {
+    return lineDecoded;
+  }
+
+  const packedTokens = text
+    .split(/[^0-9]+/)
+    .map((token) => String(token || "").trim())
+    .filter(Boolean);
+  return decodeNumericPlaylistTokens(packedTokens);
+}
+
 function decodeCompactNumericPlaylistBody(rawBody) {
   const digits = String(rawBody || "").replace(/\s+/g, "");
   if (!digits || !/^\d+$/.test(digits) || digits.length < 12 || digits.length > 250000) {
@@ -1810,22 +1854,9 @@ function decodeNumericPlaylistBody(rawBody) {
     return text;
   }
 
-  const lines = text
-    .split(/\r?\n/)
-    .map((line) => String(line || "").trim())
-    .filter(Boolean);
-  if (lines.length >= 6 && lines.length <= 60000 && lines.every((line) => /^\d{1,3}$/.test(line))) {
-    const bytes = lines.map((line) => Number(line));
-    if (!bytes.some((value) => !Number.isInteger(value) || value < 0 || value > 255)) {
-      try {
-        const decoded = Buffer.from(bytes).toString("utf8").trim();
-        if (decoded.includes("#EXTM3U")) {
-          return decoded;
-        }
-      } catch {
-        // fallback below
-      }
-    }
+  const separatedDecoded = decodeNumericPlaylistBySeparators(text);
+  if (separatedDecoded.includes("#EXTM3U")) {
+    return separatedDecoded;
   }
 
   const compactDecoded = decodeCompactNumericPlaylistBody(text);
