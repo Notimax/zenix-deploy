@@ -17,6 +17,6 @@ services:
       - key: DISCORD_PUSH_INTERVAL_MS
         value: "10000"
       - key: CANONICAL_HOST
-        sync: false
+        value: "zenix.best"
       - key: CANONICAL_SCHEME
         value: "https"

@@ -1,5 +1,5 @@
 ﻿{
-  "name": "Zenix",
+  "name": "Zenix Stream",
   "short_name": "Zenix",
   "start_url": "/",
   "scope": "/",
@@ -7,7 +7,7 @@
   "background_color": "#081226",
   "theme_color": "#081226",
   "lang": "fr",
-  "description": "Zenix: streaming gratuit, rapide et sans abonnement.",
+  "description": "Zenix Stream: films, series et anime en streaming VF gratuit.",
   "categories": [
     "entertainment"
   ],

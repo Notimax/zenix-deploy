@@ -16,6 +16,10 @@ CURRENT PRODUCT RULES
 - Mobile startup splash must never block the app.
 - Toast notifications are DESKTOP ONLY.
 - Toast position on desktop: bottom-right.
+- SEO baseline for brand queries:
+  - keep canonical domain at `https://zenix.best`.
+  - preserve optimized title/meta/schema in `index.html`.
+  - keep `robots.txt` + `sitemap.xml` aligned with the canonical domain.
 - "Pour toi" should avoid watched and liked items.
 - Movie/series language priority for FR audience:
   VF > VOSTFR > MULTI > VO.

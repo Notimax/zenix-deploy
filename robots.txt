@@ -1,3 +1,4 @@
 User-agent: *
 Allow: /
+Host: zenix.best
 Sitemap: https://zenix.best/sitemap.xml
