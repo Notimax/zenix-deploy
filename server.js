@@ -2167,44 +2167,59 @@ async function loadNotariellesEntrySources(entry) {
     return Array.isArray(cached.sources) ? cached.sources : [];
   }
 
-  const pageResponse = await fetchRemoteText(pageUrl, "text/html,application/xhtml+xml", NOTARIELLES_FETCH_HEADERS);
-  if (pageResponse.status < 200 || pageResponse.status >= 300) {
-    throw new Error("Notarielles page unavailable");
-  }
-  const playerPageUrl = parseNotariellesPlayerPageUrl(pageResponse.body);
-  if (!playerPageUrl) {
-    return [];
+  const language = String(entry?.language || "VF").toUpperCase();
+  const sources = [];
+  let playerPageUrl = "";
+
+  try {
+    const pageResponse = await fetchRemoteText(pageUrl, "text/html,application/xhtml+xml", NOTARIELLES_FETCH_HEADERS);
+    if (pageResponse.status >= 200 && pageResponse.status < 300) {
+      playerPageUrl = parseNotariellesPlayerPageUrl(pageResponse.body);
+    }
+  } catch {
+    playerPageUrl = "";
   }
 
-  const language = String(entry?.language || "VF").toUpperCase();
-  const sources = [
-    {
+  if (playerPageUrl) {
+    sources.push({
       stream_url: playerPageUrl,
       source_name: "Notarielles",
       quality: "Notarielles",
       language,
       format: "embed",
       priority: language === "VF" ? 342 : 328,
-    },
-  ];
+    });
+  }
+
+  // Keep a generic page-level embed fallback when upstream anti-bot blocks page parsing.
+  sources.push({
+    stream_url: pageUrl,
+    source_name: "Notarielles Page",
+    quality: "Notarielles",
+    language,
+    format: "embed",
+    priority: language === "VF" ? 320 : 305,
+  });
 
   try {
-    const playerResponse = await fetchRemoteText(
-      playerPageUrl,
-      "text/html,application/xhtml+xml",
-      NOTARIELLES_FETCH_HEADERS
-    );
-    if (playerResponse.status >= 200 && playerResponse.status < 300) {
-      const directStreamUrl = parseNotariellesDirectStreamUrl(playerResponse.body, playerPageUrl);
-      if (directStreamUrl) {
-        sources.unshift({
-          stream_url: directStreamUrl,
-          source_name: "Notarielles Direct",
-          quality: "Notarielles",
-          language,
-          format: directStreamUrl.includes(".m3u8") ? "hls" : "mp4",
-          priority: language === "VF" ? 350 : 335,
-        });
+    if (playerPageUrl) {
+      const playerResponse = await fetchRemoteText(
+        playerPageUrl,
+        "text/html,application/xhtml+xml",
+        NOTARIELLES_FETCH_HEADERS
+      );
+      if (playerResponse.status >= 200 && playerResponse.status < 300) {
+        const directStreamUrl = parseNotariellesDirectStreamUrl(playerResponse.body, playerPageUrl);
+        if (directStreamUrl) {
+          sources.unshift({
+            stream_url: directStreamUrl,
+            source_name: "Notarielles Direct",
+            quality: "Notarielles",
+            language,
+            format: directStreamUrl.includes(".m3u8") ? "hls" : "mp4",
+            priority: language === "VF" ? 350 : 335,
+          });
+        }
       }
     }
   } catch {
