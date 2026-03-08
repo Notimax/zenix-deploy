@@ -96,7 +96,6 @@ const INTEREST_HOME_LIMIT = 10;
 const SEARCH_SIGNAL_MAX = 220;
 const SEARCH_SIGNAL_MAX_AGE_MS = 180 * 24 * 60 * 60 * 1000;
 const LOCK_VISIBLE_ROOT_URL = true;
-const EMBED_FALLBACK_BASE_URLS = ["https://vidsrc.cc/v2/embed", "https://vidsrc.to/embed"];
 
 const FALLBACK_ITEMS = [
   {
@@ -5527,7 +5526,7 @@ function resolvePreferredLanguage(mediaId, requestedLanguage, availableLanguages
   const fallbackOrder = ["VF", "VOSTFR", "MULTI", "VO"];
   for (const entry of fallbackOrder) {
     if (availableLanguages.includes(entry)) {
-      break;
+      return entry;
     }
   }
   return "";
@@ -5876,7 +5875,7 @@ async function openPlayer(id, options = {}) {
   refs.playerLanguageSelect.disabled = true;
   updateBodyScrollLock();
   applyNativeAdPlacement();
-  startPlaybackGuard(token);
+  startPlaybackGuard();
   try {
     if (item.type === "tv") {
       const seasons = await ensureSeasons(id);
@@ -5979,7 +5978,6 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
   const baseMovieSources = extractSources(payload);
   const autoMovieSources = appendAutoZenixRelaySources(baseMovieSources);
   state.sourcePool = await appendZenixOwnedSources(item, 1, 1, autoMovieSources);
-  state.sourcePool = appendEmbedFallbackSources(item, 1, 1, state.sourcePool);
   state.allEpisodeSources = state.sourcePool.slice();
   state.sourceRetryAttempts.clear();
   if (state.sourcePool.length === 0) {
@@ -6006,7 +6004,6 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
     const refreshedMovieSources = extractSources(refreshedPayload);
     const refreshedAutoMovieSources = appendAutoZenixRelaySources(refreshedMovieSources);
     state.sourcePool = await appendZenixOwnedSources(item, 1, 1, refreshedAutoMovieSources);
-    state.sourcePool = appendEmbedFallbackSources(item, 1, 1, state.sourcePool);
     state.allEpisodeSources = state.sourcePool.slice();
     state.sourceRetryAttempts.clear();
     if (state.sourcePool.length === 0) {
@@ -6065,7 +6062,6 @@ async function loadEpisodeStream(
       ownedMergedSources,
       preferredLanguageInput
     );
-    state.allEpisodeSources = appendEmbedFallbackSources(item, season, episode, state.allEpisodeSources);
     state.availableLanguages = getAvailableLanguages(state.allEpisodeSources);
     let nextLanguage = resolvePreferredLanguage(item.id, preferredLanguageInput, state.availableLanguages);
     state.sourcePool = filterSourcesByLanguage(state.allEpisodeSources, nextLanguage);
@@ -6464,16 +6460,28 @@ function clearPlaybackGuard() {
   }
 }
 
-function startPlaybackGuard(token) {
+function startPlaybackGuard() {
   clearPlaybackGuard();
+  let trackedPlayToken = Number(state.playToken || 0);
   let lastObservedTime = 0;
   let lastAdvanceAt = Date.now();
+  let switchingSource = false;
   state.playbackGuardTimer = window.setInterval(() => {
-    if (token !== state.playToken || refs.playerOverlay.hidden) {
+    if (refs.playerOverlay.hidden) {
       clearPlaybackGuard();
       return;
     }
+    if (switchingSource) {
+      return;
+    }
     if (state.sourceLoading || state.sourceIndex < 0 || state.manualSourceLock) {
+      return;
+    }
+    const activePlayToken = Number(state.playToken || 0);
+    if (activePlayToken !== trackedPlayToken) {
+      trackedPlayToken = activePlayToken;
+      lastObservedTime = Number(refs.playerVideo?.currentTime || 0);
+      lastAdvanceAt = Date.now();
       return;
     }
     const currentSource = state.sourcePool[state.sourceIndex] || null;
@@ -6494,24 +6502,35 @@ function startPlaybackGuard(token) {
       lastAdvanceAt = Date.now();
     }
     const stalledForMs = Date.now() - lastAdvanceAt;
+    const startedPlayback = Math.max(lastObservedTime, currentTime) > 0.6;
     const blockedAtStart = !awaitingUser && video.paused && currentTime < 1.2 && readyState >= 2;
     const noSourceAtStart = !awaitingUser && video.paused && currentTime < 0.25 && readyState === 0 && networkState === 3;
-    const stalledDuringPlayback =
+    const hardFreeze =
       !awaitingUser &&
+      startedPlayback &&
       !video.paused &&
-      currentTime > 0.6 &&
-      stalledForMs > 8500 &&
+      stalledForMs > 7600 &&
       (readyState <= 2 || networkState === 2 || networkState === 3);
+    const pausedBufferStall =
+      !awaitingUser && startedPlayback && video.paused && stalledForMs > 9200 && (readyState <= 2 || networkState === 3);
+    const stalledDuringPlayback = hardFreeze || pausedBufferStall;
     if (errorCode <= 0 && !blockedAtStart && !noSourceAtStart && !stalledDuringPlayback) {
       return;
     }
-    clearPlaybackGuard();
+    switchingSource = true;
     if (stalledDuringPlayback) {
       setPlayerStatus("Lecture bloquee, bascule automatique...", true);
     }
-    trySwitchToNextSource().catch(() => {
-      setPlayerStatus("Erreur video detectee. Choisis une autre source.", true);
-    });
+    trySwitchToNextSource()
+      .catch(() => {
+        setPlayerStatus("Erreur video detectee. Choisis une autre source.", true);
+      })
+      .finally(() => {
+        switchingSource = false;
+        trackedPlayToken = Number(state.playToken || 0);
+        lastObservedTime = Number(refs.playerVideo?.currentTime || 0);
+        lastAdvanceAt = Date.now();
+      });
   }, 2400);
 }
 
@@ -7305,109 +7324,6 @@ function getSourceDedupKey(source) {
     return "";
   }
   return canonicalizeSourceUrl(source.url);
-}
-
-function extractTmdbInfoFromSourceUrl(url) {
-  const raw = String(url || "").trim();
-  if (!raw) {
-    return null;
-  }
-  let pathname = raw;
-  try {
-    pathname = new URL(raw, window.location.href).pathname;
-  } catch {
-    // keep raw
-  }
-
-  const movieMatch = pathname.match(/\/movie\/(\d+)\//i);
-  if (movieMatch) {
-    return {
-      mediaType: "movie",
-      tmdbId: Number(movieMatch[1] || 0),
-      season: 1,
-      episode: 1,
-    };
-  }
-
-  const tvMatch = pathname.match(/\/tv\/(\d+)\/s(\d+)\/e(\d+)\//i);
-  if (tvMatch) {
-    return {
-      mediaType: "tv",
-      tmdbId: Number(tvMatch[1] || 0),
-      season: Number(tvMatch[2] || 1),
-      episode: Number(tvMatch[3] || 1),
-    };
-  }
-
-  return null;
-}
-
-function resolveTmdbFallbackContext(item, season, episode, sources) {
-  const desiredType = String(item?.type || "").toLowerCase() === "tv" ? "tv" : "movie";
-  const rows = Array.isArray(sources) ? sources : [];
-  for (const entry of rows) {
-    const info = extractTmdbInfoFromSourceUrl(entry?.url);
-    if (!info || info.mediaType !== desiredType) {
-      continue;
-    }
-    const tmdbId = Number(info.tmdbId || 0);
-    if (!Number.isFinite(tmdbId) || tmdbId <= 0) {
-      continue;
-    }
-    return {
-      mediaType: desiredType,
-      tmdbId,
-      season: desiredType === "tv" ? Math.max(1, Number(season || info.season || 1)) : 1,
-      episode: desiredType === "tv" ? Math.max(1, Number(episode || info.episode || 1)) : 1,
-    };
-  }
-  return null;
-}
-
-function appendEmbedFallbackSources(item, season, episode, sources) {
-  const base = Array.isArray(sources) ? sources.slice() : [];
-  if (base.length === 0 || base.some((entry) => isEmbedSource(entry))) {
-    return base;
-  }
-
-  const context = resolveTmdbFallbackContext(item, season, episode, base);
-  if (!context) {
-    return base;
-  }
-
-  const existing = new Set(base.map((entry) => getSourceDedupKey(entry)).filter(Boolean));
-  const fallbackRows = [];
-  for (const rawBase of EMBED_FALLBACK_BASE_URLS) {
-    const safeBase = String(rawBase || "").trim().replace(/\/+$/, "");
-    if (!safeBase) {
-      continue;
-    }
-    const fallbackUrl =
-      context.mediaType === "tv"
-        ? `${safeBase}/tv/${context.tmdbId}/${context.season}/${context.episode}`
-        : `${safeBase}/movie/${context.tmdbId}`;
-    const key = canonicalizeSourceUrl(fallbackUrl);
-    if (!key || existing.has(key)) {
-      continue;
-    }
-    const normalized = normalizeSourceEntry(
-      {
-        stream_url: fallbackUrl,
-        format: "embed",
-        quality: "Secours",
-        language: "MULTI",
-        source_name: "Web Fallback",
-      },
-      base.length + fallbackRows.length
-    );
-    if (!normalized) {
-      continue;
-    }
-    existing.add(key);
-    fallbackRows.push(normalized);
-  }
-
-  return fallbackRows.length > 0 ? base.concat(fallbackRows) : base;
 }
 
 function buildPlayableSourceCandidates(source, options = {}) {
@@ -8232,6 +8148,10 @@ function showToast(message, isError = false) {
   if (!refs.toast) {
     return;
   }
+  if (isCompactViewport()) {
+    refs.toast.hidden = true;
+    return;
+  }
 
   refs.toast.textContent = message;
   refs.toast.className = `toast${isError ? " error" : ""}`;
@@ -8242,7 +8162,7 @@ function showToast(message, isError = false) {
   }
   toastTimer = setTimeout(() => {
     refs.toast.hidden = true;
-  }, 3400);
+  }, 2000);
 }
 
 function wireImageFallback(img, title, landscape = false) {
