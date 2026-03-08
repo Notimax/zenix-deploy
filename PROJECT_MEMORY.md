@@ -26,6 +26,17 @@ Last update: 2026-03-08
   - `cloudflare_stream` (`customer_code` + `uid`)
   - `bunny_stream` (`pull_zone_url` + `video_id`)
   - Intended for legal/self-hosted VF streams.
+- Pidoov provider integration added (owner-confirmed):
+  - Backend endpoint `/api/pidoov-source` resolves by title/year and extracts embed/player URLs.
+  - Frontend injects pidoov sources automatically for movies and episodes (not only F1).
+  - Matching logic favors strict title/year and FR-friendly labels to reduce wrong picks.
+  - Caching/env tuning keys:
+    - `PIDOOV_INDEX_CACHE_MS`
+    - `PIDOOV_LOOKUP_CACHE_MS`
+    - `PIDOOV_DETAIL_CACHE_MS`
+    - `PIDOOV_MAX_PAGES_PER_CATEGORY`
+    - `PIDOOV_FETCH_CONCURRENCY`
+    - `PIDOOV_MAX_MATCH_CANDIDATES`
 
 ## Mobile robustness
 - Startup splash must never block app forever.

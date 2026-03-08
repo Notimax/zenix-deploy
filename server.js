@@ -12,6 +12,22 @@ const CANONICAL_SCHEME =
 const REMOTE_API_BASE = "https://api.purstream.co/api/v1";
 const PURSTREAM_API_BASE = "https://api.purstream.co/api/v1";
 const PURSTREAM_WEB_BASE = "https://purstream.co";
+const PIDOOV_BASE = "https://pidoov.com";
+const PIDOOV_HOST = "pidoov.com";
+const PIDOOV_HOME_PATH = "/xv5lzk";
+const PIDOOV_CATEGORY_IDS = [29, 1, 4, 6, 7, 8, 9, 10, 11, 12, 2, 26, 3];
+const PIDOOV_INDEX_CACHE_MS = Math.max(5 * 60 * 1000, Number(process.env.PIDOOV_INDEX_CACHE_MS || 45 * 60 * 1000));
+const PIDOOV_LOOKUP_CACHE_MS = Math.max(3 * 60 * 1000, Number(process.env.PIDOOV_LOOKUP_CACHE_MS || 25 * 60 * 1000));
+const PIDOOV_DETAIL_CACHE_MS = Math.max(3 * 60 * 1000, Number(process.env.PIDOOV_DETAIL_CACHE_MS || 30 * 60 * 1000));
+const PIDOOV_MAX_PAGES_PER_CATEGORY = Math.max(
+  1,
+  toInt(process.env.PIDOOV_MAX_PAGES_PER_CATEGORY, 25, 1, 120)
+);
+const PIDOOV_FETCH_CONCURRENCY = Math.max(1, toInt(process.env.PIDOOV_FETCH_CONCURRENCY, 4, 1, 8));
+const PIDOOV_MAX_MATCH_CANDIDATES = Math.max(
+  1,
+  toInt(process.env.PIDOOV_MAX_MATCH_CANDIDATES, 3, 1, 6)
+);
 const ANIME_PLANNING_URL = "https://anime-sama.tv/planning/";
 const ANIME_SAMA_BASE = "https://anime-sama.to";
 const ANIME_SAMA_SEARCH_ENDPOINT = `${ANIME_SAMA_BASE}/template-php/defaut/fetch.php`;
@@ -59,6 +75,8 @@ const ZENIX_OWNED_SOURCES_FILE = path.resolve(
 const proxyCache = new Map();
 const calendarCache = new Map();
 const animeSibnetCache = new Map();
+const pidoovDetailCache = new Map();
+const pidoovLookupCache = new Map();
 const zenixOwnedSourcesCache = {
   loadedAt: 0,
   mtimeMs: 0,
@@ -67,6 +85,11 @@ const zenixOwnedSourcesCache = {
     tv: {},
     series: {},
   },
+};
+const pidoovIndexCache = {
+  loadedAt: 0,
+  entries: [],
+  inFlight: null,
 };
 const analyticsClients = new Map();
 const analyticsEvents = [];
@@ -882,6 +905,577 @@ function normalizeTitleKey(value) {
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
+}
+
+function normalizePidoovLanguage(value) {
+  const raw = String(value || "").trim().toUpperCase();
+  if (!raw) {
+    return "";
+  }
+  if (raw.includes("VOSTFR")) {
+    return "VOSTFR";
+  }
+  if (raw.includes("MULTI") || raw.includes("DUAL")) {
+    return "MULTI";
+  }
+  if (/\bVF\b/.test(raw) || raw.includes("FRENCH") || raw.includes("FR")) {
+    return "VF";
+  }
+  if (/\bVO\b/.test(raw) || raw.includes("ORIGINAL")) {
+    return "VO";
+  }
+  return "";
+}
+
+function normalizePidoovPath(value) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return "";
+  }
+  let parsed;
+  try {
+    parsed = new URL(raw, `${PIDOOV_BASE}/`);
+  } catch {
+    return "";
+  }
+  if (normalizeHostName(parsed.hostname) !== PIDOOV_HOST) {
+    return "";
+  }
+  if (!String(parsed.pathname || "").startsWith(PIDOOV_HOME_PATH)) {
+    return "";
+  }
+  return `${parsed.pathname}${parsed.search}`;
+}
+
+function parseYearFromText(value) {
+  const text = String(value || "");
+  const matches = text.match(/\((19|20)\d{2}\)/g);
+  if (!matches || matches.length === 0) {
+    return 0;
+  }
+  const last = String(matches[matches.length - 1] || "");
+  const year = Number(last.replace(/[^\d]/g, ""));
+  if (!Number.isInteger(year) || year < 1900 || year > 2099) {
+    return 0;
+  }
+  return year;
+}
+
+function sanitizePidoovTitleLabel(value) {
+  let text = stripTags(value);
+  if (!text) {
+    return "";
+  }
+  text = text
+    .replace(/\[[^\]]+\]/g, " ")
+    .replace(/\((?:19|20)\d{2}\)/g, " ")
+    .replace(/\b(?:HD|FULL\s*HD|FHD|UHD|4K|CAM|TS|HDTS|WEB[- ]?DL|WEBRIP|BLURAY|DVDRIP|HDRIP)\b/gi, " ")
+    .replace(/[|]+/g, " ")
+    .replace(/[-:]\s*$/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return text;
+}
+
+function parsePidoovCategoryPage(categoryId, page, html) {
+  const source = String(html || "");
+  const anchorRegex = /<a\s+href=["'](?<href>\/xv5lzk\/b\/pidoov\/\d+)["'][^>]*>(?<label>[\s\S]*?)<\/a>/gi;
+  const rows = [];
+  let match = null;
+  while ((match = anchorRegex.exec(source)) !== null) {
+    const detailPath = normalizePidoovPath(match.groups?.href || "");
+    if (!detailPath) {
+      continue;
+    }
+    const rawLabel = stripTags(match.groups?.label || "");
+    const title = sanitizePidoovTitleLabel(rawLabel);
+    if (title.length < 2) {
+      continue;
+    }
+    const year = parseYearFromText(rawLabel);
+    const language = normalizePidoovLanguage(rawLabel) || "VF";
+    const titleKey = normalizeTitleKey(title);
+    if (!titleKey) {
+      continue;
+    }
+    rows.push({
+      detailPath,
+      title,
+      titleKey,
+      language,
+      year,
+      categoryId,
+      page,
+      label: rawLabel,
+    });
+  }
+  return rows;
+}
+
+function parsePidoovCategoryMaxPage(categoryId, html) {
+  const source = String(html || "");
+  const cat = String(categoryId || "").replace(/[^\d]/g, "");
+  if (!cat) {
+    return 0;
+  }
+  const regex = new RegExp(`${PIDOOV_HOME_PATH}/c/pidoov/${cat}/(\\d+)`, "gi");
+  let maxPage = 0;
+  let match = null;
+  while ((match = regex.exec(source)) !== null) {
+    const page = Number(match[1] || 0);
+    if (Number.isInteger(page) && page > maxPage) {
+      maxPage = page;
+    }
+  }
+  return Math.max(0, maxPage);
+}
+
+async function mapWithConcurrency(values, concurrency, mapper) {
+  const rows = Array.isArray(values) ? values : [];
+  if (rows.length === 0) {
+    return [];
+  }
+  const limit = Math.max(1, Math.min(Number(concurrency || 1), rows.length));
+  const results = new Array(rows.length);
+  let cursor = 0;
+  const workers = Array.from({ length: limit }, async () => {
+    while (true) {
+      const current = cursor;
+      cursor += 1;
+      if (current >= rows.length) {
+        return;
+      }
+      try {
+        results[current] = await mapper(rows[current], current);
+      } catch {
+        results[current] = null;
+      }
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
+async function fetchPidoovCategoryEntries(categoryId) {
+  const cat = Number(categoryId || 0);
+  if (!Number.isInteger(cat) || cat <= 0) {
+    return [];
+  }
+  const firstUrl = `${PIDOOV_BASE}${PIDOOV_HOME_PATH}/c/pidoov/${cat}/0`;
+  const firstResponse = await fetchRemoteText(firstUrl, "text/html,application/xhtml+xml");
+  if (firstResponse.status < 200 || firstResponse.status >= 300) {
+    throw new Error(`Pidoov category ${cat} unavailable`);
+  }
+
+  const firstRows = parsePidoovCategoryPage(cat, 0, firstResponse.body);
+  const maxPage = parsePidoovCategoryMaxPage(cat, firstResponse.body);
+  const cappedMaxPage = Math.max(0, Math.min(maxPage, PIDOOV_MAX_PAGES_PER_CATEGORY - 1));
+  if (cappedMaxPage <= 0) {
+    return firstRows;
+  }
+
+  const pages = [];
+  for (let page = 1; page <= cappedMaxPage; page += 1) {
+    pages.push(page);
+  }
+
+  const nextRows = await mapWithConcurrency(pages, PIDOOV_FETCH_CONCURRENCY, async (pageNumber) => {
+    const pageUrl = `${PIDOOV_BASE}${PIDOOV_HOME_PATH}/c/pidoov/${cat}/${pageNumber}`;
+    const response = await fetchRemoteText(pageUrl, "text/html,application/xhtml+xml");
+    if (response.status < 200 || response.status >= 300) {
+      return [];
+    }
+    return parsePidoovCategoryPage(cat, pageNumber, response.body);
+  });
+
+  const merged = firstRows.slice();
+  nextRows.forEach((entries) => {
+    if (Array.isArray(entries) && entries.length > 0) {
+      merged.push(...entries);
+    }
+  });
+  return merged;
+}
+
+function prunePidoovTimedCache(map, maxEntries = 3200) {
+  const now = Date.now();
+  for (const [key, row] of map.entries()) {
+    if (Number(row?.expiresAt || 0) <= now) {
+      map.delete(key);
+    }
+  }
+  if (map.size <= maxEntries) {
+    return;
+  }
+  const sorted = Array.from(map.entries()).sort(
+    (left, right) => Number(left?.[1]?.expiresAt || 0) - Number(right?.[1]?.expiresAt || 0)
+  );
+  sorted.slice(0, map.size - maxEntries).forEach(([key]) => map.delete(key));
+}
+
+function storePidoovLookupCache(key, payload, ttlMs = PIDOOV_LOOKUP_CACHE_MS) {
+  pidoovLookupCache.set(String(key || ""), {
+    value: Array.isArray(payload) ? payload : [],
+    expiresAt: Date.now() + Math.max(1000, Number(ttlMs || 0)),
+  });
+  prunePidoovTimedCache(pidoovLookupCache, 1800);
+}
+
+function readPidoovLookupCache(key) {
+  const row = pidoovLookupCache.get(String(key || ""));
+  if (!row) {
+    return null;
+  }
+  if (Date.now() >= Number(row.expiresAt || 0)) {
+    pidoovLookupCache.delete(String(key || ""));
+    return null;
+  }
+  return Array.isArray(row.value) ? row.value : [];
+}
+
+async function loadPidoovIndex(force = false) {
+  const now = Date.now();
+  if (!force && pidoovIndexCache.loadedAt > 0 && now - pidoovIndexCache.loadedAt < PIDOOV_INDEX_CACHE_MS) {
+    return Array.isArray(pidoovIndexCache.entries) ? pidoovIndexCache.entries : [];
+  }
+  if (pidoovIndexCache.inFlight) {
+    return pidoovIndexCache.inFlight;
+  }
+
+  const task = (async () => {
+    const byPath = new Map();
+    const categoryRows = await mapWithConcurrency(
+      PIDOOV_CATEGORY_IDS,
+      Math.min(PIDOOV_FETCH_CONCURRENCY, PIDOOV_CATEGORY_IDS.length),
+      async (categoryId) => {
+        try {
+          return await fetchPidoovCategoryEntries(categoryId);
+        } catch {
+          return [];
+        }
+      }
+    );
+    categoryRows.forEach((rows) => {
+      if (!Array.isArray(rows) || rows.length === 0) {
+        return;
+      }
+      rows.forEach((entry) => {
+        const key = String(entry?.detailPath || "").trim();
+        if (!key || byPath.has(key)) {
+          return;
+        }
+        byPath.set(key, entry);
+      });
+    });
+    const entries = Array.from(byPath.values());
+    pidoovIndexCache.entries = entries;
+    pidoovIndexCache.loadedAt = Date.now();
+    return entries;
+  })();
+
+  pidoovIndexCache.inFlight = task;
+  try {
+    return await task;
+  } catch (error) {
+    const fallback = Array.isArray(pidoovIndexCache.entries) ? pidoovIndexCache.entries : [];
+    if (fallback.length > 0) {
+      return fallback;
+    }
+    throw error;
+  } finally {
+    pidoovIndexCache.inFlight = null;
+  }
+}
+
+function getPidoovTitleTokens(value) {
+  return normalizeTitleKey(value)
+    .split(" ")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 1 || /^\d+$/.test(entry));
+}
+
+function scorePidoovCandidate(entry, queryKey, queryYear = 0) {
+  const titleKey = String(entry?.titleKey || "").trim();
+  if (!titleKey || !queryKey) {
+    return 0;
+  }
+
+  let score = 0;
+  if (titleKey === queryKey) {
+    score += 420;
+  } else if (titleKey.includes(queryKey) || queryKey.includes(titleKey)) {
+    score += 210;
+  }
+
+  const queryTokens = getPidoovTitleTokens(queryKey);
+  const candidateTokens = new Set(getPidoovTitleTokens(titleKey));
+  let overlaps = 0;
+  let missingNumericTokens = 0;
+  queryTokens.forEach((token) => {
+    if (candidateTokens.has(token)) {
+      overlaps += 1;
+      return;
+    }
+    if (/^\d+$/.test(token)) {
+      missingNumericTokens += 1;
+    }
+  });
+  score += overlaps * 26;
+  if (missingNumericTokens > 0) {
+    score -= missingNumericTokens * 140;
+  }
+
+  if (queryTokens.length > 0) {
+    const ratio = overlaps / queryTokens.length;
+    if (ratio >= 1) {
+      score += 90;
+    } else if (ratio >= 0.75) {
+      score += 45;
+    } else if (ratio >= 0.5) {
+      score += 20;
+    } else if (ratio < 0.25) {
+      score -= 25;
+    }
+  }
+
+  const year = Number(entry?.year || 0);
+  if (Number.isInteger(queryYear) && queryYear > 1900) {
+    if (year === queryYear) {
+      score += 85;
+    } else if (year > 0 && Math.abs(year - queryYear) <= 1) {
+      score += 35;
+    } else if (year > 0 && Math.abs(year - queryYear) >= 2) {
+      score -= 95;
+    }
+  }
+
+  const language = String(entry?.language || "").trim().toUpperCase();
+  if (language === "VF" || language === "MULTI") {
+    score += 20;
+  } else if (language === "VOSTFR") {
+    score += 12;
+  } else if (language === "VO") {
+    score -= 25;
+  }
+
+  const diff = Math.abs(titleKey.length - queryKey.length);
+  if (diff >= 18) {
+    score -= 18;
+  } else if (diff <= 4) {
+    score += 10;
+  }
+  return score;
+}
+
+function pickBestPidoovCandidates(entries, title, year = 0) {
+  const queryKey = normalizeTitleKey(title || "");
+  if (!queryKey) {
+    return [];
+  }
+
+  const scored = (Array.isArray(entries) ? entries : [])
+    .map((entry) => ({
+      entry,
+      score: scorePidoovCandidate(entry, queryKey, Number(year || 0)),
+    }))
+    .filter((row) => row.score > 0)
+    .sort((left, right) => right.score - left.score);
+
+  if (scored.length === 0) {
+    return [];
+  }
+
+  const topScore = Number(scored[0]?.score || 0);
+  const minScore = topScore >= 420 ? 120 : Math.max(140, topScore - 160);
+  const selected = [];
+  const seenPath = new Set();
+  for (const row of scored) {
+    const pathKey = String(row?.entry?.detailPath || "").trim();
+    if (!pathKey || seenPath.has(pathKey)) {
+      continue;
+    }
+    if (row.score < minScore) {
+      continue;
+    }
+    selected.push({
+      ...row.entry,
+      score: row.score,
+    });
+    seenPath.add(pathKey);
+    if (selected.length >= PIDOOV_MAX_MATCH_CANDIDATES) {
+      break;
+    }
+  }
+  return selected;
+}
+
+function parsePidoovDetailSources(html) {
+  const source = String(html || "");
+  const output = [];
+  const seen = new Set();
+  const blockedHostKeywords = [
+    "doubleclick",
+    "googlesyndication",
+    "google-analytics",
+    "adsterra",
+    "maddenwiped",
+    "histats",
+    "popads",
+  ];
+
+  const iframeRegex = /<iframe\b(?<attrs>[^>]*)\bsrc=["'](?<src>[^"']+)["'][^>]*>/gi;
+  let iframeMatch = null;
+  while ((iframeMatch = iframeRegex.exec(source)) !== null) {
+    const rawSrc = String(iframeMatch.groups?.src || "").trim();
+    if (!rawSrc) {
+      continue;
+    }
+    let absolute = rawSrc;
+    try {
+      absolute = new URL(rawSrc, `${PIDOOV_BASE}/`).href;
+    } catch {
+      absolute = rawSrc;
+    }
+    const parsed = parseSafeRemoteUrl(absolute);
+    if (!parsed) {
+      continue;
+    }
+    const host = normalizeHostName(parsed.hostname || "");
+    if (blockedHostKeywords.some((keyword) => host.includes(keyword))) {
+      continue;
+    }
+
+    const tagRaw = String(iframeMatch[0] || "").toLowerCase();
+    const likelyPlayer =
+      tagRaw.includes("allowfullscreen") ||
+      /\/(?:iframe|embed|player)\b/i.test(parsed.pathname) ||
+      /video|stream|play/i.test(parsed.pathname);
+    if (!likelyPlayer) {
+      continue;
+    }
+
+    const key = parsed.href;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    output.push({
+      stream_url: key,
+      format: "embed",
+    });
+  }
+
+  const directRegex = /\b(?:src|file)\s*[:=]\s*["'](?<src>https?:\/\/[^"']+\.(?:m3u8|mp4)(?:\?[^"']*)?)["']/gi;
+  let directMatch = null;
+  while ((directMatch = directRegex.exec(source)) !== null) {
+    const rawSrc = String(directMatch.groups?.src || "").trim();
+    const parsed = parseSafeRemoteUrl(rawSrc);
+    if (!parsed) {
+      continue;
+    }
+    const key = parsed.href;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    output.push({
+      stream_url: key,
+      format: key.includes(".m3u8") ? "hls" : "mp4",
+    });
+  }
+
+  return output;
+}
+
+async function loadPidoovDetailSources(detailPath) {
+  const safePath = normalizePidoovPath(detailPath);
+  if (!safePath) {
+    return [];
+  }
+  const cached = pidoovDetailCache.get(safePath);
+  if (cached && Date.now() < Number(cached.expiresAt || 0)) {
+    return Array.isArray(cached.sources) ? cached.sources : [];
+  }
+
+  const target = `${PIDOOV_BASE}${safePath}`;
+  const response = await fetchRemoteText(target, "text/html,application/xhtml+xml");
+  if (response.status < 200 || response.status >= 300) {
+    throw new Error("Pidoov detail unavailable");
+  }
+
+  const sources = parsePidoovDetailSources(response.body);
+  pidoovDetailCache.set(safePath, {
+    sources,
+    expiresAt: Date.now() + PIDOOV_DETAIL_CACHE_MS,
+  });
+  prunePidoovTimedCache(pidoovDetailCache, 1800);
+  return sources;
+}
+
+async function resolvePidoovSourcesByTitle(title, options = {}) {
+  const safeTitle = String(title || "").trim();
+  if (safeTitle.length < 2) {
+    return [];
+  }
+
+  const type = String(options?.type || "movie").toLowerCase() === "tv" ? "tv" : "movie";
+  const year = toInt(options?.year, 0, 0, 2099);
+  const season = toInt(options?.season, 1, 1, 500);
+  const episode = toInt(options?.episode, 1, 1, 50000);
+  const lookupKey = `${normalizeTitleKey(safeTitle)}|${type}|${year}|${season}|${episode}`;
+  const cached = readPidoovLookupCache(lookupKey);
+  if (cached) {
+    return cached;
+  }
+
+  const index = await loadPidoovIndex();
+  const candidates = pickBestPidoovCandidates(index, safeTitle, year);
+  if (candidates.length === 0) {
+    storePidoovLookupCache(lookupKey, []);
+    return [];
+  }
+
+  const merged = [];
+  const seen = new Set();
+  for (const candidate of candidates) {
+    let detailSources = [];
+    try {
+      detailSources = await loadPidoovDetailSources(candidate.detailPath);
+    } catch {
+      detailSources = [];
+    }
+    if (!Array.isArray(detailSources) || detailSources.length === 0) {
+      continue;
+    }
+
+    const candidateLanguage = normalizePidoovLanguage(candidate.language || candidate.label || "") || "VF";
+    detailSources.forEach((entry, indexInDetail) => {
+      const url = String(entry?.stream_url || "").trim();
+      if (!url || seen.has(url)) {
+        return;
+      }
+      seen.add(url);
+
+      const language = candidateLanguage;
+      const sourceName = candidate.year
+        ? `Pidoov ${candidate.year}`
+        : String(candidate?.title || "").trim()
+          ? `Pidoov - ${candidate.title}`
+          : "Pidoov";
+      const basePriority = language === "VF" ? 380 : language === "MULTI" ? 360 : language === "VOSTFR" ? 340 : 320;
+      merged.push({
+        stream_url: url,
+        source_name: sourceName,
+        quality: "Pidoov",
+        language,
+        format: String(entry?.format || "").trim() || "embed",
+        priority: basePriority - Math.min(40, indexInDetail * 6),
+      });
+    });
+  }
+
+  storePidoovLookupCache(lookupKey, merged);
+  return merged;
 }
 
 function isTruthyFlag(value) {
@@ -2628,6 +3222,55 @@ async function handleAnimeSibnet(req, res, requestUrl) {
   }
 }
 
+async function handlePidoovSource(req, res, requestUrl) {
+  if (requestUrl.pathname !== "/api/pidoov-source") {
+    return false;
+  }
+  if (req.method !== "GET") {
+    sendJson(res, 405, { error: "Method Not Allowed" });
+    return true;
+  }
+
+  const title = String(requestUrl.searchParams.get("title") || "").trim();
+  if (title.length < 2) {
+    sendJson(res, 400, { error: "Missing title" });
+    return true;
+  }
+  const type = String(requestUrl.searchParams.get("type") || "movie").toLowerCase() === "tv" ? "tv" : "movie";
+  const year = toInt(requestUrl.searchParams.get("year"), 0, 0, 2099);
+  const season = toInt(requestUrl.searchParams.get("season"), 1, 1, 500);
+  const episode = toInt(requestUrl.searchParams.get("episode"), 1, 1, 50000);
+
+  try {
+    const sources = await resolvePidoovSourcesByTitle(title, {
+      type,
+      year,
+      season,
+      episode,
+    });
+    sendJson(res, 200, {
+      apiVersion: "zenix-pidoov-source-v1",
+      type: "success",
+      data: {
+        title,
+        mediaType: type,
+        year,
+        season: type === "tv" ? season : 1,
+        episode: type === "tv" ? episode : 1,
+        count: sources.length,
+        sources,
+      },
+    });
+    return true;
+  } catch (error) {
+    sendJson(res, 502, {
+      error: "Pidoov source unavailable",
+      reason: sanitizeToken(String(error?.message || ""), 120),
+    });
+    return true;
+  }
+}
+
 async function handleZenixOwnedSource(req, res, requestUrl) {
   if (requestUrl.pathname !== "/api/zenix-source") {
     return false;
@@ -2839,6 +3482,12 @@ const server = http.createServer((req, res) => {
     })
     .then((handledAnimeSibnet) => {
       if (handledAnimeSibnet) {
+        return true;
+      }
+      return handlePidoovSource(req, res, requestUrl);
+    })
+    .then((handledPidoovSource) => {
+      if (handledPidoovSource) {
         return true;
       }
       return handleZenixOwnedSource(req, res, requestUrl);

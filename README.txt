@@ -62,3 +62,18 @@ OWNED SOURCES (LEGAL VF)
   - Bunny Stream: `provider=bunny_stream`, `pull_zone_url`, `video_id`
 - URLs are generated server-side to HLS manifests and injected as owned sources.
 - Example ready for movie `3940` exists in `zenix-owned-sources.example.json`.
+
+PIDOOV INTEGRATION (GLOBAL FALLBACK)
+- New backend endpoint: `/api/pidoov-source`
+- Purpose: title/year matching + extraction of pidoov player iframe URLs as extra fallback sources.
+- Frontend now injects pidoov sources automatically in:
+  - movie playback source pool
+  - episode playback source pool
+  - detail language compatibility sync
+- Server-side cache controls:
+  - `PIDOOV_INDEX_CACHE_MS`
+  - `PIDOOV_LOOKUP_CACHE_MS`
+  - `PIDOOV_DETAIL_CACHE_MS`
+  - `PIDOOV_MAX_PAGES_PER_CATEGORY`
+  - `PIDOOV_FETCH_CONCURRENCY`
+  - `PIDOOV_MAX_MATCH_CANDIDATES`

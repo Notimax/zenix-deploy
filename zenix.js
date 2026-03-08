@@ -56,6 +56,7 @@ const STREAM_DIRECT_TIMEOUT_MS = 5200;
 const STREAM_DIRECT_PREFETCH_TIMEOUT_MS = 3600;
 const ANIME_SIBNET_TIMEOUT_MS = 11000;
 const ZENIX_OWNED_SOURCE_TIMEOUT_MS = 7000;
+const PIDOOV_SOURCE_TIMEOUT_MS = 14000;
 const EPISODE_SOON_VERIFY_TTL_MS = 3 * 60 * 1000;
 const EPISODE_SOON_VERIFY_LIMIT = 40;
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
@@ -6225,7 +6226,8 @@ async function syncDetailLanguageOptions(id, season, episode) {
   const payload = await fetchStreamJson(`/stream/${id}/episode?season=${season}&episode=${episode}`);
   const baseSources = extractSources(payload);
   const autoSources = appendAutoZenixRelaySources(baseSources);
-  const sources = await appendZenixOwnedSources(item, season, episode, autoSources);
+  const ownedSources = await appendZenixOwnedSources(item, season, episode, autoSources);
+  const sources = await appendPidoovSources(item, season, episode, ownedSources);
   const languages = getAvailableLanguages(sources);
   const selected = resolvePreferredLanguage(id, refs.detailLanguageSelect?.value || "", languages);
   populateLanguageSelect(refs.detailLanguageSelect, languages, selected);
@@ -6630,7 +6632,8 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
   const baseMovieSources = extractSources(payload);
   const autoMovieSources = appendAutoZenixRelaySources(baseMovieSources);
   const ownedMovieSources = await appendZenixOwnedSources(item, 1, 1, autoMovieSources);
-  state.sourcePool = filterMovieSourcesForFrench(ownedMovieSources);
+  const pidoovMovieSources = await appendPidoovSources(item, 1, 1, ownedMovieSources);
+  state.sourcePool = filterMovieSourcesForFrench(pidoovMovieSources);
   state.allEpisodeSources = state.sourcePool.slice();
   state.sourceRetryAttempts.clear();
   if (state.sourcePool.length === 0) {
@@ -6658,7 +6661,8 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
     const refreshedMovieSources = extractSources(refreshedPayload);
     const refreshedAutoMovieSources = appendAutoZenixRelaySources(refreshedMovieSources);
     const refreshedOwnedMovieSources = await appendZenixOwnedSources(item, 1, 1, refreshedAutoMovieSources);
-    state.sourcePool = filterMovieSourcesForFrench(refreshedOwnedMovieSources);
+    const refreshedPidoovMovieSources = await appendPidoovSources(item, 1, 1, refreshedOwnedMovieSources);
+    state.sourcePool = filterMovieSourcesForFrench(refreshedPidoovMovieSources);
     state.allEpisodeSources = state.sourcePool.slice();
     state.sourceRetryAttempts.clear();
     if (state.sourcePool.length === 0) {
@@ -6710,11 +6714,12 @@ async function loadEpisodeStream(
     const baseSources = extractSources(nextPayload);
     const autoMergedSources = appendAutoZenixRelaySources(baseSources);
     const ownedMergedSources = await appendZenixOwnedSources(item, season, episode, autoMergedSources);
+    const pidoovMergedSources = await appendPidoovSources(item, season, episode, ownedMergedSources);
     state.allEpisodeSources = await appendAnimeSibnetSource(
       item,
       season,
       episode,
-      ownedMergedSources,
+      pidoovMergedSources,
       preferredLanguageInput
     );
     state.availableLanguages = getAvailableLanguages(state.allEpisodeSources);
@@ -6903,6 +6908,33 @@ function getOwnedSourceMediaType(item) {
   return String(item?.type || "").toLowerCase() === "tv" ? "tv" : "movie";
 }
 
+function getItemReleaseYear(item) {
+  const candidates = [
+    item?.releaseDate,
+    item?.release_date,
+    item?.firstAirDate,
+    item?.first_air_date,
+    item?.airDate,
+    item?.date,
+    item?.year,
+  ];
+  for (const candidate of candidates) {
+    const raw = String(candidate || "").trim();
+    if (!raw) {
+      continue;
+    }
+    const match = raw.match(/\b(19|20)\d{2}\b/);
+    if (!match) {
+      continue;
+    }
+    const year = Number(match[0]);
+    if (Number.isInteger(year) && year >= 1900 && year <= 2099) {
+      return year;
+    }
+  }
+  return 0;
+}
+
 async function appendZenixOwnedSources(item, season, episode, sources) {
   const base = Array.isArray(sources) ? sources.slice() : [];
   const mediaId = Number(item?.id || 0);
@@ -6958,6 +6990,73 @@ async function appendZenixOwnedSources(item, season, episode, sources) {
     }
 
     return owned.concat(base);
+  } catch {
+    return base;
+  }
+}
+
+async function appendPidoovSources(item, season, episode, sources) {
+  const base = Array.isArray(sources) ? sources.slice() : [];
+  if (!item) {
+    return base;
+  }
+
+  const title = String(item?.title || "").trim();
+  if (title.length < 2) {
+    return base;
+  }
+
+  const mediaType = getOwnedSourceMediaType(item);
+  const safeSeason = Math.max(1, Number(season || 1));
+  const safeEpisode = Math.max(1, Number(episode || 1));
+  const year = getItemReleaseYear(item);
+  const params = new URLSearchParams({
+    title,
+    type: mediaType,
+    season: String(safeSeason),
+    episode: String(safeEpisode),
+  });
+  if (year > 0) {
+    params.set("year", String(year));
+  }
+
+  try {
+    const payload = await fetchJson(`${API_BASE}/pidoov-source?${params.toString()}`, {
+      timeoutMs: PIDOOV_SOURCE_TIMEOUT_MS,
+      retryDelays: [400, 1000],
+    });
+    const raw = Array.isArray(payload?.data?.sources) ? payload.data.sources : [];
+    if (raw.length === 0) {
+      return base;
+    }
+
+    const existing = new Set(base.map((entry) => getSourceDedupKey(entry)).filter(Boolean));
+    const pidoovSources = raw
+      .map((entry, index) =>
+        normalizeSourceEntry(
+          {
+            ...entry,
+            source_name: String(entry?.source_name || entry?.name || "Pidoov").trim() || "Pidoov",
+          },
+          index
+        )
+      )
+      .filter((entry) => {
+        if (!entry) {
+          return false;
+        }
+        const key = getSourceDedupKey(entry);
+        if (!key || existing.has(key)) {
+          return false;
+        }
+        existing.add(key);
+        return true;
+      });
+
+    if (pidoovSources.length === 0) {
+      return base;
+    }
+    return pidoovSources.concat(base);
   } catch {
     return base;
   }
