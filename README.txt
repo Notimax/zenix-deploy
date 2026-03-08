@@ -33,9 +33,14 @@ MOBILE DEBUG CHECKLIST
 - Run 3 x 20s iPhone 13 WebKit playback checks on target content.
 - If playback still fails, inspect source validity upstream and add FR-compatible backups.
 
+RELEASE QUALITY GATE (MANDATORY)
+- Before closing any streaming fix, run brute tests on BOTH desktop and phone:
+  - Desktop: open detail + play + verify at least 20s continuous playback.
+  - Phone simulation (iPhone 13 WebKit): run 3 tests of 20s each.
+  - If any run fails, keep iterating and redeploy until stable.
+
 KEY FILES
 - zenix.js (frontend logic/player/notifications)
 - zenix.css (layout/toast/splash styles)
 - server.js (API proxy + HLS proxy)
 - PROJECT_MEMORY.md (extended working memory)
-

@@ -7886,6 +7886,7 @@ async function startPlayerSource(source, resumeTime, token) {
 }
 
 async function waitForPlaybackBootstrap(video, token, timeoutMs = 4200) {
+  const nativeHls = shouldUseNativeHls(video);
   const deadline = Date.now() + Math.max(1200, Number(timeoutMs || 0));
   while (Date.now() < deadline) {
     if (token !== state.playToken) {
@@ -7914,7 +7915,11 @@ async function waitForPlaybackBootstrap(video, token, timeoutMs = 4200) {
   const readyState = Number(video?.readyState || 0);
   const networkState = Number(video?.networkState || 0);
   const paused = Boolean(video?.paused);
-  if (currentTime <= 0.18 && paused && readyState === 0 && (networkState === 2 || networkState === 3)) {
+  if (currentTime <= 0.18 && paused && readyState === 0 && (networkState === 2 || networkState === 3 || networkState === 0)) {
+    if (nativeHls) {
+      markAwaitingUserPlay(60000);
+      return;
+    }
     throw new Error("Source stalled at bootstrap");
   }
   if (currentTime <= 0.18 && paused && readyState >= 2) {
@@ -7927,14 +7932,19 @@ function shouldUseNativeHls(video) {
   if (!video || typeof video.canPlayType !== "function") {
     return false;
   }
-  if (!video.canPlayType(HLS_MIME)) {
-    return false;
-  }
 
   const ua = String(navigator.userAgent || "");
   const isIOS =
     /iP(hone|od|ad)/i.test(ua) ||
     (navigator.platform === "MacIntel" && Number(navigator.maxTouchPoints || 0) > 1);
+  if (isIOS) {
+    // iOS Safari natively supports HLS even when canPlayType can be inconsistent.
+    return true;
+  }
+  const canPlayHls = Boolean(video.canPlayType(HLS_MIME) || video.canPlayType("application/x-mpegURL"));
+  if (!canPlayHls) {
+    return false;
+  }
   const isAppleWebkit = /AppleWebKit/i.test(ua);
   const isDesktopSafari = /Safari/i.test(ua) && !/Chrome|Chromium|Edg|OPR|Firefox/i.test(ua);
   return isIOS || (isDesktopSafari && isAppleWebkit);
@@ -7969,15 +7979,19 @@ async function tryDecodedHlsBlobPlayback(video, streamUrl, timeoutMs = HLS_READY
 
 async function startHlsPlayback(video, streamUrl, token) {
   if (shouldUseNativeHls(video)) {
+    video.src = streamUrl;
+    video.load();
     try {
-      video.src = streamUrl;
-      video.load();
-      await waitVideoReady(video, HLS_READY_TIMEOUT_MS);
-      return;
-    } catch (nativeError) {
-      await tryDecodedHlsBlobPlayback(video, streamUrl);
-      return;
+      await waitVideoReady(video, Math.min(HLS_READY_TIMEOUT_MS, 2200));
+    } catch {
+      // Keep native source active; try decoded fallback best-effort without hard failing startup.
+      try {
+        await tryDecodedHlsBlobPlayback(video, streamUrl, HLS_READY_TIMEOUT_MS + 2600);
+      } catch {
+        // no-op: startPlayerSource will handle play/bootstrap checks next
+      }
     }
+    return;
   }
 
   const Hls = await loadHlsLibrary();
