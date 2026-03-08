@@ -2125,6 +2125,14 @@ async function handleHlsProxy(req, res, requestUrl) {
     return true;
   } catch (error) {
     const code = String(error?.name || "").toLowerCase().includes("abort") ? 504 : 502;
+    if (requestMethod === "GET" && target?.href) {
+      res.writeHead(302, {
+        Location: target.href,
+        "Cache-Control": "no-cache",
+      });
+      res.end();
+      return true;
+    }
     sendJson(res, code, { error: "HLS proxy failed" });
     return true;
   } finally {
