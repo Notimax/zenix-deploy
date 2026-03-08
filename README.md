@@ -19,6 +19,7 @@ Ouvre ensuite:
 - Lecture directe avec un lecteur video HTML5.
 - Sauvegarde locale de reprise de lecture (`localStorage`).
 - Service worker nettoye pour eviter les caches herites.
+- Regle QA streaming: si un test playback echoue, corriger puis relancer les tests jusqu'a validation complete.
 
 ## Deploiement Render
 

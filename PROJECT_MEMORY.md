@@ -36,3 +36,8 @@ Last update: 2026-03-08
 - Confirm no mobile toast visible.
 - Confirm startup splash disappears on mobile.
 - Confirm source fallback behavior in player status and source selector.
+
+## Mandatory test failure loop
+- If a playback test fails (block, freeze, error, micro bug), never stop at diagnostics.
+- Apply a fix immediately, then rerun the same test conditions.
+- Keep iterating fix + retest until all mandatory checks are green.

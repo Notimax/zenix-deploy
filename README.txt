@@ -39,6 +39,10 @@ RELEASE QUALITY GATE (MANDATORY)
   - Phone simulation (iPhone 13 WebKit): run 3 tests of 20s each.
   - Real phone check (iPhone Safari): run at least 1 manual 20s check on production, because automated WebKit in this environment can fail media codec playback.
   - If any run fails, keep iterating and redeploy until stable.
+  - Mandatory fail loop:
+    - If a test shows playback block/error (including micro bug), do not stop.
+    - Debug the cause, apply a fix, then rerun the same tests.
+    - Repeat fix + retest until all required runs pass.
 
 KEY FILES
 - zenix.js (frontend logic/player/notifications)
