@@ -162,3 +162,34 @@ LAST BRUTE RESULT (LOCAL AFTER NAKIOS MIGRATION, 2026-03-08)
   - passed: 8
   - failed: 0
   - `/api/media/*/sheet` 404 count during matrix: 0
+
+LATEST FIX LOG (2026-03-09)
+- Player UX cleanup:
+  - removed quick action button bar in player (`Recommencer`, `-10s`, `+10s`, `Reessayer`, etc.) from UI.
+  - keyboard shortcuts remain available for power users.
+- New styled startup animation inside player:
+  - animated loading overlay (`playerLoadingIndicator`) now appears while source is connecting.
+  - overlay auto-hides when playback starts or on terminal error.
+- Faster auto source switching when blocked:
+  - playback guard interval reduced and stall thresholds tightened.
+  - startup/status-based recovery now triggers earlier for quicker automatic fallback.
+
+LAST BRUTE RESULT (LIVE AFTER PLAYER PATCH, 2026-03-09)
+- Source: `__tmp_brut_f1_mercredi_matrix_result_live_after_player_patch_2026-03-09.json`
+- Command:
+  - `ZENIX_BASE_URL=https://zenix.best/ node __tmp_brut_f1_mercredi_matrix.js`
+- Summary:
+  - total runs: 8
+  - passed: 8
+  - failed: 0
+  - `/api/media/*/sheet` 404 count during matrix: 0
+
+LAST EPISODE PROBE (LIVE, 2026-03-09)
+- Desktop source: `__tmp_series_20s_probe_desktop_after_player_patch_2026-03-09.json`
+  - title: `Solo Leveling`
+  - samples: 20
+  - max video time: 14.82s
+- iPhone 13 source: `__tmp_series_20s_probe_ios_after_player_patch_2026-03-09.json`
+  - title: `Solo Leveling`
+  - samples: 20
+  - max video time: 10.09s

@@ -22,6 +22,12 @@ Last update: 2026-03-08
   - preferred order: `VF`, `VOSTFR`, `MULTI`, then `VO`
   - avoid pure `VO` when a French-friendly source exists
 - Auto-switch source must trigger when playback is blocked.
+- Player loading UX:
+  - show styled in-player loading animation while source is connecting.
+  - hide loader as soon as playback starts (`play/playing`) or on terminal error state.
+- Player controls UX:
+  - quick action button row in player was removed from UI to keep layout clean.
+  - keyboard shortcuts remain available (`space/k`, arrows, `f`, etc.).
 - Desktop playback resize-loop hardening:
   - nav-fit recalculation is deferred while player/detail overlays are open.
   - deferred nav-fit recalculation is flushed on overlay close.
@@ -33,6 +39,9 @@ Last update: 2026-03-08
   - when audio tracks are exposed, player attempts to force French track.
   - hard filter now removes known non-playable embed/gate URLs before playback (ad-gate hosts, store links).
   - for movies, direct media formats (`hls/mp4/webm/dash`) are prioritized and embeds are dropped when at least one direct source exists.
+  - auto fallback reaction was tightened:
+    - playback guard interval reduced.
+    - startup stall and status-driven recovery thresholds reduced for faster source switch.
 - Frontend detail warmup hardening:
   - `ensureDetails()` now caches missing sheet IDs (`detailsMissing`) and skips repeat `/api/media/{id}/sheet` calls.
   - external provider IDs are excluded from Purstream sheet fetches to avoid mass 404 noise.

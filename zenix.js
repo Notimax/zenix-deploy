@@ -99,6 +99,13 @@ const SOURCE_SUCCESS_BONUS = 8;
 const SOURCE_RETRY_PER_INDEX = 1;
 const FILTER_PREMIUM_SOURCES = false;
 const AUTO_PREMIUM_FALLBACK = true;
+const PLAYBACK_GUARD_INTERVAL_MS = 1200;
+const PLAYBACK_STALL_HARD_MS = 5200;
+const PLAYBACK_STALL_PAUSED_MS = 6400;
+const PLAYBACK_STARTUP_STALL_MS = 2600;
+const PLAYBACK_STATUS_RECOVERY_MS = 1800;
+const PLAYBACK_HEALTH_FIRST_DELAY_MS = 1400;
+const PLAYBACK_HEALTH_REPEAT_DELAY_MS = 2100;
 const SKIP_INTRO_SECONDS = 85;
 const SKIP_RECAP_SECONDS = 45;
 const INTEREST_QUERY_MAX = 40;
@@ -373,6 +380,8 @@ const refs = {
   playerLanguageSelect: document.getElementById("playerLanguageSelect"),
   playerStatus: document.getElementById("playerStatus"),
   playerSourceMeta: document.getElementById("playerSourceMeta"),
+  playerLoadingIndicator: document.getElementById("playerLoadingIndicator"),
+  playerLoadingText: document.getElementById("playerLoadingText"),
   playerVideo: document.getElementById("playerVideo"),
   playerEmbedFrame: document.getElementById("playerEmbedFrame"),
   playerRestartBtn: document.getElementById("playerRestartBtn"),
@@ -1525,9 +1534,11 @@ function bindEvents() {
   refs.playerVideo.addEventListener("timeupdate", onPlayerProgress);
   refs.playerVideo.addEventListener("play", () => {
     clearAwaitingUserPlay();
+    setPlayerLoading(false);
   });
   refs.playerVideo.addEventListener("playing", () => {
     clearAwaitingUserPlay();
+    setPlayerLoading(false);
   });
   refs.playerVideo.addEventListener("pause", () => {
     saveNowPlayingProgress({ force: true });
@@ -7582,23 +7593,27 @@ function startPlaybackGuard() {
       !awaitingUser &&
       startedPlayback &&
       !video.paused &&
-      stalledForMs > 7600 &&
+      stalledForMs > PLAYBACK_STALL_HARD_MS &&
       (readyState <= 2 || networkState === 2 || networkState === 3);
     const pausedBufferStall =
-      !awaitingUser && startedPlayback && video.paused && stalledForMs > 9200 && (readyState <= 2 || networkState === 3);
+      !awaitingUser &&
+      startedPlayback &&
+      video.paused &&
+      stalledForMs > PLAYBACK_STALL_PAUSED_MS &&
+      (readyState <= 2 || networkState === 3);
     const stalledDuringPlayback = hardFreeze || pausedBufferStall;
     const startupStallWithAlternative =
       hasNextCandidate &&
       !awaitingUser &&
       video.paused &&
       currentTime < 0.25 &&
-      stalledForMs > 4200 &&
+      stalledForMs > PLAYBACK_STARTUP_STALL_MS &&
       readyState === 0 &&
       (networkState === 0 || networkState === 2 || networkState === 3);
     const statusDrivenRecovery =
       hasNextCandidate &&
       !awaitingUser &&
-      stalledForMs > 3200 &&
+      stalledForMs > PLAYBACK_STATUS_RECOVERY_MS &&
       /lecture impossible|source selectionnee indisponible|source indisponible/.test(statusText);
     if (
       errorCode <= 0 &&
@@ -7624,12 +7639,12 @@ function startPlaybackGuard() {
         lastObservedTime = Number(refs.playerVideo?.currentTime || 0);
         lastAdvanceAt = Date.now();
       });
-  }, 2400);
+  }, PLAYBACK_GUARD_INTERVAL_MS);
 }
 
 function schedulePlaybackHealthMonitor(token, step = 0) {
   clearPlaybackHealthMonitor();
-  const delay = step === 0 ? 2200 : 3200;
+  const delay = step === 0 ? PLAYBACK_HEALTH_FIRST_DELAY_MS : PLAYBACK_HEALTH_REPEAT_DELAY_MS;
   state.playbackHealthTimer = window.setTimeout(() => {
     if (token !== state.playToken) {
       return;
@@ -7815,6 +7830,7 @@ async function trySwitchToNextSource() {
 
   const token = ++state.playToken;
   const resumeTime = Number(refs.playerVideo.currentTime || 0);
+  setPlayerLoading(true, "Bascule automatique vers une autre source...");
   await playFromSourcePool(resumeTime, token, nextIndex);
   showToast("Source alternative active.");
 }
@@ -8881,6 +8897,7 @@ async function startPlayerSource(source, resumeTime, token) {
 
   const loadTicket = ++state.sourceLoadTicket;
   state.sourceLoading = true;
+  setPlayerLoading(true, "Chargement de la source...");
   if (refs.playerSourceMeta) {
     refs.playerSourceMeta.textContent = formatSourceLabel(
       source,
@@ -8902,6 +8919,10 @@ async function startPlayerSource(source, resumeTime, token) {
     for (const streamUrl of streamCandidates) {
       const useEmbed = isEmbedSource(source, streamUrl);
       const useHls = source?.format === "hls" || /m3u8/i.test(streamUrl);
+      setPlayerLoading(
+        true,
+        useEmbed ? "Chargement du lecteur integre..." : useHls ? "Chargement du flux video..." : "Preparation du flux video..."
+      );
       try {
         teardownPlayerEngine(video);
         if (useEmbed) {
@@ -8911,6 +8932,7 @@ async function startPlayerSource(source, resumeTime, token) {
             timeoutMs: EMBED_READY_TIMEOUT_MS,
           });
           setPlayerStatus("Lecture en cours.");
+          setPlayerLoading(false);
         } else if (useHls) {
           resetPlayerEmbedFrame();
           video.hidden = false;
@@ -8976,6 +8998,7 @@ async function startPlayerSource(source, resumeTime, token) {
           }
           await waitForPlaybackBootstrap(video, token);
           preferFrenchAudioTrack(video);
+          setPlayerLoading(false);
         }
         sourceStarted = true;
         state.ignoreVideoErrorUntil = 0;
@@ -8991,6 +9014,9 @@ async function startPlayerSource(source, resumeTime, token) {
   } finally {
     if (loadTicket === state.sourceLoadTicket) {
       state.sourceLoading = false;
+    }
+    if (!sourceStarted) {
+      setPlayerLoading(false);
     }
   }
 
@@ -9455,9 +9481,39 @@ function waitVideoReady(video, timeoutMs = VIDEO_READY_TIMEOUT_MS) {
   });
 }
 
+function setPlayerLoading(active, message = "") {
+  if (!refs.playerLoadingIndicator) {
+    return;
+  }
+  const canShow = Boolean(active) && Boolean(refs.playerOverlay) && !refs.playerOverlay.hidden;
+  refs.playerLoadingIndicator.hidden = !canShow;
+  if (refs.playerLoadingText) {
+    const safe = String(message || "").trim();
+    refs.playerLoadingText.textContent = safe || "Chargement du lecteur...";
+  }
+}
+
+function shouldShowPlayerLoadingFromStatus(message, isError = false) {
+  if (isError) {
+    return false;
+  }
+  const text = String(message || "").trim().toLowerCase();
+  if (!text) {
+    return false;
+  }
+  if (/lecture en cours|lecture s\d+e\d+|clique sur play/i.test(text)) {
+    return false;
+  }
+  return /preparation|connexion|chargement|actualisation|fallback|resynchronisation|nouvel essai|bascule|segment|secours/i.test(
+    text
+  );
+}
+
 function setPlayerStatus(message, isError = false) {
-  refs.playerStatus.textContent = message || "";
+  const safeMessage = String(message || "");
+  refs.playerStatus.textContent = safeMessage;
   refs.playerStatus.classList.toggle("error", Boolean(isError));
+  setPlayerLoading(shouldShowPlayerLoadingFromStatus(safeMessage, isError), safeMessage);
 }
 
 function closePlayer(options = {}) {
@@ -9473,6 +9529,7 @@ function closePlayer(options = {}) {
     refs.playerPanel.removeAttribute("data-player-type");
   }
 
+  setPlayerLoading(false);
   setPlayerStatus("");
   if (refs.playerSourceMeta) {
     refs.playerSourceMeta.textContent = "";

@@ -67,8 +67,8 @@
       "logo": "https://zenix.best/android-chrome-512x512.png"
     }
   </script>
-    <link rel="stylesheet" href="/zenix.css?v=20260308-c103" />
-    <script defer src="/zenix.js?v=20260308-c113"></script>
+    <link rel="stylesheet" href="/zenix.css?v=20260309-c104" />
+    <script defer src="/zenix.js?v=20260309-c125"></script>
 </head>
 <body>
   <div class="startup-splash" id="startupSplash" aria-hidden="true">
@@ -421,6 +421,14 @@
         <div class="player-layout">
           <div class="player-main">
             <div class="player-video-wrap">
+              <div class="player-loading" id="playerLoadingIndicator" aria-live="polite">
+                <div class="player-loading-ring" aria-hidden="true">
+                  <span></span>
+                  <span></span>
+                  <span></span>
+                </div>
+                <p class="player-loading-text" id="playerLoadingText">Chargement du lecteur...</p>
+              </div>
               <video id="playerVideo" controls playsinline preload="metadata"></video>
               <iframe
                 id="playerEmbedFrame"
@@ -429,16 +437,6 @@
                 allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
                 hidden
               ></iframe>
-            </div>
-            <div class="player-quickbar" aria-label="Actions rapides">
-              <button class="btn btn-soft btn-compact" id="playerRestartBtn" type="button">Recommencer</button>
-              <button class="btn btn-soft btn-compact" id="playerRewindBtn" type="button">-10s</button>
-              <button class="btn btn-soft btn-compact" id="playerForwardBtn" type="button">+10s</button>
-              <button class="btn btn-soft btn-compact" id="playerRetryBtn" type="button">Reessayer</button>
-              <button class="btn btn-soft btn-compact" id="playerSkipIntroBtn" type="button">Passer intro</button>
-              <button class="btn btn-soft btn-compact" id="playerSkipRecapBtn" type="button">Passer recap</button>
-              <button class="btn btn-soft btn-compact" id="playerFullscreenBtn" type="button">Plein ecran</button>
-              <button class="btn btn-soft btn-compact" id="playerPipBtn" type="button">Mode flottant</button>
             </div>
           </div>
 
