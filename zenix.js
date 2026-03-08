@@ -385,6 +385,20 @@ function replayStartupSplashAnimations() {
   refs.startupSplash.classList.remove("is-replaying");
 }
 
+function forceHideStartupSplash() {
+  if (!refs.startupSplash) {
+    return;
+  }
+  if (state.startupSplashForceTimer) {
+    clearTimeout(state.startupSplashForceTimer);
+    state.startupSplashForceTimer = 0;
+  }
+  refs.startupSplash.hidden = true;
+  refs.startupSplash.classList.remove("is-leaving");
+  refs.startupSplash.classList.remove("is-replaying");
+  document.body.classList.remove("startup-lock");
+}
+
 function startStartupSplash() {
   if (!refs.startupSplash) {
     return performance.now();
@@ -398,10 +412,8 @@ function startStartupSplash() {
     clearTimeout(state.startupSplashForceTimer);
   }
   state.startupSplashForceTimer = window.setTimeout(() => {
-    completeStartupSplash(0, { force: true }).catch(() => {
-      // fallback only
-    });
-  }, STARTUP_SPLASH_MAX_MS);
+    forceHideStartupSplash();
+  }, STARTUP_SPLASH_MAX_MS + 1000);
 
   return performance.now();
 }
@@ -451,9 +463,7 @@ async function completeStartupSplash(startedAt = 0, options = {}) {
     setTimeout(finish, 620);
   });
 
-  splash.hidden = true;
-  splash.classList.remove("is-leaving");
-  document.body.classList.remove("startup-lock");
+  forceHideStartupSplash();
 }
 
 init();
@@ -2024,6 +2034,19 @@ function isCompactViewport() {
     return window.matchMedia(`(max-width: ${MOBILE_VIEWPORT_MAX_WIDTH}px)`).matches;
   }
   return Number(window.innerWidth || 0) <= MOBILE_VIEWPORT_MAX_WIDTH;
+}
+
+function isLikelyMobileDevice() {
+  const ua = String(navigator.userAgent || "").toLowerCase();
+  if (/(iphone|ipod|ipad|android|mobile|windows phone|blackberry)/i.test(ua)) {
+    return true;
+  }
+  const touchPoints = Number(navigator.maxTouchPoints || 0);
+  const screenWidth = Number(window.screen?.width || 0);
+  if (touchPoints > 1 && screenWidth > 0 && screenWidth <= 1366) {
+    return true;
+  }
+  return isCompactViewport();
 }
 
 function shouldBoostCoverLoading() {
@@ -5557,6 +5580,22 @@ function filterSourcesByLanguage(sources, language) {
   return merged.length > 0 ? merged : rows;
 }
 
+function filterMovieSourcesForFrench(sources) {
+  const rows = Array.isArray(sources) ? sources.slice() : [];
+  if (rows.length <= 1) {
+    return rows;
+  }
+  const hasFrenchFriendly = rows.some((entry) => {
+    const language = String(entry?.language || "").trim().toUpperCase();
+    return language === "VF" || language === "VOSTFR" || language === "MULTI";
+  });
+  if (!hasFrenchFriendly) {
+    return rows;
+  }
+  const withoutVo = rows.filter((entry) => String(entry?.language || "").trim().toUpperCase() !== "VO");
+  return withoutVo.length > 0 ? withoutVo : rows;
+}
+
 async function syncDetailLanguageOptions(id, season, episode) {
   const item = findItemById(id);
   if (!item || item.type !== "tv") {
@@ -5977,7 +6016,8 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
   clearManualSourceLock();
   const baseMovieSources = extractSources(payload);
   const autoMovieSources = appendAutoZenixRelaySources(baseMovieSources);
-  state.sourcePool = await appendZenixOwnedSources(item, 1, 1, autoMovieSources);
+  const ownedMovieSources = await appendZenixOwnedSources(item, 1, 1, autoMovieSources);
+  state.sourcePool = filterMovieSourcesForFrench(ownedMovieSources);
   state.allEpisodeSources = state.sourcePool.slice();
   state.sourceRetryAttempts.clear();
   if (state.sourcePool.length === 0) {
@@ -6003,7 +6043,8 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
     clearManualSourceLock();
     const refreshedMovieSources = extractSources(refreshedPayload);
     const refreshedAutoMovieSources = appendAutoZenixRelaySources(refreshedMovieSources);
-    state.sourcePool = await appendZenixOwnedSources(item, 1, 1, refreshedAutoMovieSources);
+    const refreshedOwnedMovieSources = await appendZenixOwnedSources(item, 1, 1, refreshedAutoMovieSources);
+    state.sourcePool = filterMovieSourcesForFrench(refreshedOwnedMovieSources);
     state.allEpisodeSources = state.sourcePool.slice();
     state.sourceRetryAttempts.clear();
     if (state.sourcePool.length === 0) {
@@ -6497,6 +6538,8 @@ function startPlaybackGuard() {
     const readyState = Number(video.readyState || 0);
     const networkState = Number(video.networkState || 0);
     const awaitingUser = isAwaitingUserPlay();
+    const hasNextCandidate = state.sourceIndex + 1 < state.sourcePool.length;
+    const statusText = String(refs.playerStatus?.textContent || "").toLowerCase();
     if (currentTime > lastObservedTime + 0.08) {
       lastObservedTime = currentTime;
       lastAdvanceAt = Date.now();
@@ -6504,7 +6547,12 @@ function startPlaybackGuard() {
     const stalledForMs = Date.now() - lastAdvanceAt;
     const startedPlayback = Math.max(lastObservedTime, currentTime) > 0.6;
     const blockedAtStart = !awaitingUser && video.paused && currentTime < 1.2 && readyState >= 2;
-    const noSourceAtStart = !awaitingUser && video.paused && currentTime < 0.25 && readyState === 0 && networkState === 3;
+    const noSourceAtStart =
+      !awaitingUser &&
+      video.paused &&
+      currentTime < 0.25 &&
+      readyState === 0 &&
+      (networkState === 0 || networkState === 2 || networkState === 3);
     const hardFreeze =
       !awaitingUser &&
       startedPlayback &&
@@ -6514,11 +6562,31 @@ function startPlaybackGuard() {
     const pausedBufferStall =
       !awaitingUser && startedPlayback && video.paused && stalledForMs > 9200 && (readyState <= 2 || networkState === 3);
     const stalledDuringPlayback = hardFreeze || pausedBufferStall;
-    if (errorCode <= 0 && !blockedAtStart && !noSourceAtStart && !stalledDuringPlayback) {
+    const startupStallWithAlternative =
+      hasNextCandidate &&
+      !awaitingUser &&
+      video.paused &&
+      currentTime < 0.25 &&
+      stalledForMs > 4200 &&
+      readyState === 0 &&
+      (networkState === 0 || networkState === 2 || networkState === 3);
+    const statusDrivenRecovery =
+      hasNextCandidate &&
+      !awaitingUser &&
+      stalledForMs > 3200 &&
+      /lecture impossible|source selectionnee indisponible|source indisponible/.test(statusText);
+    if (
+      errorCode <= 0 &&
+      !blockedAtStart &&
+      !noSourceAtStart &&
+      !stalledDuringPlayback &&
+      !startupStallWithAlternative &&
+      !statusDrivenRecovery
+    ) {
       return;
     }
     switchingSource = true;
-    if (stalledDuringPlayback) {
+    if (stalledDuringPlayback || startupStallWithAlternative || statusDrivenRecovery) {
       setPlayerStatus("Lecture bloquee, bascule automatique...", true);
     }
     trySwitchToNextSource()
@@ -6557,7 +6625,12 @@ function schedulePlaybackHealthMonitor(token, step = 0) {
     const awaitingUser = isAwaitingUserPlay();
     const blockedAtStart = !awaitingUser && step >= 1 && video.paused && currentTime < 1.2 && readyState >= 2;
     const noSourceAtStart =
-      !awaitingUser && step >= 2 && video.paused && currentTime < 0.25 && readyState === 0 && networkState === 3;
+      !awaitingUser &&
+      step >= 2 &&
+      video.paused &&
+      currentTime < 0.25 &&
+      readyState === 0 &&
+      (networkState === 0 || networkState === 2 || networkState === 3);
     if (errorCode > 0 || blockedAtStart || noSourceAtStart) {
       trySwitchToNextSource().catch(() => {
         setPlayerStatus("Erreur video detectee. Choisis une autre source.", true);
@@ -7001,10 +7074,14 @@ function getSourceScore(format, quality, language, index, host = "") {
   } else if (qualityText.includes("hd")) {
     score += 70;
   }
-  if (language === "VOSTFR") {
-    score += 22;
-  } else if (language === "VF") {
-    score += 20;
+  if (language === "VF") {
+    score += 30;
+  } else if (language === "VOSTFR") {
+    score += 26;
+  } else if (language === "MULTI") {
+    score += 18;
+  } else if (language === "VO") {
+    score += 4;
   }
 
   score += Math.max(0, 30 - index);
@@ -8148,7 +8225,7 @@ function showToast(message, isError = false) {
   if (!refs.toast) {
     return;
   }
-  if (isCompactViewport()) {
+  if (isLikelyMobileDevice()) {
     refs.toast.hidden = true;
     return;
   }

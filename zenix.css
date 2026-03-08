@@ -2397,6 +2397,8 @@ body.startup-lock {
 
 .toast {
   position: fixed;
+  top: auto;
+  left: auto;
   right: 16px;
   bottom: 16px;
   z-index: 120;
@@ -2554,6 +2556,10 @@ body.compact-cards .top-meta {
 @media (max-width: 740px) {
   .layout {
     padding: 14px;
+  }
+
+  .toast {
+    display: none !important;
   }
 
   .startup-bar {
@@ -2848,6 +2854,12 @@ body.compact-cards .top-meta {
   .quick-link:active,
   .modal-close:active {
     transform: scale(0.98);
+  }
+}
+
+@media (pointer: coarse) {
+  .toast {
+    display: none !important;
   }
 }
 
