@@ -7542,13 +7542,26 @@ function toAbsoluteUrl(raw, fallbackBase = window.location.href) {
   }
 }
 
+function normalizeExistingHlsProxyUrl(rawUrl) {
+  const absolute = toAbsoluteUrl(rawUrl);
+  if (!absolute || !/\/api\/hls-proxy(?:\?|$)/i.test(absolute)) {
+    return "";
+  }
+  const target = extractProxyTargetUrl(absolute);
+  if (!target) {
+    return "";
+  }
+  return `${API_BASE}/hls-proxy?url=${encodeURIComponent(target)}`;
+}
+
 function toHlsProxyUrl(rawUrl) {
   const absolute = toAbsoluteUrl(rawUrl);
   if (!absolute) {
     return "";
   }
-  if (/\/api\/hls-proxy\?url=/i.test(absolute)) {
-    return absolute;
+  const normalizedExisting = normalizeExistingHlsProxyUrl(absolute);
+  if (normalizedExisting) {
+    return normalizedExisting;
   }
   if (!/^https?:\/\//i.test(absolute)) {
     return "";
@@ -7600,7 +7613,8 @@ function rewritePlaylistLineUriForClient(rawUri, baseUrl) {
     return absolute;
   }
   if (/\/api\/hls-proxy\?url=/i.test(absolute)) {
-    return absolute;
+    const normalized = toHlsProxyUrl(absolute);
+    return normalized ? toAbsoluteUrl(normalized) : absolute;
   }
   if (/^https?:\/\//i.test(absolute)) {
     const proxied = toHlsProxyUrl(absolute);
@@ -7632,6 +7646,7 @@ function rewritePlaylistTextForClient(playlistText, baseUrl) {
 }
 
 function pickFirstHlsVariantUrl(masterText, baseUrl) {
+  const resolveBase = extractProxyTargetUrl(baseUrl) || baseUrl;
   const lines = String(masterText || "").split(/\r?\n/);
   for (let index = 0; index < lines.length; index += 1) {
     const current = String(lines[index] || "").trim();
@@ -7643,7 +7658,12 @@ function pickFirstHlsVariantUrl(masterText, baseUrl) {
       if (!candidate || candidate.startsWith("#")) {
         continue;
       }
-      return toAbsoluteUrl(candidate, baseUrl);
+      const absolute = toAbsoluteUrl(candidate, resolveBase);
+      if (/\/api\/hls-proxy\?url=/i.test(absolute)) {
+        const normalized = toHlsProxyUrl(absolute);
+        return normalized ? toAbsoluteUrl(normalized) : absolute;
+      }
+      return absolute;
     }
   }
   return "";
@@ -7720,14 +7740,15 @@ function buildPlayableSourceCandidates(source, options = {}) {
   const isProxied = /\/api\/hls-proxy\?url=/i.test(absolute);
   const isRemoteHttp = /^https?:\/\//i.test(absolute);
   const looksLikeHls = source?.format === "hls" || /m3u8/i.test(absolute);
+  const normalizedProxyAbsolute = toAbsoluteUrl(toHlsProxyUrl(absolute) || absolute);
   const proxyUrl = !isProxied && isRemoteHttp ? `${API_BASE}/hls-proxy?url=${encodeURIComponent(absolute)}` : "";
   const proxiedTarget = isProxied ? extractProxyTargetUrl(absolute) : "";
 
   if (looksLikeHls && isProxied) {
     if (options.preferDirectHls && proxiedTarget) {
-      candidates.push(proxiedTarget, absolute);
+      candidates.push(proxiedTarget, normalizedProxyAbsolute);
     } else {
-      candidates.push(absolute);
+      candidates.push(normalizedProxyAbsolute);
       if (proxiedTarget) {
         candidates.push(proxiedTarget);
       }
@@ -7755,9 +7776,36 @@ function buildPlayableSourceCandidates(source, options = {}) {
   return Array.from(new Set(candidates.filter(Boolean)));
 }
 
+function shouldPreferProxyFirstForHls(video, source) {
+  if (!shouldUseNativeHls(video)) {
+    return false;
+  }
+  const absolute = toAbsoluteUrl(source?.url || "");
+  if (!absolute) {
+    return false;
+  }
+  const target = extractProxyTargetUrl(absolute) || absolute;
+  try {
+    const targetHost = String(new URL(target).hostname || "")
+      .trim()
+      .toLowerCase()
+      .replace(/^www\./, "");
+    const currentHost = String(window.location.hostname || "")
+      .trim()
+      .toLowerCase()
+      .replace(/^www\./, "");
+    if (!targetHost || !currentHost) {
+      return false;
+    }
+    return targetHost !== currentHost;
+  } catch {
+    return false;
+  }
+}
+
 async function startPlayerSource(source, resumeTime, token) {
   const video = refs.playerVideo;
-  const preferDirectHls = shouldUseNativeHls(video);
+  const preferDirectHls = shouldUseNativeHls(video) && !shouldPreferProxyFirstForHls(video, source);
   const streamCandidates = buildPlayableSourceCandidates(source, {
     // Native Safari/iOS handles direct HLS better; keep proxy as fallback.
     preferDirectHls,
