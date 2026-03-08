@@ -27,8 +27,8 @@
   <link rel="dns-prefetch" href="//image.tmdb.org" />
   <link rel="dns-prefetch" href="//cdn.jsdelivr.net" />
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Instrument+Serif:ital@0;1&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/zenix.css?v=20260307-c99" />
-    <script defer src="/zenix.js?v=20260307-c99"></script>
+    <link rel="stylesheet" href="/zenix.css?v=20260308-c100" />
+    <script defer src="/zenix.js?v=20260308-c100"></script>
 </head>
 <body>
   <div class="startup-splash" id="startupSplash" aria-hidden="true">
@@ -220,6 +220,21 @@
           Recherche
           <input id="calendarSearchInput" class="calendar-search-input" type="search" placeholder="Nom du titre..." autocomplete="off" />
         </label>
+        <div class="calendar-type-filter" role="group" aria-label="Filtrer par type">
+          <span class="calendar-type-filter-label">Type</span>
+          <label class="calendar-type-pill" for="calendarTypeFilm">
+            <input id="calendarTypeFilm" type="checkbox" data-calendar-type-filter="film" checked />
+            <span>Film</span>
+          </label>
+          <label class="calendar-type-pill" for="calendarTypeSerie">
+            <input id="calendarTypeSerie" type="checkbox" data-calendar-type-filter="serie" checked />
+            <span>Serie</span>
+          </label>
+          <label class="calendar-type-pill" for="calendarTypeAnime">
+            <input id="calendarTypeAnime" type="checkbox" data-calendar-type-filter="anime" checked />
+            <span>Anime</span>
+          </label>
+        </div>
         <button class="btn btn-soft" id="calendarRefreshBtn" type="button">Actualiser le calendrier</button>
       </div>
 

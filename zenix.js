@@ -26,6 +26,7 @@ const INITIAL_IMAGE_WARMUP_LIMIT = 260;
 const CALENDAR_YEAR_RANGE = 3;
 const CALENDAR_CACHE_KEY = "zenix-calendar-cache-v1";
 const CALENDAR_CACHE_MAX_ENTRIES = 8;
+const CALENDAR_TYPE_KEYS = ["film", "serie", "anime"];
 const INITIAL_CATALOG_WARMUP_PAGES = 2;
 const BACKGROUND_CATALOG_DELAY_MS = 8;
 const BACKGROUND_CATALOG_RENDER_EVERY = 8;
@@ -130,6 +131,7 @@ const state = {
   calendarLoading: false,
   calendarData: null,
   calendarOverviewUnavailable: false,
+  calendarTypeFilters: { film: true, serie: true, anime: true },
   searchToken: 0,
   page: 0,
   totalPages: 0,
@@ -311,6 +313,7 @@ const refs = {
   calendarMonthSelect: document.getElementById("calendarMonthSelect"),
   calendarYearSelect: document.getElementById("calendarYearSelect"),
   calendarSearchInput: document.getElementById("calendarSearchInput"),
+  calendarTypeFilterInputs: Array.from(document.querySelectorAll("[data-calendar-type-filter]")),
   calendarRefreshBtn: document.getElementById("calendarRefreshBtn"),
   calendarMergedGrid: document.getElementById("calendarMergedGrid"),
   calendarMergedMeta: document.getElementById("calendarMergedMeta"),
@@ -2266,6 +2269,108 @@ function monthLabelFr(monthNumber) {
   return date.toLocaleDateString("fr-FR", { month: "long" });
 }
 
+function createDefaultCalendarTypeFilters() {
+  return { film: true, serie: true, anime: true };
+}
+
+function sanitizeCalendarTypeFilters(value) {
+  const defaults = createDefaultCalendarTypeFilters();
+  if (!value || typeof value !== "object") {
+    return defaults;
+  }
+  const next = { ...defaults };
+  CALENDAR_TYPE_KEYS.forEach((type) => {
+    if (Object.prototype.hasOwnProperty.call(value, type)) {
+      next[type] = Boolean(value[type]);
+    }
+  });
+  if (!Object.values(next).some(Boolean)) {
+    return defaults;
+  }
+  return next;
+}
+
+function normalizeCalendarMediaType(value) {
+  const raw = normalizeTitleKey(value || "");
+  if (!raw) {
+    return "";
+  }
+  if (raw === "film" || raw === "movie" || raw === "movies" || raw === "cinema") {
+    return "film";
+  }
+  if (raw === "serie" || raw === "series" || raw === "tv" || raw === "show") {
+    return "serie";
+  }
+  if (raw === "anime" || raw === "scan" || raw === "animation") {
+    return "anime";
+  }
+  return "";
+}
+
+function getCalendarEntryMediaType(entry) {
+  if (!entry || typeof entry !== "object") {
+    return "film";
+  }
+  const explicit = normalizeCalendarMediaType(
+    entry.type || entry.kind || entry.mediaType || entry.media_type || entry.category || ""
+  );
+  if (explicit) {
+    return explicit;
+  }
+  if (Boolean(entry.isAnime)) {
+    return "anime";
+  }
+  return "film";
+}
+
+function formatCalendarDateLabel(entry) {
+  if (!entry || typeof entry !== "object") {
+    return "Date inconnue";
+  }
+
+  const candidates = [
+    entry.dateIso,
+    entry.releaseDate,
+    entry.release_date,
+    entry.airDate,
+    entry.air_date,
+    entry.date,
+    entry.datetime,
+  ];
+  for (const candidate of candidates) {
+    const raw = String(candidate || "").trim();
+    if (!raw) {
+      continue;
+    }
+    const isoMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})(?:$|[ T])/);
+    if (isoMatch) {
+      const year = Number(isoMatch[1]);
+      const month = String(Math.max(1, Math.min(12, Number(isoMatch[2])))).padStart(2, "0");
+      const day = String(Math.max(1, Math.min(31, Number(isoMatch[3])))).padStart(2, "0");
+      return year === state.calendarYear ? `${day}/${month}` : `${day}/${month}/${year}`;
+    }
+    const parsed = Date.parse(raw);
+    if (!Number.isFinite(parsed)) {
+      continue;
+    }
+    const date = new Date(parsed);
+    const day = String(date.getDate()).padStart(2, "0");
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const year = date.getFullYear();
+    return year === state.calendarYear ? `${day}/${month}` : `${day}/${month}/${year}`;
+  }
+
+  const dayNumber = Number(entry.dayNumber || entry.day || entry.number || 0);
+  if (Number.isFinite(dayNumber) && dayNumber > 0) {
+    const safeDay = String(Math.max(1, Math.min(31, Math.trunc(dayNumber)))).padStart(2, "0");
+    const safeMonth = String(state.calendarMonth).padStart(2, "0");
+    return `${safeDay}/${safeMonth}`;
+  }
+
+  const rawLabel = String(entry.dateLabel || entry.dayName || "").trim();
+  return rawLabel || "Date inconnue";
+}
+
 function initCalendarControls() {
   if (!refs.calendarMonthSelect || !refs.calendarYearSelect || !refs.calendarRefreshBtn) {
     return;
@@ -2319,6 +2424,31 @@ function initCalendarControls() {
       }
       renderCalendarSection();
       syncBrowseRoute({ replace: true });
+    });
+  }
+
+  if (Array.isArray(refs.calendarTypeFilterInputs) && refs.calendarTypeFilterInputs.length > 0) {
+    refs.calendarTypeFilterInputs.forEach((input) => {
+      if (!(input instanceof HTMLInputElement)) {
+        return;
+      }
+      const type = normalizeCalendarMediaType(input.dataset.calendarTypeFilter || "");
+      if (!type) {
+        input.disabled = true;
+        return;
+      }
+      input.checked = state.calendarTypeFilters[type] !== false;
+      input.addEventListener("change", () => {
+        state.calendarTypeFilters[type] = Boolean(input.checked);
+        if (!CALENDAR_TYPE_KEYS.some((key) => state.calendarTypeFilters[key])) {
+          state.calendarTypeFilters[type] = true;
+          input.checked = true;
+          showToast("Selectionne au moins un type.");
+          return;
+        }
+        renderCalendarSection();
+        saveBrowseState();
+      });
     });
   }
 }
@@ -2581,7 +2711,7 @@ function renderCalendarSection() {
   const compact = new Map();
   sourceRows.forEach((entry) => {
     const titleKey = normalizeTitleKey(entry?.title || "");
-    const typeKey = normalizeTitleKey(entry?.type || entry?.kind || "");
+    const typeKey = getCalendarEntryMediaType(entry);
     const dateKey = String(entry?.dateIso || "").trim() || String(entry?.dayNumber || "");
     const key = `${titleKey}::${typeKey}::${dateKey}`;
     const current = compact.get(key);
@@ -2603,8 +2733,14 @@ function renderCalendarSection() {
   });
 
   const query = normalizeTitleKey(state.calendarQuery || "");
+  const activeCalendarTypes = new Set(
+    CALENDAR_TYPE_KEYS.filter((type) => state.calendarTypeFilters[type] !== false)
+  );
   const mergedRows = Array.from(compact.values())
     .filter((entry) => {
+      if (!activeCalendarTypes.has(getCalendarEntryMediaType(entry))) {
+        return false;
+      }
       if (!query) {
         return true;
       }
@@ -2618,9 +2754,6 @@ function renderCalendarSection() {
     film: "Film",
     serie: "Serie",
     anime: "Anime",
-    movie: "Film",
-    tv: "Serie",
-    scan: "Anime",
   };
 
   mergedRows.forEach((entry, index) => {
@@ -2629,12 +2762,10 @@ function renderCalendarSection() {
     const detailId = resolveCalendarDetailId(entry);
     const hasDetails = detailId > 0;
     const linkLabel = hasDetails ? "Voir details" : "Bientot";
-    const typeLabel = typeMap[String(entry.type || entry.kind || "").toLowerCase()] || "Titre";
+    const mediaType = getCalendarEntryMediaType(entry);
+    const typeLabel = typeMap[mediaType] || "Titre";
     const poster = normalizeImageUrl(entry.poster || "");
-    const dateLabel =
-      entry.source === "purstream"
-        ? `${String(entry.dayNumber || "").padStart(2, "0")}/${String(state.calendarMonth).padStart(2, "0")}`
-        : entry.dateLabel || entry.dayName || "Sans date";
+    const dateLabel = formatCalendarDateLabel(entry);
     card.innerHTML = `
       <div class="media-shell">
         <div class="media-thumb calendar-media-thumb">
@@ -2692,10 +2823,15 @@ function renderCalendarSection() {
   });
   if (mergedRows.length === 0) {
     const providerStatus = state.calendarData?.providerStatus || {};
-    const sourceHint =
+    let sourceHint =
       providerStatus.catalog === false && providerStatus.anime === false
         ? "Sources calendrier temporairement indisponibles."
         : "Aucune sortie fusionnee pour cette periode.";
+    if (query) {
+      sourceHint = `Aucun resultat pour "${state.calendarQuery}".`;
+    } else if (compact.size > 0) {
+      sourceHint = "Aucune sortie pour les filtres selectionnes.";
+    }
     refs.calendarMergedGrid.innerHTML = `<p class="empty">${escapeHtml(sourceHint)}</p>`;
   } else {
     refs.calendarMergedGrid.appendChild(mergedFragment);
@@ -2717,10 +2853,15 @@ function renderCalendarSection() {
   });
 
   if (refs.calendarMergedMeta) {
+    const selectedLabels = CALENDAR_TYPE_KEYS
+      .filter((type) => state.calendarTypeFilters[type] !== false)
+      .map((type) => typeMap[type]);
+    const filterSuffix =
+      selectedLabels.length < CALENDAR_TYPE_KEYS.length ? ` (${selectedLabels.join(", ")})` : "";
     if (query) {
-      refs.calendarMergedMeta.textContent = `${mergedRows.length} resultat(s) pour "${state.calendarQuery}".`;
+      refs.calendarMergedMeta.textContent = `${mergedRows.length} resultat(s) pour "${state.calendarQuery}"${filterSuffix}.`;
     } else {
-      refs.calendarMergedMeta.textContent = `${mergedRows.length} sorties detectees.`;
+      refs.calendarMergedMeta.textContent = `${mergedRows.length} sorties detectees${filterSuffix}.`;
     }
   }
 }
@@ -8515,6 +8656,7 @@ function saveBrowseState() {
       sortBy: state.sortBy,
       query: state.query,
       calendarQuery: state.calendarQuery,
+      calendarTypeFilters: { ...state.calendarTypeFilters },
       savedAt: Date.now(),
     };
     localStorage.setItem(BROWSE_STATE_KEY, JSON.stringify(payload));
@@ -8589,10 +8731,23 @@ function applySavedBrowseState() {
   }
   state.query = String(saved.query || "").trim();
   state.calendarQuery = String(saved.calendarQuery || "").trim();
+  state.calendarTypeFilters = sanitizeCalendarTypeFilters(saved.calendarTypeFilters);
 
   refs.searchInput.value = state.view === "calendar" ? state.calendarQuery : state.query;
   if (refs.calendarSearchInput) {
     refs.calendarSearchInput.value = state.calendarQuery;
+  }
+  if (Array.isArray(refs.calendarTypeFilterInputs)) {
+    refs.calendarTypeFilterInputs.forEach((input) => {
+      if (!(input instanceof HTMLInputElement)) {
+        return;
+      }
+      const type = normalizeCalendarMediaType(input.dataset.calendarTypeFilter || "");
+      if (!type) {
+        return;
+      }
+      input.checked = state.calendarTypeFilters[type] !== false;
+    });
   }
   refs.sortSelect.value = state.sortBy;
 }
