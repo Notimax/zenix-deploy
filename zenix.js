@@ -3006,6 +3006,56 @@ function resolveCalendarEntryCover(entry, detailId = 0) {
   return cover || direct;
 }
 
+function hydrateCalendarCardFromDetails(card, detailId, fallbackTitle = "") {
+  const mediaId = Math.max(0, Number(detailId || 0));
+  if (!(card instanceof HTMLElement) || mediaId <= 0) {
+    return;
+  }
+
+  ensureDetails(mediaId)
+    .then((details) => {
+      if (!card.isConnected || !details) {
+        return;
+      }
+      const mediaType = details.type === "tv" ? (Boolean(details.isAnime) ? "anime" : "serie") : "film";
+      const typeMap = {
+        film: "Film",
+        serie: "Serie",
+        anime: "Anime",
+      };
+      const badge = card.querySelector(".meta-pill");
+      if (badge) {
+        badge.textContent = typeMap[mediaType] || "Titre";
+      }
+
+      const image = card.querySelector("img");
+      if (image instanceof HTMLImageElement) {
+        const item =
+          findItemById(mediaId) || {
+            id: mediaId,
+            type: details.type === "tv" ? "tv" : "movie",
+            title: String(details.title || fallbackTitle || "Sans titre"),
+            poster: normalizeImageUrl(
+              details?.posters?.large || details?.posters?.small || details?.posters?.wallpaper || ""
+            ),
+            backdrop: normalizeImageUrl(
+              details?.posters?.wallpaper || details?.posters?.small || details?.posters?.large || ""
+            ),
+            isAnime: Boolean(details.isAnime),
+          };
+        setImageSourceSafely(
+          image,
+          resolveCardCover(item, details),
+          String(details.title || fallbackTitle || "Affiche"),
+          true
+        );
+      }
+    })
+    .catch(() => {
+      // best effort refresh only
+    });
+}
+
 function renderCalendarSection() {
   if (!refs.calendarSection || !refs.calendarMergedGrid) {
     return;
@@ -3126,6 +3176,9 @@ function renderCalendarSection() {
 
     if (hasDetails) {
       card.classList.add("clickable");
+      if (index < 28) {
+        hydrateCalendarCardFromDetails(card, detailId, String(entry.title || "Affiche"));
+      }
       card.addEventListener("click", (event) => {
         const target = event.target;
         if (target instanceof HTMLElement && target.closest("button, a")) {
