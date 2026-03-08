@@ -6121,11 +6121,12 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
   }
   state.sourceIndex = -1;
   renderPlayerSourceOptions();
+  const allowPremiumRescue = !(shouldUseNativeHls(refs.playerVideo) && isLikelyMobileDevice());
   try {
     await playFromSourcePoolWithRescue(resumeTime, token, {
       startIndex: 0,
       skipPremiumFallback: true,
-      allowPremiumRescue: true,
+      allowPremiumRescue,
     });
   } catch (firstError) {
     if (token !== state.playToken) {
@@ -6151,7 +6152,7 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
     await playFromSourcePoolWithRescue(resumeTime, token, {
       startIndex: 0,
       skipPremiumFallback: true,
-      allowPremiumRescue: true,
+      allowPremiumRescue,
     });
     showToast("Source film actualisee automatiquement.");
   }
@@ -6842,6 +6843,7 @@ async function trySwitchToNextSource() {
 
   const currentSource = state.sourcePool[state.sourceIndex] || null;
   const avoidPremiumAuto = !currentSource?.premiumHint;
+  const allowPremiumAutoFallback = AUTO_PREMIUM_FALLBACK && !(shouldUseNativeHls(refs.playerVideo) && isLikelyMobileDevice());
   const attemptedKeys = new Set();
   const currentKey = getSourceDedupKey(currentSource);
   if (currentKey) {
@@ -6849,7 +6851,7 @@ async function trySwitchToNextSource() {
   }
 
   let nextIndex = getNextAutomaticSourceIndex(state.sourceIndex, avoidPremiumAuto, attemptedKeys);
-  if (nextIndex < 0 && AUTO_PREMIUM_FALLBACK) {
+  if (nextIndex < 0 && allowPremiumAutoFallback) {
     nextIndex = getFallbackSourceIndex(state.sourceIndex, attemptedKeys);
   }
   if (nextIndex < 0 || nextIndex >= state.sourcePool.length) {
@@ -6858,7 +6860,7 @@ async function trySwitchToNextSource() {
       state.sourceRetryAttempts.clear();
       state.sourceIndex = -1;
       nextIndex = getNextAutomaticSourceIndex(-1, avoidPremiumAuto, attemptedKeys);
-      if (nextIndex < 0 && AUTO_PREMIUM_FALLBACK) {
+      if (nextIndex < 0 && allowPremiumAutoFallback) {
         nextIndex = getFallbackSourceIndex(-1, attemptedKeys);
       }
       showToast("Bascule automatique vers une autre langue/source.");
