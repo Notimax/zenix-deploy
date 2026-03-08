@@ -80,6 +80,13 @@ const RECENT_SEARCHES_LIMIT = 8;
 const SCROLL_RESTORE_MAX = 8000;
 const SLOW_NET_TYPES = new Set(["slow-2g", "2g", "3g"]);
 const NEW_RELEASE_DAYS = 45;
+const TOP_DAILY_LIMIT = 10;
+const TOP_DAILY_RECENCY_WINDOW_DAYS = 160;
+const TOP_DAILY_TYPE_CAPS = {
+  movie: 5,
+  tv: 4,
+  anime: 3,
+};
 const WATCH_HISTORY_MAX = 250;
 const WATCH_HISTORY_MAX_AGE_MS = 120 * 24 * 60 * 60 * 1000;
 const SOURCE_HOST_HEALTH_MAX = 140;
@@ -143,6 +150,7 @@ const state = {
   loadingTop: false,
   catalog: [],
   topDaily: [],
+  topDailyDayKey: "",
   activeHeroId: null,
   selectedDetailId: null,
   detailsCache: new Map(),
@@ -3520,17 +3528,20 @@ async function loadTopDaily() {
   state.loadingTop = true;
 
   try {
-    const payload = await fetchJson(`${API_BASE}/catalog/top-10-for-home`);
-    const rows = Array.isArray(payload?.data?.items) ? payload.data.items : [];
-    const mapped = rows.map(normalizeCatalogItem).filter(Boolean);
-    state.topDaily = mapped;
-    warmImageCacheFromPool(mapped, 40);
-    if (!state.activeHeroId && mapped[0]) {
-      state.activeHeroId = mapped[0].id;
+    const dayKey = getTopDailyDateKey();
+    const computed = buildTopFromCatalog(dayKey);
+    if (computed.length > 0) {
+      state.topDaily = computed;
+      state.topDailyDayKey = dayKey;
+    } else if (state.topDaily.length === 0) {
+      state.topDaily = buildTopFromCatalog(dayKey);
+      state.topDailyDayKey = dayKey;
+    }
+    warmImageCacheFromPool(state.topDaily, 40);
+    if (!state.activeHeroId && state.topDaily[0]) {
+      state.activeHeroId = state.topDaily[0].id;
     }
     updateSyncText();
-  } catch {
-    state.topDaily = buildTopFromCatalog();
   } finally {
     state.loadingTop = false;
   }
@@ -3675,11 +3686,184 @@ function normalizeCatalogItem(raw) {
   };
 }
 
-function buildTopFromCatalog() {
-  return state.catalog
-    .slice()
-    .sort((a, b) => parseReleaseDate(b.releaseDate) - parseReleaseDate(a.releaseDate))
-    .slice(0, 10);
+function getTopDailyDateKey(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function getTopDailySeed(dayKey = getTopDailyDateKey()) {
+  const numeric = Number(String(dayKey || "").replace(/\D+/g, "").slice(0, 8) || 0);
+  if (Number.isFinite(numeric) && numeric > 0) {
+    return numeric;
+  }
+  return Math.max(1, Math.trunc(Date.now() / (24 * 60 * 60 * 1000)));
+}
+
+function getTopDailyTypeCap(typeBucket) {
+  if (typeBucket === "anime") {
+    return TOP_DAILY_TYPE_CAPS.anime;
+  }
+  if (typeBucket === "tv") {
+    return TOP_DAILY_TYPE_CAPS.tv;
+  }
+  return TOP_DAILY_TYPE_CAPS.movie;
+}
+
+function computeTopDailyScore(item, daySeed, nowMs) {
+  if (!item) {
+    return Number.NEGATIVE_INFINITY;
+  }
+
+  const id = Number(item.id || 0);
+  if (id <= 0) {
+    return Number.NEGATIVE_INFINITY;
+  }
+
+  let score = 0;
+  const releaseTs = parseReleaseDate(item.releaseDate);
+  if (releaseTs > 0) {
+    const ageDays = (nowMs - releaseTs) / (24 * 60 * 60 * 1000);
+    if (ageDays >= 0) {
+      const freshness = Math.max(0, 1 - ageDays / TOP_DAILY_RECENCY_WINDOW_DAYS);
+      score += freshness * 120;
+      if (ageDays <= 14) {
+        score += 34;
+      } else if (ageDays <= 45) {
+        score += 18;
+      }
+    } else {
+      const daysUntil = Math.min(45, Math.max(0, -ageDays));
+      score += Math.max(6, 30 - daysUntil * 0.55);
+    }
+  } else {
+    score += 10;
+  }
+
+  if (isRecentlyReleased(item, NEW_RELEASE_DAYS + 20)) {
+    score += 12;
+  }
+
+  const typeBucket = getItemTypeBucket(item);
+  if (typeBucket === "anime") {
+    score += 18;
+  } else if (typeBucket === "tv") {
+    score += 15;
+  } else {
+    score += 12;
+  }
+
+  const rating = getUserRating(id);
+  if (rating > 0) {
+    score += 40;
+  } else if (rating < 0) {
+    score -= 52;
+  }
+
+  if (isFavorite(id)) {
+    score += 26;
+  }
+
+  const progress = state.progress?.[id];
+  if (progress) {
+    const age = Math.max(0, nowMs - Number(progress?.lastPlayed || 0));
+    const recency = Math.exp(-age / (28 * 24 * 60 * 60 * 1000));
+    const duration = Number(progress?.duration || 0);
+    const time = Number(progress?.time || 0);
+    const completion = duration > 0 ? Math.max(0, Math.min(1, time / duration)) : Math.min(1, time / 3600);
+    score += 22 + recency * 44 + completion * 24;
+    if (isItemMostlyWatched(item)) {
+      score -= 10;
+    }
+  }
+
+  const lang = normalizeLanguageLabel(item.languageHint || "");
+  if (lang === "VF" || lang === "MULTI") {
+    score += 7;
+  } else if (lang === "VOSTFR") {
+    score += 4;
+  }
+
+  const dayRoll = seededShuffleValue(id, daySeed);
+  const tieRoll = seededShuffleValue(id + 17, daySeed * 7);
+  score += dayRoll * 52 + (tieRoll - 0.5) * 18;
+  return score;
+}
+
+function buildTopFromCatalog(dayKey = getTopDailyDateKey()) {
+  const sourcePool = state.catalog.length > 0 ? state.catalog : FALLBACK_ITEMS;
+  if (!Array.isArray(sourcePool) || sourcePool.length === 0) {
+    return [];
+  }
+
+  const daySeed = getTopDailySeed(dayKey);
+  const nowMs = Date.now();
+  const scored = [];
+  sourcePool.forEach((item) => {
+    const id = Number(item?.id || 0);
+    if (id <= 0) {
+      return;
+    }
+    scored.push({
+      item,
+      score: computeTopDailyScore(item, daySeed, nowMs),
+    });
+  });
+
+  scored.sort((left, right) => {
+    const delta = Number(right.score || 0) - Number(left.score || 0);
+    if (Math.abs(delta) > 0.001) {
+      return delta;
+    }
+    const releaseDelta = parseReleaseDate(right.item?.releaseDate) - parseReleaseDate(left.item?.releaseDate);
+    if (releaseDelta !== 0) {
+      return releaseDelta;
+    }
+    return seededShuffleValue(right.item?.id || 0, daySeed) - seededShuffleValue(left.item?.id || 0, daySeed);
+  });
+
+  const picked = [];
+  const usedIds = new Set();
+  const typeCounts = {
+    movie: 0,
+    tv: 0,
+    anime: 0,
+  };
+
+  for (const entry of scored) {
+    const id = Number(entry?.item?.id || 0);
+    if (id <= 0 || usedIds.has(id)) {
+      continue;
+    }
+    const typeBucket = getItemTypeBucket(entry.item);
+    const cap = getTopDailyTypeCap(typeBucket);
+    if (Number(typeCounts[typeBucket] || 0) >= cap) {
+      continue;
+    }
+    picked.push(entry.item);
+    usedIds.add(id);
+    typeCounts[typeBucket] = Number(typeCounts[typeBucket] || 0) + 1;
+    if (picked.length >= TOP_DAILY_LIMIT) {
+      break;
+    }
+  }
+
+  if (picked.length < TOP_DAILY_LIMIT) {
+    for (const entry of scored) {
+      const id = Number(entry?.item?.id || 0);
+      if (id <= 0 || usedIds.has(id)) {
+        continue;
+      }
+      picked.push(entry.item);
+      usedIds.add(id);
+      if (picked.length >= TOP_DAILY_LIMIT) {
+        break;
+      }
+    }
+  }
+
+  return picked.slice(0, TOP_DAILY_LIMIT);
 }
 
 function renderAll() {
