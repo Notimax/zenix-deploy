@@ -92,6 +92,7 @@ const TOP_DAILY_TYPE_CAPS = {
   tv: 4,
   anime: 3,
 };
+const SUPPLEMENTAL_MEDIA_ID_MIN = 1500000000;
 const WATCH_HISTORY_MAX = 250;
 const WATCH_HISTORY_MAX_AGE_MS = 120 * 24 * 60 * 60 * 1000;
 const SOURCE_HOST_HEALTH_MAX = 140;
@@ -5818,6 +5819,10 @@ async function ensureDetails(id) {
     return state.detailsCache.get(mediaId) || null;
   }
   if (state.detailsMissing.has(mediaId)) {
+    return null;
+  }
+  if (mediaId >= SUPPLEMENTAL_MEDIA_ID_MIN) {
+    state.detailsMissing.add(mediaId);
     return null;
   }
 
