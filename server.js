@@ -98,6 +98,18 @@ const RENDEZVOUS_FETCH_HEADERS = {
   Referer: `${RENDEZVOUS_BASE}/`,
   "Accept-Language": DEFAULT_ACCEPT_LANGUAGE,
 };
+const SUPPLEMENTAL_CATALOG_CACHE_MS = Math.max(
+  60 * 1000,
+  Number(process.env.SUPPLEMENTAL_CATALOG_CACHE_MS || 20 * 60 * 1000)
+);
+const SUPPLEMENTAL_CATALOG_PAGE_SIZE = Math.max(
+  20,
+  toInt(process.env.SUPPLEMENTAL_CATALOG_PAGE_SIZE, 84, 20, 180)
+);
+const SUPPLEMENTAL_CALENDAR_LIMIT = Math.max(
+  20,
+  toInt(process.env.SUPPLEMENTAL_CALENDAR_LIMIT, 180, 20, 360)
+);
 const ANIME_PLANNING_URL = "https://anime-sama.tv/planning/";
 const ANIME_SAMA_BASE = "https://anime-sama.to";
 const ANIME_SAMA_SEARCH_ENDPOINT = `${ANIME_SAMA_BASE}/template-php/defaut/fetch.php`;
@@ -206,6 +218,11 @@ const rendezvousStaticCache = {
   loadedAt: 0,
   mtimeMs: 0,
   entries: [],
+};
+const supplementalCatalogCache = {
+  loadedAt: 0,
+  entries: [],
+  inFlight: null,
 };
 const analyticsClients = new Map();
 const analyticsEvents = [];
@@ -1077,6 +1094,65 @@ function parseYearFromText(value) {
   return year;
 }
 
+function toIsoDate(value) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return "";
+  }
+  const date = new Date(raw);
+  if (!Number.isFinite(date.getTime())) {
+    return "";
+  }
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(date.getUTCDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function buildSupplementalMediaId(prefix, rawKey) {
+  const safePrefix = String(prefix || "supp").trim().toLowerCase();
+  const safeKey = String(rawKey || "").trim();
+  if (!safeKey) {
+    return 0;
+  }
+  const hashHex = crypto
+    .createHash("sha1")
+    .update(`${safePrefix}:${safeKey}`)
+    .digest("hex")
+    .slice(0, 8);
+  const numeric = Number.parseInt(hashHex, 16);
+  if (!Number.isInteger(numeric) || numeric <= 0) {
+    return 0;
+  }
+  return 1_500_000_000 + (numeric % 400_000_000);
+}
+
+function parseSeasonEpisodeFromTitleText(value) {
+  const text = String(value || "").trim();
+  if (!text) {
+    return { title: "", season: 0, episode: 0, kind: "movie" };
+  }
+  const decoded = stripTags(text);
+  const withSpaces = decoded.replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
+  const tvMatch = withSpaces.match(
+    /^(?<title>.+?)\s+saison\s*(?<season>\d+)\s*episode\s*(?<episode>\d+)(?:\s+\d{4})?$/i
+  );
+  if (tvMatch) {
+    return {
+      title: String(tvMatch.groups?.title || "").trim(),
+      season: toInt(tvMatch.groups?.season, 0, 0, 500),
+      episode: toInt(tvMatch.groups?.episode, 0, 0, 50000),
+      kind: "tv",
+    };
+  }
+  return {
+    title: withSpaces,
+    season: 0,
+    episode: 0,
+    kind: "movie",
+  };
+}
+
 function sanitizePidoovTitleLabel(value) {
   let text = stripTags(value);
   if (!text) {
@@ -1404,6 +1480,7 @@ function loadRendezvousStaticEntries() {
             return {
               ...baseEntry,
               language: normalizedLanguage,
+              lastmod: toIsoDate(entry?.lastmod || entry?.updatedAt || ""),
               staticSources,
             };
           })
@@ -1882,6 +1959,34 @@ function parseXmlLocValues(xml) {
     }
   }
   return values;
+}
+
+function parseXmlLocRows(xml) {
+  const source = String(xml || "");
+  if (!source) {
+    return [];
+  }
+  const rows = [];
+  const regex = /<(?:url|sitemap)>([\s\S]*?)<\/(?:url|sitemap)>/gi;
+  let match = null;
+  while ((match = regex.exec(source)) !== null) {
+    const block = String(match[1] || "");
+    const locMatch = block.match(/<loc>([^<]+)<\/loc>/i);
+    const loc = String(locMatch?.[1] || "").trim();
+    if (!loc) {
+      continue;
+    }
+    const lastmodMatch = block.match(/<lastmod>([^<]+)<\/lastmod>/i);
+    const lastmod = String(lastmodMatch?.[1] || "").trim();
+    rows.push({
+      loc,
+      lastmod,
+    });
+  }
+  if (rows.length > 0) {
+    return rows;
+  }
+  return parseXmlLocValues(source).map((loc) => ({ loc, lastmod: "" }));
 }
 
 function parseNotariellesEpisodeUrlsFromHtml(html, baseUrl = `${NOTARIELLES_BASE}/`) {
@@ -2715,7 +2820,8 @@ async function loadRendezvousIndex(force = false) {
         RENDEZVOUS_FETCH_HEADERS
       );
       if (indexResponse.status >= 200 && indexResponse.status < 300) {
-        sitemapUrls = parseXmlLocValues(indexResponse.body)
+        sitemapUrls = parseXmlLocRows(indexResponse.body)
+          .map((entry) => String(entry?.loc || "").trim())
           .filter((entry) => {
             const parsed = parseSafeRemoteUrl(entry);
             return parsed && normalizeHostName(parsed.hostname) === RENDEZVOUS_HOST;
@@ -2726,6 +2832,7 @@ async function loadRendezvousIndex(force = false) {
       sitemapUrls = [];
     }
 
+    const lastmodByPageUrl = new Map();
     const sitemapRows =
       sitemapUrls.length > 0
         ? await mapWithConcurrency(
@@ -2741,7 +2848,7 @@ async function loadRendezvousIndex(force = false) {
                 if (response.status < 200 || response.status >= 300) {
                   return [];
                 }
-                return parseXmlLocValues(response.body);
+                return parseXmlLocRows(response.body);
               } catch {
                 return [];
               }
@@ -2752,11 +2859,13 @@ async function loadRendezvousIndex(force = false) {
     const dedupe = new Map();
     const sitemapPageCandidates = [];
     const sitemapPageSeen = new Set();
-    sitemapRows.forEach((values) => {
-      if (!Array.isArray(values)) {
+    sitemapRows.forEach((rows) => {
+      if (!Array.isArray(rows)) {
         return;
       }
-      values.forEach((url) => {
+      rows.forEach((row) => {
+        const url = String(row?.loc || row || "").trim();
+        const lastmod = toIsoDate(row?.lastmod || "");
         const normalizedPath = normalizeRendezvousPath(url);
         if (normalizedPath && /\/page\/\d+\/?$/i.test(normalizedPath)) {
           const pageUrl = `${RENDEZVOUS_BASE}${normalizedPath}`;
@@ -2770,8 +2879,14 @@ async function loadRendezvousIndex(force = false) {
 
         const entry = parseRendezvousEntryFromUrl(url);
         const key = String(entry?.pageUrl || "").trim();
+        if (key && lastmod && !lastmodByPageUrl.has(key)) {
+          lastmodByPageUrl.set(key, lastmod);
+        }
         if (entry && key && !dedupe.has(key)) {
-          dedupe.set(key, entry);
+          dedupe.set(key, {
+            ...entry,
+            lastmod,
+          });
         }
       });
     });
@@ -2800,7 +2915,10 @@ async function loadRendezvousIndex(force = false) {
       if (!key || dedupe.has(key)) {
         return;
       }
-      dedupe.set(key, entry);
+      dedupe.set(key, {
+        ...entry,
+        lastmod: String(lastmodByPageUrl.get(key) || ""),
+      });
     });
 
     const staticEntries = loadRendezvousStaticEntries();
@@ -2809,7 +2927,10 @@ async function loadRendezvousIndex(force = false) {
       if (!key || dedupe.has(key)) {
         return;
       }
-      dedupe.set(key, entry);
+      dedupe.set(key, {
+        ...entry,
+        lastmod: String(entry?.lastmod || lastmodByPageUrl.get(key) || ""),
+      });
     });
 
     const entries = Array.from(dedupe.values());
@@ -3161,6 +3282,426 @@ async function resolveRendezvousSourcesByTitle(title, options = {}) {
   return merged;
 }
 
+function normalizeSupplementalMediaType(value) {
+  return String(value || "").toLowerCase() === "tv" ? "tv" : "movie";
+}
+
+function buildSupplementalSemanticKey(entry) {
+  const titleKey = normalizeTitleKey(entry?.titleKey || entry?.title || "");
+  const mediaType = normalizeSupplementalMediaType(entry?.type || entry?.mediaType || "");
+  const year = toInt(entry?.year, 0, 0, 2099);
+  const season = mediaType === "tv" ? toInt(entry?.season, 0, 0, 500) : 0;
+  const episode = mediaType === "tv" ? toInt(entry?.episode, 0, 0, 50000) : 0;
+  return `${titleKey}::${mediaType}::${year}::${season}::${episode}`;
+}
+
+function toSupplementalReleaseDate(entry) {
+  const fromLastmod = toIsoDate(entry?.lastmod || entry?.updatedAt || "");
+  if (fromLastmod) {
+    return fromLastmod;
+  }
+  const year = toInt(entry?.year, 0, 0, 2099);
+  if (year > 0) {
+    return `${year}-01-01`;
+  }
+  return "";
+}
+
+function scoreSupplementalCandidate(entry) {
+  if (!entry) {
+    return -9999;
+  }
+  let score = 0;
+  const language = normalizePidoovLanguage(entry?.language || "") || "VF";
+  if (language === "VF") {
+    score += 40;
+  } else if (language === "MULTI") {
+    score += 30;
+  } else if (language === "VOSTFR") {
+    score += 24;
+  } else {
+    score += 8;
+  }
+  const provider = String(entry.provider || "").trim().toLowerCase();
+  if (provider === "pidoov") {
+    score += 14;
+  } else if (provider === "rendezvous") {
+    score += 12;
+  }
+  const releaseDate = toSupplementalReleaseDate(entry);
+  if (releaseDate) {
+    score += 16;
+  }
+  if (String(entry?.detailUrl || entry?.pageUrl || "").trim()) {
+    score += 8;
+  }
+  if (normalizeSupplementalMediaType(entry?.type || entry?.mediaType || "") === "tv") {
+    const season = toInt(entry?.season, 0, 0, 500);
+    const episode = toInt(entry?.episode, 0, 0, 50000);
+    if (season > 0 && episode > 0) {
+      score += 12;
+    }
+  }
+  return score;
+}
+
+function sanitizeSupplementalTitle(value) {
+  const parsed = parseSeasonEpisodeFromTitleText(value);
+  const title = String(parsed?.title || "").trim();
+  return title || String(value || "").trim();
+}
+
+function buildPidoovSupplementalCandidates(entries, providerLabel = "Pidoov", isStatic = false) {
+  const rows = [];
+  const list = Array.isArray(entries) ? entries : [];
+  list.forEach((entry) => {
+    const detailPath = normalizePidoovPath(entry?.detailPath || "");
+    const titleRaw = sanitizeSupplementalTitle(entry?.title || entry?.label || "");
+    if (!titleRaw) {
+      return;
+    }
+    const parsed = parseSeasonEpisodeFromTitleText(titleRaw);
+    const title = String(parsed.title || titleRaw).trim();
+    const titleKey = normalizeTitleKey(title);
+    if (!titleKey) {
+      return;
+    }
+    const mediaType = parsed.kind === "tv" ? "tv" : "movie";
+    const season = mediaType === "tv" ? toInt(parsed.season, 0, 0, 500) : 0;
+    const episode = mediaType === "tv" ? toInt(parsed.episode, 0, 0, 50000) : 0;
+    const year = toInt(entry?.year || parseYearFromText(entry?.label || titleRaw), 0, 0, 2099);
+    const language = normalizePidoovLanguage(entry?.language || entry?.label || "") || "VF";
+    const detailUrl = detailPath ? `${PIDOOV_BASE}${detailPath}` : "";
+    const rawKey = detailPath || `${titleKey}:${year}:${season}:${episode}:${language}`;
+
+    rows.push({
+      provider: "pidoov",
+      providerLabel,
+      isStatic: Boolean(isStatic),
+      rawKey,
+      title,
+      titleKey,
+      type: mediaType,
+      year,
+      season,
+      episode,
+      language,
+      detailUrl,
+      pageUrl: detailUrl,
+      lastmod: "",
+    });
+  });
+  return rows;
+}
+
+function buildRendezvousSupplementalCandidates(entries, providerLabel = "Rendezvous", isStatic = false) {
+  const rows = [];
+  const list = Array.isArray(entries) ? entries : [];
+  list.forEach((entry) => {
+    const pageUrl = String(entry?.pageUrl || "").trim();
+    const parsedUrl = parseSafeRemoteUrl(pageUrl);
+    if (!parsedUrl || normalizeHostName(parsedUrl.hostname) !== RENDEZVOUS_HOST) {
+      return;
+    }
+
+    const titleRaw = sanitizeSupplementalTitle(entry?.title || "");
+    if (!titleRaw) {
+      return;
+    }
+    const titleKey = normalizeTitleKey(titleRaw);
+    if (!titleKey) {
+      return;
+    }
+
+    const mediaType = normalizeSupplementalMediaType(entry?.mediaType || entry?.type || "movie");
+    const season = mediaType === "tv" ? toInt(entry?.season, 0, 0, 500) : 0;
+    const episode = mediaType === "tv" ? toInt(entry?.episode, 0, 0, 50000) : 0;
+    const year = toInt(entry?.year, 0, 0, 2099);
+    const language = normalizePidoovLanguage(entry?.language || "") || "VF";
+
+    rows.push({
+      provider: "rendezvous",
+      providerLabel,
+      isStatic: Boolean(isStatic),
+      rawKey: pageUrl || `${titleKey}:${year}:${season}:${episode}:${language}`,
+      title: titleRaw,
+      titleKey,
+      type: mediaType,
+      year,
+      season,
+      episode,
+      language,
+      detailUrl: pageUrl,
+      pageUrl,
+      lastmod: toIsoDate(entry?.lastmod || ""),
+    });
+  });
+  return rows;
+}
+
+function chooseBestSupplementalCandidate(current, next) {
+  if (!current) {
+    return next;
+  }
+  if (!next) {
+    return current;
+  }
+  const currentScore = scoreSupplementalCandidate(current);
+  const nextScore = scoreSupplementalCandidate(next);
+  if (nextScore > currentScore) {
+    return next;
+  }
+  if (nextScore < currentScore) {
+    return current;
+  }
+  const currentDate = Date.parse(toSupplementalReleaseDate(current) || "");
+  const nextDate = Date.parse(toSupplementalReleaseDate(next) || "");
+  const currentSafeDate = Number.isFinite(currentDate) ? currentDate : 0;
+  const nextSafeDate = Number.isFinite(nextDate) ? nextDate : 0;
+  if (nextSafeDate > currentSafeDate) {
+    return next;
+  }
+  return current;
+}
+
+function mapSupplementalCandidateToCatalogRow(entry, fallbackIdSet) {
+  const mediaType = normalizeSupplementalMediaType(entry?.type || entry?.mediaType || "");
+  const title = String(entry?.title || "").trim();
+  const titleKey = normalizeTitleKey(title);
+  if (!title || !titleKey) {
+    return null;
+  }
+
+  const language = normalizePidoovLanguage(entry?.language || "") || "VF";
+  const year = toInt(entry?.year, 0, 0, 2099);
+  const season = mediaType === "tv" ? toInt(entry?.season, 0, 0, 500) : 0;
+  const episode = mediaType === "tv" ? toInt(entry?.episode, 0, 0, 50000) : 0;
+  const releaseDate = toSupplementalReleaseDate(entry);
+  const rawKey = String(entry?.rawKey || `${titleKey}:${mediaType}:${year}:${season}:${episode}`).trim();
+
+  let id = buildSupplementalMediaId(entry?.provider || "supp", rawKey);
+  if (id <= 0) {
+    return null;
+  }
+  const reserved = fallbackIdSet instanceof Set ? fallbackIdSet : new Set();
+  while (reserved.has(id)) {
+    id += 1;
+  }
+  reserved.add(id);
+
+  return {
+    id,
+    type: mediaType === "tv" ? "tv" : "movie",
+    title,
+    isAnime: false,
+    runtime: null,
+    release_date: releaseDate || null,
+    end_date: null,
+    lang: language,
+    language,
+    small_poster_path: "",
+    large_poster_path: "",
+    wallpaper_poster_path: "",
+    external_provider: String(entry?.provider || "").trim(),
+    external_key: rawKey,
+    external_year: year,
+    external_season: season,
+    external_episode: episode,
+    external_language: language,
+    external_detail_url: String(entry?.detailUrl || entry?.pageUrl || "").trim(),
+    external_label: String(entry?.providerLabel || "").trim(),
+    supplemental_rank: scoreSupplementalCandidate(entry),
+    supplemental_date: releaseDate || "",
+    title_key: titleKey,
+  };
+}
+
+async function loadSupplementalCatalogEntries(force = false) {
+  const now = Date.now();
+  if (
+    !force &&
+    supplementalCatalogCache.loadedAt > 0 &&
+    now - supplementalCatalogCache.loadedAt < SUPPLEMENTAL_CATALOG_CACHE_MS &&
+    Array.isArray(supplementalCatalogCache.entries) &&
+    supplementalCatalogCache.entries.length > 0
+  ) {
+    return supplementalCatalogCache.entries;
+  }
+  if (supplementalCatalogCache.inFlight) {
+    return supplementalCatalogCache.inFlight;
+  }
+
+  const task = (async () => {
+    const [pidoovDynamicResult, rendezvousDynamicResult] = await Promise.allSettled([
+      loadPidoovIndex(false),
+      loadRendezvousIndex(false),
+    ]);
+    const pidoovStatic = loadPidoovStaticEntries();
+    const rendezvousStatic = loadRendezvousStaticEntries();
+
+    const pidoovDynamic =
+      pidoovDynamicResult.status === "fulfilled" && Array.isArray(pidoovDynamicResult.value)
+        ? pidoovDynamicResult.value
+        : [];
+    const rendezvousDynamic =
+      rendezvousDynamicResult.status === "fulfilled" && Array.isArray(rendezvousDynamicResult.value)
+        ? rendezvousDynamicResult.value
+        : [];
+
+    const candidates = []
+      .concat(buildPidoovSupplementalCandidates(pidoovDynamic, "Pidoov", false))
+      .concat(buildPidoovSupplementalCandidates(pidoovStatic, "Pidoov", true))
+      .concat(buildRendezvousSupplementalCandidates(rendezvousDynamic, "Rendezvous", false))
+      .concat(buildRendezvousSupplementalCandidates(rendezvousStatic, "Rendezvous", true));
+
+    const bySemantic = new Map();
+    candidates.forEach((candidate) => {
+      const key = buildSupplementalSemanticKey(candidate);
+      if (!key || key.startsWith("::")) {
+        return;
+      }
+      const current = bySemantic.get(key);
+      bySemantic.set(key, chooseBestSupplementalCandidate(current, candidate));
+    });
+
+    const reservedIds = new Set();
+    const rows = Array.from(bySemantic.values())
+      .map((entry) => mapSupplementalCandidateToCatalogRow(entry, reservedIds))
+      .filter(Boolean);
+
+    rows.sort((left, right) => {
+      const leftRank = Number(left?.supplemental_rank || 0);
+      const rightRank = Number(right?.supplemental_rank || 0);
+      if (leftRank !== rightRank) {
+        return rightRank - leftRank;
+      }
+      const leftDate = Date.parse(String(left?.supplemental_date || left?.release_date || ""));
+      const rightDate = Date.parse(String(right?.supplemental_date || right?.release_date || ""));
+      const leftSafeDate = Number.isFinite(leftDate) ? leftDate : 0;
+      const rightSafeDate = Number.isFinite(rightDate) ? rightDate : 0;
+      if (leftSafeDate !== rightSafeDate) {
+        return rightSafeDate - leftSafeDate;
+      }
+      return String(left?.title || "").localeCompare(String(right?.title || ""), "fr", {
+        sensitivity: "base",
+      });
+    });
+
+    supplementalCatalogCache.entries = rows;
+    supplementalCatalogCache.loadedAt = Date.now();
+    return supplementalCatalogCache.entries;
+  })();
+
+  supplementalCatalogCache.inFlight = task;
+  try {
+    return await task;
+  } catch (error) {
+    if (Array.isArray(supplementalCatalogCache.entries) && supplementalCatalogCache.entries.length > 0) {
+      return supplementalCatalogCache.entries;
+    }
+    throw error;
+  } finally {
+    supplementalCatalogCache.inFlight = null;
+  }
+}
+
+function buildSupplementalCatalogPage(entries, page = 1, pageSize = SUPPLEMENTAL_CATALOG_PAGE_SIZE) {
+  const rows = Array.isArray(entries) ? entries : [];
+  const safePageSize = Math.max(1, Number(pageSize || SUPPLEMENTAL_CATALOG_PAGE_SIZE));
+  const total = rows.length;
+  const lastPage = Math.max(1, Math.ceil(total / safePageSize));
+  const safePage = Math.max(1, Number(page || 1));
+  if (safePage > lastPage) {
+    return {
+      data: [],
+      current_page: safePage,
+      last_page: lastPage,
+      per_page: safePageSize,
+      total,
+    };
+  }
+  const start = (safePage - 1) * safePageSize;
+  const data = rows.slice(start, start + safePageSize);
+  return {
+    data,
+    current_page: safePage,
+    last_page: lastPage,
+    per_page: safePageSize,
+    total,
+  };
+}
+
+function buildSupplementalCalendarItems(entries, month, year, limit = SUPPLEMENTAL_CALENDAR_LIMIT) {
+  const safeMonth = toInt(month, 1, 1, 12);
+  const safeYear = toInt(year, new Date().getFullYear(), 2000, 2099);
+  const rows = Array.isArray(entries) ? entries : [];
+  const mapped = [];
+
+  rows.forEach((entry) => {
+    const dateIsoRaw = String(entry?.supplemental_date || entry?.release_date || "").trim();
+    const dateIso = toIsoDate(dateIsoRaw);
+    if (!dateIso) {
+      return;
+    }
+    const match = dateIso.match(/^(?<y>\d{4})-(?<m>\d{2})-(?<d>\d{2})$/);
+    if (!match) {
+      return;
+    }
+    const itemYear = Number(match.groups?.y || 0);
+    const itemMonth = Number(match.groups?.m || 0);
+    const itemDay = Number(match.groups?.d || 0);
+    if (itemYear !== safeYear || itemMonth !== safeMonth || itemDay <= 0) {
+      return;
+    }
+
+    const provider = String(entry?.external_provider || "").trim().toLowerCase();
+    const type = String(entry?.type || "").toLowerCase() === "tv" ? "serie" : "film";
+    mapped.push({
+      source: provider || "provider",
+      key: `supp-${provider}-${entry.id}-${dateIso}`,
+      dateIso,
+      dayNumber: itemDay,
+      mediaId: Number(entry?.id || 0),
+      title: String(entry?.title || "").trim() || "Sans titre",
+      type,
+      poster: "",
+      backdrop: "",
+      season: Number(entry?.external_season || 0),
+      episode: Number(entry?.external_episode || 0),
+      supplemental: String(entry?.external_label || provider || "Provider"),
+      categories: [],
+      url: String(entry?.external_detail_url || "").trim(),
+      languageHint: String(entry?.external_language || entry?.language || "").trim(),
+      hasDetails: false,
+      provider: provider || "provider",
+    });
+  });
+
+  mapped.sort((left, right) => {
+    const dayDiff = Number(left?.dayNumber || 0) - Number(right?.dayNumber || 0);
+    if (dayDiff !== 0) {
+      return dayDiff;
+    }
+    const leftTitle = String(left?.title || "");
+    const rightTitle = String(right?.title || "");
+    return leftTitle.localeCompare(rightTitle, "fr", { sensitivity: "base" });
+  });
+
+  const dedupe = new Set();
+  const unique = [];
+  mapped.forEach((entry) => {
+    const semantic = `${normalizeTitleKey(entry.title)}::${entry.type}::${entry.dateIso}::${Number(entry.season || 0)}::${Number(
+      entry.episode || 0
+    )}`;
+    if (!semantic || dedupe.has(semantic)) {
+      return;
+    }
+    dedupe.add(semantic);
+    unique.push(entry);
+  });
+  return unique.slice(0, Math.max(1, Number(limit || SUPPLEMENTAL_CALENDAR_LIMIT)));
+}
+
 function isTruthyFlag(value) {
   if (value === true || value === 1) {
     return true;
@@ -3362,7 +3903,7 @@ function parseAnimePlanning(html, fallbackYear) {
   };
 }
 
-function buildMergedCalendar(purstreamItems, animeItems) {
+function buildMergedCalendar(purstreamItems, animeItems, supplementalItems = []) {
   const dedupe = new Map();
   const pushMerged = (entry) => {
     const normalizedTitle = normalizeTitleKey(entry?.title || "");
@@ -3392,6 +3933,12 @@ function buildMergedCalendar(purstreamItems, animeItems) {
   };
 
   purstreamItems.forEach((entry) => {
+    pushMerged({
+      ...entry,
+      kind: entry.type,
+    });
+  });
+  supplementalItems.forEach((entry) => {
     pushMerged({
       ...entry,
       kind: entry.type,
@@ -4773,9 +5320,10 @@ async function handleCalendarOverview(req, res, requestUrl) {
   }
 
   try {
-    const [purstreamResult, animeResult] = await Promise.allSettled([
+    const [purstreamResult, animeResult, supplementalResult] = await Promise.allSettled([
       fetchPurstreamCalendarMonth(month, year),
       fetchAnimePlanningPage(),
+      loadSupplementalCatalogEntries(false),
     ]);
 
     let purstream = {
@@ -4786,6 +5334,9 @@ async function handleCalendarOverview(req, res, requestUrl) {
     };
     let anime = {
       days: [],
+      items: [],
+    };
+    let supplemental = {
       items: [],
     };
 
@@ -4813,12 +5364,24 @@ async function handleCalendarOverview(req, res, requestUrl) {
       }
     }
 
-    if (purstream.items.length === 0 && anime.items.length === 0) {
+    if (supplementalResult.status === "fulfilled") {
+      try {
+        supplemental = {
+          items: buildSupplementalCalendarItems(supplementalResult.value, month, year),
+        };
+      } catch {
+        supplemental = {
+          items: [],
+        };
+      }
+    }
+
+    if (purstream.items.length === 0 && anime.items.length === 0 && supplemental.items.length === 0) {
       sendJson(res, 502, { error: "Calendar providers unavailable" });
       return true;
     }
 
-    const merged = buildMergedCalendar(purstream.items, anime.items);
+    const merged = buildMergedCalendar(purstream.items, anime.items, supplemental.items);
 
     const payload = {
       apiVersion: "zenix-calendar-v1",
@@ -4839,15 +5402,22 @@ async function handleCalendarOverview(req, res, requestUrl) {
           days: anime.days,
           items: anime.items,
         },
+        supplemental: {
+          count: supplemental.items.length,
+          items: supplemental.items,
+        },
         mergedCount: merged.length,
         merged,
         sourceLinks: {
           purstream: `${PURSTREAM_WEB_BASE}/calendar`,
           animeSama: ANIME_PLANNING_URL,
+          pidoov: PIDOOV_BASE,
+          rendezvous: RENDEZVOUS_BASE,
         },
         providerStatus: {
           catalog: purstreamResult.status === "fulfilled",
           anime: animeResult.status === "fulfilled",
+          supplemental: supplementalResult.status === "fulfilled",
         },
       },
     };
@@ -4866,6 +5436,48 @@ async function handleCalendarOverview(req, res, requestUrl) {
     return true;
   } catch {
     sendJson(res, 502, { error: "Calendar providers unavailable" });
+    return true;
+  }
+}
+
+async function handleCatalogSupplemental(req, res, requestUrl) {
+  if (requestUrl.pathname !== "/api/catalog/supplemental") {
+    return false;
+  }
+  if (req.method !== "GET") {
+    sendJson(res, 405, { error: "Method Not Allowed" });
+    return true;
+  }
+
+  const page = toInt(requestUrl.searchParams.get("page"), 1, 1, 99999);
+  const perPage = toInt(
+    requestUrl.searchParams.get("perPage"),
+    SUPPLEMENTAL_CATALOG_PAGE_SIZE,
+    20,
+    SUPPLEMENTAL_CATALOG_PAGE_SIZE
+  );
+
+  try {
+    const entries = await loadSupplementalCatalogEntries(false);
+    const pageData = buildSupplementalCatalogPage(entries, page, perPage);
+    sendJson(res, 200, {
+      apiVersion: "zenix-supplemental-catalog-v1",
+      type: "success",
+      data: {
+        generatedAt: new Date().toISOString(),
+        items: pageData,
+        providers: {
+          pidoov: PIDOOV_BASE,
+          rendezvous: RENDEZVOUS_BASE,
+        },
+      },
+    });
+    return true;
+  } catch (error) {
+    sendJson(res, 502, {
+      error: "Supplemental catalog unavailable",
+      reason: sanitizeToken(String(error?.message || ""), 120),
+    });
     return true;
   }
 }
@@ -5286,6 +5898,12 @@ const server = http.createServer((req, res) => {
     })
     .then((handledCalendar) => {
       if (handledCalendar) {
+        return true;
+      }
+      return handleCatalogSupplemental(req, res, requestUrl);
+    })
+    .then((handledSupplementalCatalog) => {
+      if (handledSupplementalCatalog) {
         return true;
       }
       return handleHlsProxy(req, res, requestUrl);

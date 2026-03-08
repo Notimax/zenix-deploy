@@ -122,3 +122,18 @@ RENDEZVOUS INTEGRATION (MOVIES + SERIES FALLBACK)
   - `RENDEZVOUS_FETCH_CONCURRENCY`
   - `RENDEZVOUS_MAX_MATCH_CANDIDATES`
   - `RENDEZVOUS_STATIC_SOURCES_FILE`
+
+MULTI-PROVIDER CATALOG + CALENDAR FUSION
+- New backend endpoint: `/api/catalog/supplemental`
+  - exposes normalized catalog rows from owned external providers (currently Pidoov + Rendezvous).
+  - page-compatible structure with `current_page`, `last_page`, `data`.
+- Frontend catalog sync now merges:
+  - Purstream catalog page + supplemental provider page
+  - semantic dedupe (`title + type + year + season + episode`) to avoid duplicates across providers.
+- Calendar overview now merges supplemental provider entries too:
+  - `/api/calendar/overview` includes `data.supplemental` block and `providerStatus.supplemental`.
+  - merged stream is now: Purstream + supplemental providers + Anime planning.
+- Supplemental tuning keys:
+  - `SUPPLEMENTAL_CATALOG_CACHE_MS`
+  - `SUPPLEMENTAL_CATALOG_PAGE_SIZE`
+  - `SUPPLEMENTAL_CALENDAR_LIMIT`

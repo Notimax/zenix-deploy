@@ -72,6 +72,18 @@ Last update: 2026-03-08
     - `RENDEZVOUS_FETCH_CONCURRENCY`
     - `RENDEZVOUS_MAX_MATCH_CANDIDATES`
     - `RENDEZVOUS_STATIC_SOURCES_FILE`
+- Multi-provider catalog/calendar fusion added:
+  - Backend endpoint `/api/catalog/supplemental` exposes normalized provider entries
+    (currently Pidoov + Rendezvous) with pagination.
+  - Frontend catalog sync merges Purstream + supplemental entries on each page.
+  - Semantic dedupe now prevents duplicates across providers using
+    `title + mediaType + year + season + episode`.
+  - Calendar overview (`/api/calendar/overview`) now includes `supplemental` items and provider status.
+  - Supplemental entries are integrated in merged calendar without perturbing existing anime/purstream flows.
+  - Tuning keys:
+    - `SUPPLEMENTAL_CATALOG_CACHE_MS`
+    - `SUPPLEMENTAL_CATALOG_PAGE_SIZE`
+    - `SUPPLEMENTAL_CALENDAR_LIMIT`
 
 ## Mobile robustness
 - Startup splash must never block app forever.

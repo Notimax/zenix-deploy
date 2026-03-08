@@ -59,6 +59,7 @@ const ZENIX_OWNED_SOURCE_TIMEOUT_MS = 7000;
 const PIDOOV_SOURCE_TIMEOUT_MS = 14000;
 const NOTARIELLES_SOURCE_TIMEOUT_MS = 14000;
 const RENDEZVOUS_SOURCE_TIMEOUT_MS = 14000;
+const SUPPLEMENTAL_CATALOG_TIMEOUT_MS = 14000;
 const EPISODE_SOON_VERIFY_TTL_MS = 3 * 60 * 1000;
 const EPISODE_SOON_VERIFY_LIMIT = 40;
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
@@ -152,6 +153,7 @@ const state = {
   page: 0,
   totalPages: 0,
   catalogSyncPage: 0,
+  supplementalLastPage: Number.POSITIVE_INFINITY,
   hasMore: true,
   loadingCatalog: false,
   backgroundSyncRunning: false,
@@ -3229,7 +3231,9 @@ function renderCalendarSection() {
   if (mergedRows.length === 0) {
     const providerStatus = state.calendarData?.providerStatus || {};
     let sourceHint =
-      providerStatus.catalog === false && providerStatus.anime === false
+      providerStatus.catalog === false &&
+      providerStatus.anime === false &&
+      providerStatus.supplemental === false
         ? "Sources calendrier temporairement indisponibles."
         : "Aucune sortie fusionnee pour cette periode.";
     if (query) {
@@ -3622,6 +3626,7 @@ function applyCatalogSnapshot(snapshot) {
   state.page = Math.max(1, Number(snapshot.page || 1));
   state.totalPages = Math.max(state.page, Number(snapshot.totalPages || state.page || 1));
   state.catalogSyncPage = Math.max(1, Number(snapshot.catalogSyncPage || state.page || 1));
+  state.supplementalLastPage = Number(snapshot.supplementalLastPage || Number.POSITIVE_INFINITY);
   state.hasMore = Boolean(snapshot.hasMore);
   state.lastSyncAt = new Date(Number(snapshot.savedAt || Date.now()));
   return true;
@@ -3649,6 +3654,7 @@ async function loadInitialCatalog() {
     state.page = 0;
     state.totalPages = 0;
     state.catalogSyncPage = 0;
+    state.supplementalLastPage = Number.POSITIVE_INFINITY;
     state.hasMore = true;
     upsertCatalogItems(firstResult.items, { prepend: false });
     state.page = firstResult.currentPage;
@@ -3901,6 +3907,13 @@ async function handleRemoteSearch(token, signal) {
 
 function upsertCatalogItems(items, { prepend }) {
   const map = new Map(state.catalog.map((item) => [item.id, item]));
+  const semanticToId = new Map();
+  state.catalog.forEach((entry) => {
+    const semantic = getCatalogSemanticKey(entry);
+    if (semantic && !semanticToId.has(semantic)) {
+      semanticToId.set(semantic, entry.id);
+    }
+  });
   const incoming = [];
 
   for (const raw of items) {
@@ -3911,9 +3924,27 @@ function upsertCatalogItems(items, { prepend }) {
 
     if (map.has(item.id)) {
       map.set(item.id, { ...map.get(item.id), ...item });
-    } else {
-      incoming.push(item);
-      map.set(item.id, item);
+      const semantic = getCatalogSemanticKey(item);
+      if (semantic && !semanticToId.has(semantic)) {
+        semanticToId.set(semantic, item.id);
+      }
+      continue;
+    }
+
+    const semantic = getCatalogSemanticKey(item);
+    if (semantic && semanticToId.has(semantic)) {
+      const targetId = semanticToId.get(semantic);
+      const existing = map.get(targetId);
+      if (existing) {
+        map.set(targetId, mergeCatalogSemanticItem(existing, item));
+        continue;
+      }
+    }
+
+    incoming.push(item);
+    map.set(item.id, item);
+    if (semantic && !semanticToId.has(semantic)) {
+      semanticToId.set(semantic, item.id);
     }
   }
 
@@ -3927,13 +3958,91 @@ function upsertCatalogItems(items, { prepend }) {
   state.catalog = merged;
 }
 
+function getCatalogSemanticKey(item) {
+  if (!item) {
+    return "";
+  }
+  const titleKey = normalizeTitleKey(item.title || item.titleKey || "");
+  if (!titleKey) {
+    return "";
+  }
+  const mediaType = item.type === "tv" ? "tv" : "movie";
+  const releaseYear = Number.parseInt(getYear(item.releaseDate || ""), 10);
+  const externalYear = Number(item.externalYear || 0);
+  const year = externalYear > 0 ? externalYear : Number.isFinite(releaseYear) ? releaseYear : 0;
+  const season = mediaType === "tv" ? Math.max(0, Number(item.externalSeason || 0)) : 0;
+  const episode = mediaType === "tv" ? Math.max(0, Number(item.externalEpisode || 0)) : 0;
+  return `${titleKey}::${mediaType}::${year}::${season}::${episode}`;
+}
+
+function getCatalogItemQualityScore(item) {
+  if (!item) {
+    return -9999;
+  }
+  let score = 0;
+  if (String(item.poster || "").trim()) {
+    score += 40;
+  }
+  if (String(item.backdrop || "").trim()) {
+    score += 18;
+  }
+  if (String(item.releaseDate || "").trim()) {
+    score += 14;
+  }
+  if (Number(item.runtime || 0) > 0) {
+    score += 6;
+  }
+  if (!item.isExternal) {
+    score += 20;
+  }
+  const lang = normalizeLanguageLabel(item.externalLanguage || item.languageHint || "");
+  if (lang === "VF") {
+    score += 12;
+  } else if (lang === "MULTI") {
+    score += 9;
+  } else if (lang === "VOSTFR") {
+    score += 6;
+  }
+  return score;
+}
+
+function mergeCatalogSemanticItem(existing, incoming) {
+  const keepExisting = getCatalogItemQualityScore(existing) >= getCatalogItemQualityScore(incoming);
+  const base = keepExisting ? { ...incoming, ...existing } : { ...existing, ...incoming };
+  base.id = Number(existing?.id || incoming?.id || 0);
+  base.poster = String(base.poster || existing?.poster || incoming?.poster || "").trim();
+  base.backdrop = String(base.backdrop || existing?.backdrop || incoming?.backdrop || "").trim();
+  base.releaseDate = base.releaseDate || existing?.releaseDate || incoming?.releaseDate || null;
+  base.languageHint = normalizeLanguageLabel(base.languageHint || existing?.languageHint || incoming?.languageHint || "");
+  if (!base.externalProvider) {
+    base.isExternal = false;
+  }
+  return base;
+}
+
 async function fetchCatalogPage(page) {
-  const payload = await fetchJson(`${API_BASE}/catalog/movies?page=${page}`);
+  const shouldFetchSupplemental = Number(page || 1) <= Number(state.supplementalLastPage || Number.POSITIVE_INFINITY);
+  const [payload, supplementalPayload] = await Promise.all([
+    fetchJson(`${API_BASE}/catalog/movies?page=${page}`),
+    shouldFetchSupplemental
+      ? fetchJson(`${API_BASE}/catalog/supplemental?page=${page}&perPage=84`, {
+          timeoutMs: SUPPLEMENTAL_CATALOG_TIMEOUT_MS,
+          retryDelays: [400, 950],
+        }).catch(() => null)
+      : Promise.resolve(null),
+  ]);
   const items = payload?.data?.items || {};
   const rows = Array.isArray(items.data) ? items.data : [];
+  const supplementalLastPage = Number(supplementalPayload?.data?.items?.last_page || 0);
+  if (supplementalLastPage > 0) {
+    state.supplementalLastPage = supplementalLastPage;
+  }
+  const supplementalRows = Array.isArray(supplementalPayload?.data?.items?.data)
+    ? supplementalPayload.data.items.data
+    : [];
 
   return {
-    items: rows.map(normalizeCatalogItem).filter(Boolean),
+    items: rows.concat(supplementalRows).map(normalizeCatalogItem).filter(Boolean),
     currentPage: Number(items.current_page || page),
     lastPage: Number(items.last_page || page),
   };
@@ -3953,6 +4062,15 @@ function normalizeCatalogItem(raw) {
 
   const title = String(raw?.title || "Sans titre");
   const languageHint = normalizeLanguageLabel(raw?.lang || raw?.language || raw?.langue || "");
+  const releaseDate = raw?.release_date || raw?.releaseDate || null;
+  const externalProvider = String(raw?.external_provider || raw?.externalProvider || "")
+    .trim()
+    .toLowerCase();
+  const externalSeason = Math.max(0, Number(raw?.external_season ?? raw?.externalSeason ?? 0));
+  const externalEpisode = Math.max(0, Number(raw?.external_episode ?? raw?.externalEpisode ?? 0));
+  const externalYearRaw = Number(raw?.external_year ?? raw?.externalYear ?? 0);
+  const fallbackYear = Number.parseInt(getYear(releaseDate || ""), 10);
+  const externalYear = Number.isFinite(externalYearRaw) && externalYearRaw > 0 ? externalYearRaw : fallbackYear > 0 ? fallbackYear : 0;
   return {
     id,
     type,
@@ -3962,10 +4080,20 @@ function normalizeCatalogItem(raw) {
     poster: normalizeImageUrl(raw?.large_poster_path || raw?.small_poster_path || ""),
     backdrop: normalizeImageUrl(raw?.wallpaper_poster_path || raw?.small_poster_path || raw?.large_poster_path || ""),
     runtime: typeof raw?.runtime === "number" ? raw.runtime : null,
-    releaseDate: raw?.release_date || null,
+    releaseDate,
     endDate: raw?.end_date || null,
     languageHint,
     isAnime,
+    isExternal: Boolean(externalProvider),
+    externalProvider,
+    externalKey: String(raw?.external_key || raw?.externalKey || "").trim(),
+    externalDetailUrl: String(raw?.external_detail_url || raw?.externalDetailUrl || "").trim(),
+    externalLanguage: normalizeLanguageLabel(raw?.external_language || raw?.externalLanguage || ""),
+    externalYear,
+    externalSeason,
+    externalEpisode,
+    supplementalRank: Number(raw?.supplemental_rank || raw?.supplementalRank || 0),
+    supplementalDate: String(raw?.supplemental_date || raw?.supplementalDate || "").trim(),
   };
 }
 
@@ -6624,21 +6752,56 @@ async function openPlayer(id, options = {}) {
   }
 }
 
-async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
-  setPlayerStatus("Connexion au flux film...");
-  const streamPath = `/stream/${item.id}`;
-  const payload = await fetchStreamJson(streamPath, { force: true });
-  if (token !== state.playToken) {
-    return;
-  }
+function getExternalPlaybackContext(item) {
+  const season = Math.max(1, Number(item?.externalSeason || 1));
+  const episode = Math.max(1, Number(item?.externalEpisode || 1));
+  const year = Math.max(0, Number(item?.externalYear || Number.parseInt(getYear(item?.releaseDate || ""), 10) || 0));
+  return { season, episode, year };
+}
 
-  clearManualSourceLock();
-  const baseMovieSources = extractSources(payload);
-  const autoMovieSources = appendAutoZenixRelaySources(baseMovieSources);
-  const ownedMovieSources = await appendZenixOwnedSources(item, 1, 1, autoMovieSources);
-  const pidoovMovieSources = await appendPidoovSources(item, 1, 1, ownedMovieSources);
-  const rendezvousMovieSources = await appendRendezvousSources(item, 1, 1, pidoovMovieSources);
-  state.sourcePool = filterMovieSourcesForFrench(rendezvousMovieSources);
+async function resolveExternalItemSources(item) {
+  const { season, episode } = getExternalPlaybackContext(item);
+  let merged = [];
+  if (item?.type === "tv" && !item?.isAnime) {
+    merged = await appendNotariellesSources(item, season, episode, merged);
+  }
+  merged = await appendPidoovSources(item, season, episode, merged);
+  merged = await appendRendezvousSources(item, season, episode, merged);
+  return {
+    sources: filterMovieSourcesForFrench(merged),
+    season,
+    episode,
+  };
+}
+
+async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
+  const isExternalItem = Boolean(item?.isExternal && item?.externalProvider);
+  const { season: externalSeason, episode: externalEpisode } = getExternalPlaybackContext(item);
+  const streamPath = `/stream/${item.id}`;
+
+  if (isExternalItem) {
+    setPlayerStatus("Connexion aux sources externes...");
+    const resolved = await resolveExternalItemSources(item);
+    if (token !== state.playToken) {
+      return;
+    }
+    clearManualSourceLock();
+    state.sourcePool = resolved.sources;
+  } else {
+    setPlayerStatus("Connexion au flux film...");
+    const payload = await fetchStreamJson(streamPath, { force: true });
+    if (token !== state.playToken) {
+      return;
+    }
+
+    clearManualSourceLock();
+    const baseMovieSources = extractSources(payload);
+    const autoMovieSources = appendAutoZenixRelaySources(baseMovieSources);
+    const ownedMovieSources = await appendZenixOwnedSources(item, 1, 1, autoMovieSources);
+    const pidoovMovieSources = await appendPidoovSources(item, 1, 1, ownedMovieSources);
+    const rendezvousMovieSources = await appendRendezvousSources(item, 1, 1, pidoovMovieSources);
+    state.sourcePool = filterMovieSourcesForFrench(rendezvousMovieSources);
+  }
   state.allEpisodeSources = state.sourcePool.slice();
   state.sourceRetryAttempts.clear();
   if (state.sourcePool.length === 0) {
@@ -6657,23 +6820,33 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
     if (token !== state.playToken) {
       throw firstError;
     }
-    setPlayerStatus("Actualisation des sources film...");
-    const refreshedPayload = await fetchStreamJson(streamPath, { force: true });
-    if (token !== state.playToken) {
-      return;
+    if (isExternalItem) {
+      setPlayerStatus("Actualisation des sources externes...");
+      const refreshedExternal = await resolveExternalItemSources(item);
+      if (token !== state.playToken) {
+        return;
+      }
+      clearManualSourceLock();
+      state.sourcePool = refreshedExternal.sources;
+    } else {
+      setPlayerStatus("Actualisation des sources film...");
+      const refreshedPayload = await fetchStreamJson(streamPath, { force: true });
+      if (token !== state.playToken) {
+        return;
+      }
+      clearManualSourceLock();
+      const refreshedMovieSources = extractSources(refreshedPayload);
+      const refreshedAutoMovieSources = appendAutoZenixRelaySources(refreshedMovieSources);
+      const refreshedOwnedMovieSources = await appendZenixOwnedSources(item, 1, 1, refreshedAutoMovieSources);
+      const refreshedPidoovMovieSources = await appendPidoovSources(item, 1, 1, refreshedOwnedMovieSources);
+      const refreshedRendezvousMovieSources = await appendRendezvousSources(
+        item,
+        1,
+        1,
+        refreshedPidoovMovieSources
+      );
+      state.sourcePool = filterMovieSourcesForFrench(refreshedRendezvousMovieSources);
     }
-    clearManualSourceLock();
-    const refreshedMovieSources = extractSources(refreshedPayload);
-    const refreshedAutoMovieSources = appendAutoZenixRelaySources(refreshedMovieSources);
-    const refreshedOwnedMovieSources = await appendZenixOwnedSources(item, 1, 1, refreshedAutoMovieSources);
-    const refreshedPidoovMovieSources = await appendPidoovSources(item, 1, 1, refreshedOwnedMovieSources);
-    const refreshedRendezvousMovieSources = await appendRendezvousSources(
-      item,
-      1,
-      1,
-      refreshedPidoovMovieSources
-    );
-    state.sourcePool = filterMovieSourcesForFrench(refreshedRendezvousMovieSources);
     state.allEpisodeSources = state.sourcePool.slice();
     state.sourceRetryAttempts.clear();
     if (state.sourcePool.length === 0) {
@@ -6694,10 +6867,10 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
     title: item.title,
     poster: item.poster,
     isAnime: false,
-    season: 1,
-    episode: 1,
+    season: isExternalItem ? externalSeason : 1,
+    episode: isExternalItem ? externalEpisode : 1,
   };
-  setPlayerSubTitle("Film");
+  setPlayerSubTitle(isExternalItem && item.type === "tv" ? `Episode S${externalSeason}E${externalEpisode}` : "Film");
   if (syncRoute) {
     setAppRoute({ watch: item.id }, { replace: true });
   }
@@ -11093,6 +11266,7 @@ function saveCatalogSnapshot() {
       page: state.page,
       totalPages: state.totalPages,
       catalogSyncPage: state.catalogSyncPage,
+      supplementalLastPage: state.supplementalLastPage,
       hasMore: state.hasMore,
       items: state.catalog.slice(0, 900),
     });
