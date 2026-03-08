@@ -39,6 +39,19 @@ Last update: 2026-03-08
     - `PIDOOV_MAX_PAGES_PER_CATEGORY`
     - `PIDOOV_FETCH_CONCURRENCY`
     - `PIDOOV_MAX_MATCH_CANDIDATES`
+- Notarielles provider integration added (owner-confirmed):
+  - Backend endpoint `/api/notarielles-source` resolves series episode sources by `title + season + episode`.
+  - Backend index is resilient: uses sitemap when possible and also scrapes episode links from seed pages
+    (`/`, `/series-en-streaming/`, `series-VF`, `series-VOSTFR`) plus extra category probes.
+  - Frontend injects Notarielles sources for TV non-anime episodes before other fallback providers.
+  - Caching/env tuning keys:
+    - `NOTARIELLES_INDEX_CACHE_MS`
+    - `NOTARIELLES_SEARCH_CACHE_MS`
+    - `NOTARIELLES_PAGE_CACHE_MS`
+    - `NOTARIELLES_MAX_SITEMAPS`
+    - `NOTARIELLES_PAGE_PROBE_COUNT`
+    - `NOTARIELLES_FETCH_CONCURRENCY`
+    - `NOTARIELLES_MAX_MATCH_CANDIDATES`
 
 ## Mobile robustness
 - Startup splash must never block app forever.

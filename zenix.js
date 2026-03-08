@@ -57,6 +57,7 @@ const STREAM_DIRECT_PREFETCH_TIMEOUT_MS = 3600;
 const ANIME_SIBNET_TIMEOUT_MS = 11000;
 const ZENIX_OWNED_SOURCE_TIMEOUT_MS = 7000;
 const PIDOOV_SOURCE_TIMEOUT_MS = 14000;
+const NOTARIELLES_SOURCE_TIMEOUT_MS = 14000;
 const EPISODE_SOON_VERIFY_TTL_MS = 3 * 60 * 1000;
 const EPISODE_SOON_VERIFY_LIMIT = 40;
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
@@ -6227,7 +6228,8 @@ async function syncDetailLanguageOptions(id, season, episode) {
   const baseSources = extractSources(payload);
   const autoSources = appendAutoZenixRelaySources(baseSources);
   const ownedSources = await appendZenixOwnedSources(item, season, episode, autoSources);
-  const sources = await appendPidoovSources(item, season, episode, ownedSources);
+  const notariellesSources = await appendNotariellesSources(item, season, episode, ownedSources);
+  const sources = await appendPidoovSources(item, season, episode, notariellesSources);
   const languages = getAvailableLanguages(sources);
   const selected = resolvePreferredLanguage(id, refs.detailLanguageSelect?.value || "", languages);
   populateLanguageSelect(refs.detailLanguageSelect, languages, selected);
@@ -6714,7 +6716,8 @@ async function loadEpisodeStream(
     const baseSources = extractSources(nextPayload);
     const autoMergedSources = appendAutoZenixRelaySources(baseSources);
     const ownedMergedSources = await appendZenixOwnedSources(item, season, episode, autoMergedSources);
-    const pidoovMergedSources = await appendPidoovSources(item, season, episode, ownedMergedSources);
+    const notariellesMergedSources = await appendNotariellesSources(item, season, episode, ownedMergedSources);
+    const pidoovMergedSources = await appendPidoovSources(item, season, episode, notariellesMergedSources);
     state.allEpisodeSources = await appendAnimeSibnetSource(
       item,
       season,
@@ -7057,6 +7060,67 @@ async function appendPidoovSources(item, season, episode, sources) {
       return base;
     }
     return pidoovSources.concat(base);
+  } catch {
+    return base;
+  }
+}
+
+async function appendNotariellesSources(item, season, episode, sources) {
+  const base = Array.isArray(sources) ? sources.slice() : [];
+  if (!item || item.type !== "tv" || item.isAnime) {
+    return base;
+  }
+
+  const title = String(item?.title || "").trim();
+  if (title.length < 2) {
+    return base;
+  }
+
+  const safeSeason = Math.max(1, Number(season || 1));
+  const safeEpisode = Math.max(1, Number(episode || 1));
+  const params = new URLSearchParams({
+    title,
+    season: String(safeSeason),
+    episode: String(safeEpisode),
+  });
+
+  try {
+    const payload = await fetchJson(`${API_BASE}/notarielles-source?${params.toString()}`, {
+      timeoutMs: NOTARIELLES_SOURCE_TIMEOUT_MS,
+      retryDelays: [400, 1000],
+    });
+    const raw = Array.isArray(payload?.data?.sources) ? payload.data.sources : [];
+    if (raw.length === 0) {
+      return base;
+    }
+
+    const existing = new Set(base.map((entry) => getSourceDedupKey(entry)).filter(Boolean));
+    const notariellesSources = raw
+      .map((entry, index) =>
+        normalizeSourceEntry(
+          {
+            ...entry,
+            source_name: String(entry?.source_name || entry?.name || "Notarielles").trim() || "Notarielles",
+          },
+          index
+        )
+      )
+      .filter((entry) => {
+        if (!entry) {
+          return false;
+        }
+        const key = getSourceDedupKey(entry);
+        if (!key || existing.has(key)) {
+          return false;
+        }
+        existing.add(key);
+        return true;
+      });
+
+    if (notariellesSources.length === 0) {
+      return base;
+    }
+    return notariellesSources.concat(base);
   } catch {
     return base;
   }

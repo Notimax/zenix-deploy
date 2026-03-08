@@ -35,6 +35,32 @@ const PIDOOV_MAX_MATCH_CANDIDATES = Math.max(
   1,
   toInt(process.env.PIDOOV_MAX_MATCH_CANDIDATES, 3, 1, 6)
 );
+const NOTARIELLES_BASE = "https://notarielles.fr";
+const NOTARIELLES_HOST = "notarielles.fr";
+const NOTARIELLES_SITEMAP_INDEX_URL = `${NOTARIELLES_BASE}/sitemaps.xml`;
+const NOTARIELLES_INDEX_CACHE_MS = Math.max(
+  5 * 60 * 1000,
+  Number(process.env.NOTARIELLES_INDEX_CACHE_MS || 30 * 60 * 1000)
+);
+const NOTARIELLES_SEARCH_CACHE_MS = Math.max(
+  60 * 1000,
+  Number(process.env.NOTARIELLES_SEARCH_CACHE_MS || 15 * 60 * 1000)
+);
+const NOTARIELLES_PAGE_CACHE_MS = Math.max(
+  60 * 1000,
+  Number(process.env.NOTARIELLES_PAGE_CACHE_MS || 20 * 60 * 1000)
+);
+const NOTARIELLES_MAX_SITEMAPS = Math.max(1, toInt(process.env.NOTARIELLES_MAX_SITEMAPS, 40, 1, 80));
+const NOTARIELLES_PAGE_PROBE_COUNT = Math.max(2, toInt(process.env.NOTARIELLES_PAGE_PROBE_COUNT, 8, 2, 24));
+const NOTARIELLES_FETCH_CONCURRENCY = Math.max(
+  1,
+  toInt(process.env.NOTARIELLES_FETCH_CONCURRENCY, 4, 1, 8)
+);
+const NOTARIELLES_MAX_MATCH_CANDIDATES = Math.max(
+  1,
+  toInt(process.env.NOTARIELLES_MAX_MATCH_CANDIDATES, 3, 1, 6)
+);
+const NOTARIELLES_SEED_PATHS = ["/", "/series-en-streaming/", "/categorie-series/series-VF/", "/categorie-series/series-VOSTFR/"];
 const ANIME_PLANNING_URL = "https://anime-sama.tv/planning/";
 const ANIME_SAMA_BASE = "https://anime-sama.to";
 const ANIME_SAMA_SEARCH_ENDPOINT = `${ANIME_SAMA_BASE}/template-php/defaut/fetch.php`;
@@ -90,6 +116,7 @@ const calendarCache = new Map();
 const animeSibnetCache = new Map();
 const pidoovDetailCache = new Map();
 const pidoovLookupCache = new Map();
+const notariellesPageCache = new Map();
 const zenixOwnedSourcesCache = {
   loadedAt: 0,
   mtimeMs: 0,
@@ -103,6 +130,11 @@ const pidoovIndexCache = {
   loadedAt: 0,
   entries: [],
   full: false,
+  inFlight: null,
+};
+const notariellesIndexCache = {
+  loadedAt: 0,
+  entries: [],
   inFlight: null,
 };
 const pidoovStaticCache = {
@@ -1642,6 +1674,535 @@ async function resolvePidoovSourcesByTitle(title, options = {}) {
   if (merged.length === 0 && !pidoovIndexCache.full) {
     triggerPidoovFullIndexRefresh();
   }
+  return merged;
+}
+
+function normalizeNotariellesPath(value) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return "";
+  }
+  let parsed;
+  try {
+    parsed = new URL(raw, `${NOTARIELLES_BASE}/`);
+  } catch {
+    return "";
+  }
+  if (normalizeHostName(parsed.hostname) !== NOTARIELLES_HOST) {
+    return "";
+  }
+  return `${parsed.pathname}${parsed.search}`;
+}
+
+function parseXmlLocValues(xml) {
+  const source = String(xml || "");
+  const values = [];
+  const regex = /<loc>([^<]+)<\/loc>/gi;
+  let match = null;
+  while ((match = regex.exec(source)) !== null) {
+    const url = String(match[1] || "").trim();
+    if (url) {
+      values.push(url);
+    }
+  }
+  return values;
+}
+
+function parseNotariellesEpisodeUrlsFromHtml(html, baseUrl = `${NOTARIELLES_BASE}/`) {
+  const source = String(html || "");
+  if (!source) {
+    return [];
+  }
+  const urls = [];
+  const seen = new Set();
+  const hrefRegex = /href=["'](?<href>[^"']+)["']/gi;
+  let match = null;
+  while ((match = hrefRegex.exec(source)) !== null) {
+    const rawHref = String(match.groups?.href || "").trim();
+    if (!rawHref) {
+      continue;
+    }
+    if (!/\/categorie-series\//i.test(rawHref)) {
+      continue;
+    }
+    if (!/-saison-\d+-episode-\d+-(vf|vostfr)(?:$|[/?#])/i.test(rawHref)) {
+      continue;
+    }
+    let absolute = rawHref;
+    try {
+      absolute = new URL(rawHref, String(baseUrl || `${NOTARIELLES_BASE}/`)).href;
+    } catch {
+      absolute = rawHref;
+    }
+    const normalizedPath = normalizeNotariellesPath(absolute);
+    if (!normalizedPath) {
+      continue;
+    }
+    const canonicalUrl = `${NOTARIELLES_BASE}${normalizedPath}`;
+    if (seen.has(canonicalUrl)) {
+      continue;
+    }
+    seen.add(canonicalUrl);
+    urls.push(canonicalUrl);
+  }
+  return urls;
+}
+
+async function loadNotariellesEpisodeEntriesFromPages(pageUrls) {
+  const targets = Array.isArray(pageUrls) ? pageUrls.filter(Boolean) : [];
+  if (targets.length === 0) {
+    return [];
+  }
+  const pageRows = await mapWithConcurrency(
+    targets,
+    Math.min(NOTARIELLES_FETCH_CONCURRENCY, targets.length || 1),
+    async (pageUrl) => {
+      try {
+        const response = await fetchRemoteText(pageUrl, "text/html,application/xhtml+xml");
+        if (response.status < 200 || response.status >= 300) {
+          return [];
+        }
+        const episodeUrls = parseNotariellesEpisodeUrlsFromHtml(response.body, pageUrl);
+        return episodeUrls
+          .map((url) => parseNotariellesEntryFromUrl(url))
+          .filter(Boolean);
+      } catch {
+        return [];
+      }
+    }
+  );
+  return pageRows.flat();
+}
+
+function slugToReadableTitle(slug) {
+  const raw = String(slug || "");
+  let decoded = raw;
+  try {
+    decoded = decodeURIComponent(raw);
+  } catch {
+    decoded = raw;
+  }
+  return decoded
+    .replace(/\+/g, " ")
+    .replace(/[-_]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizeNotariellesLanguage(value) {
+  const raw = String(value || "").trim().toLowerCase();
+  if (!raw) {
+    return "";
+  }
+  if (raw.endsWith("-vf")) {
+    return "VF";
+  }
+  if (raw.endsWith("-vostfr")) {
+    return "VOSTFR";
+  }
+  return "";
+}
+
+function parseNotariellesEntryFromUrl(value) {
+  const rawPath = normalizeNotariellesPath(value);
+  if (!rawPath) {
+    return null;
+  }
+  const parsed = parseSafeRemoteUrl(`${NOTARIELLES_BASE}${rawPath}`);
+  if (!parsed) {
+    return null;
+  }
+  const rawPathname = String(parsed.pathname || "");
+  let pathname = rawPathname;
+  try {
+    pathname = decodeURIComponent(rawPathname);
+  } catch {
+    pathname = rawPathname;
+  }
+  const match = pathname.match(/\/categorie-series\/(?<id>\d+)-(?<slug>[^/?#]+)\/?$/i);
+  if (!match) {
+    return null;
+  }
+  const mediaId = toInt(match.groups?.id, 0, 0, 999999999);
+  const slugRaw = String(match.groups?.slug || "").trim();
+  const seasonEpisodeMatch = slugRaw.match(/^(?<title>.+)-saison-(?<season>\d+)-episode-(?<episode>\d+)-(?<lang>vf|vostfr)$/i);
+  if (!seasonEpisodeMatch) {
+    return null;
+  }
+
+  const season = toInt(seasonEpisodeMatch.groups?.season, 0, 0, 400);
+  const episode = toInt(seasonEpisodeMatch.groups?.episode, 0, 0, 20000);
+  if (season <= 0 || episode <= 0) {
+    return null;
+  }
+
+  const title = slugToReadableTitle(seasonEpisodeMatch.groups?.title || "");
+  const titleKey = normalizeTitleKey(title);
+  if (!titleKey) {
+    return null;
+  }
+
+  const language = normalizeNotariellesLanguage(`-${String(seasonEpisodeMatch.groups?.lang || "").toLowerCase()}`);
+  return {
+    mediaId,
+    title,
+    titleKey,
+    season,
+    episode,
+    language: language || "VF",
+    pageUrl: parsed.href,
+  };
+}
+
+function scoreNotariellesCandidate(entry, queryTitleKey, season, episode) {
+  if (!entry || !queryTitleKey) {
+    return -9999;
+  }
+  let score = 0;
+  if (Number(entry.season) === Number(season)) {
+    score += 240;
+  } else {
+    score -= 220;
+  }
+  if (Number(entry.episode) === Number(episode)) {
+    score += 240;
+  } else {
+    score -= 220;
+  }
+
+  const titleKey = String(entry.titleKey || "").trim();
+  if (titleKey === queryTitleKey) {
+    score += 360;
+  } else if (titleKey.includes(queryTitleKey) || queryTitleKey.includes(titleKey)) {
+    score += 160;
+  }
+
+  const queryTokens = getPidoovTitleTokens(queryTitleKey);
+  const candidateTokens = new Set(getPidoovTitleTokens(titleKey));
+  let overlaps = 0;
+  queryTokens.forEach((token) => {
+    if (candidateTokens.has(token)) {
+      overlaps += 1;
+    }
+  });
+  score += overlaps * 28;
+  if (queryTokens.length > 0) {
+    const ratio = overlaps / queryTokens.length;
+    if (ratio >= 1) {
+      score += 70;
+    } else if (ratio >= 0.7) {
+      score += 30;
+    } else if (ratio < 0.3) {
+      score -= 80;
+    }
+  }
+
+  const language = String(entry.language || "").trim().toUpperCase();
+  if (language === "VF") {
+    score += 18;
+  } else if (language === "VOSTFR") {
+    score += 10;
+  }
+  return score;
+}
+
+async function loadNotariellesIndex(force = false) {
+  const now = Date.now();
+  if (
+    !force &&
+    notariellesIndexCache.loadedAt > 0 &&
+    now - notariellesIndexCache.loadedAt < NOTARIELLES_INDEX_CACHE_MS &&
+    Array.isArray(notariellesIndexCache.entries) &&
+    notariellesIndexCache.entries.length > 0
+  ) {
+    return notariellesIndexCache.entries;
+  }
+  if (notariellesIndexCache.inFlight) {
+    return notariellesIndexCache.inFlight;
+  }
+
+  const task = (async () => {
+    let sitemapUrls = [];
+    try {
+      const indexResponse = await fetchRemoteText(NOTARIELLES_SITEMAP_INDEX_URL, "application/xml,text/xml");
+      if (indexResponse.status >= 200 && indexResponse.status < 300) {
+        sitemapUrls = parseXmlLocValues(indexResponse.body)
+          .filter((entry) => {
+            const parsed = parseSafeRemoteUrl(entry);
+            return parsed && normalizeHostName(parsed.hostname) === NOTARIELLES_HOST;
+          })
+          .slice(0, NOTARIELLES_MAX_SITEMAPS);
+      }
+    } catch {
+      sitemapUrls = [];
+    }
+
+    const sitemapRows =
+      sitemapUrls.length > 0
+        ? await mapWithConcurrency(
+            sitemapUrls,
+            Math.min(NOTARIELLES_FETCH_CONCURRENCY, sitemapUrls.length || 1),
+            async (sitemapUrl) => {
+              let response = null;
+              try {
+                response = await fetchRemoteText(sitemapUrl, "application/xml,text/xml");
+              } catch {
+                return [];
+              }
+              if (!response || response.status < 200 || response.status >= 300) {
+                return [];
+              }
+              return parseXmlLocValues(response.body);
+            }
+          )
+        : [];
+
+    const dedupe = new Map();
+    const sitemapPageCandidates = [];
+    const sitemapPageSeen = new Set();
+    sitemapRows.forEach((values) => {
+      if (!Array.isArray(values)) {
+        return;
+      }
+      values.forEach((url) => {
+        const normalizedPath = normalizeNotariellesPath(url);
+        if (normalizedPath && /\/categorie-series\//i.test(normalizedPath)) {
+          const pageUrl = `${NOTARIELLES_BASE}${normalizedPath}`;
+          if (!sitemapPageSeen.has(pageUrl)) {
+            sitemapPageSeen.add(pageUrl);
+            if (sitemapPageCandidates.length < NOTARIELLES_PAGE_PROBE_COUNT) {
+              sitemapPageCandidates.push(pageUrl);
+            }
+          }
+        }
+
+        const entry = parseNotariellesEntryFromUrl(url);
+        if (!entry) {
+          return;
+        }
+        const key = `${entry.pageUrl}`;
+        if (!dedupe.has(key)) {
+          dedupe.set(key, entry);
+        }
+      });
+    });
+
+    const seedUrls = NOTARIELLES_SEED_PATHS.map((pathToken) => {
+      try {
+        return new URL(pathToken, `${NOTARIELLES_BASE}/`).href;
+      } catch {
+        return "";
+      }
+    }).filter(Boolean);
+    const probeUrls = [];
+    const probeSeen = new Set();
+    seedUrls.concat(sitemapPageCandidates).forEach((entry) => {
+      const safeUrl = String(entry || "").trim();
+      if (!safeUrl || probeSeen.has(safeUrl)) {
+        return;
+      }
+      probeSeen.add(safeUrl);
+      probeUrls.push(safeUrl);
+    });
+
+    const seedEntries = await loadNotariellesEpisodeEntriesFromPages(probeUrls);
+    seedEntries.forEach((entry) => {
+      const key = String(entry?.pageUrl || "").trim();
+      if (!key || dedupe.has(key)) {
+        return;
+      }
+      dedupe.set(key, entry);
+    });
+
+    const entries = Array.from(dedupe.values());
+    notariellesIndexCache.entries = entries;
+    notariellesIndexCache.loadedAt = Date.now();
+    return notariellesIndexCache.entries;
+  })();
+
+  notariellesIndexCache.inFlight = task;
+  try {
+    return await task;
+  } catch (error) {
+    if (Array.isArray(notariellesIndexCache.entries) && notariellesIndexCache.entries.length > 0) {
+      return notariellesIndexCache.entries;
+    }
+    throw error;
+  } finally {
+    notariellesIndexCache.inFlight = null;
+  }
+}
+
+function parseNotariellesPlayerPageUrl(html) {
+  const source = String(html || "");
+  const insideMatch = source.match(
+    /<div[^>]+class=["'][^"']*insideIframe[^"']*["'][^>]*>[\s\S]{0,1800}?<iframe[^>]+src=["'](?<src>[^"']+)["']/i
+  );
+  const iframeMatch = insideMatch || source.match(/<iframe[^>]+src=["'](?<src>[^"']*serie-vf\.php[^"']*)["']/i);
+  const rawSrc = String(iframeMatch?.groups?.src || "").trim();
+  if (!rawSrc) {
+    return "";
+  }
+  let absolute = rawSrc;
+  try {
+    absolute = new URL(rawSrc, `${NOTARIELLES_BASE}/`).href;
+  } catch {
+    absolute = rawSrc;
+  }
+  const parsed = parseSafeRemoteUrl(absolute);
+  if (!parsed) {
+    return "";
+  }
+  if (normalizeHostName(parsed.hostname) !== NOTARIELLES_HOST) {
+    return "";
+  }
+  return parsed.href;
+}
+
+function parseNotariellesDirectStreamUrl(html, baseUrl) {
+  const source = String(html || "");
+  const match = source.match(/<source[^>]+src=['"](?<src>[^'"]+)['"]/i);
+  const rawSrc = String(match?.groups?.src || "").trim();
+  if (!rawSrc) {
+    return "";
+  }
+  let absolute = rawSrc;
+  try {
+    absolute = new URL(rawSrc, String(baseUrl || `${NOTARIELLES_BASE}/`)).href;
+  } catch {
+    absolute = rawSrc;
+  }
+  const parsed = parseSafeRemoteUrl(absolute);
+  if (!parsed) {
+    return "";
+  }
+  if (/\/universal\.mp4(?:$|\?)/i.test(parsed.pathname || "")) {
+    return "";
+  }
+  return parsed.href;
+}
+
+async function loadNotariellesEntrySources(entry) {
+  const pageUrl = String(entry?.pageUrl || "").trim();
+  if (!pageUrl) {
+    return [];
+  }
+  const cached = notariellesPageCache.get(pageUrl);
+  if (cached && Date.now() < Number(cached.expiresAt || 0)) {
+    return Array.isArray(cached.sources) ? cached.sources : [];
+  }
+
+  const pageResponse = await fetchRemoteText(pageUrl, "text/html,application/xhtml+xml");
+  if (pageResponse.status < 200 || pageResponse.status >= 300) {
+    throw new Error("Notarielles page unavailable");
+  }
+  const playerPageUrl = parseNotariellesPlayerPageUrl(pageResponse.body);
+  if (!playerPageUrl) {
+    return [];
+  }
+
+  const language = String(entry?.language || "VF").toUpperCase();
+  const sources = [
+    {
+      stream_url: playerPageUrl,
+      source_name: "Notarielles",
+      quality: "Notarielles",
+      language,
+      format: "embed",
+      priority: language === "VF" ? 342 : 328,
+    },
+  ];
+
+  try {
+    const playerResponse = await fetchRemoteText(playerPageUrl, "text/html,application/xhtml+xml");
+    if (playerResponse.status >= 200 && playerResponse.status < 300) {
+      const directStreamUrl = parseNotariellesDirectStreamUrl(playerResponse.body, playerPageUrl);
+      if (directStreamUrl) {
+        sources.unshift({
+          stream_url: directStreamUrl,
+          source_name: "Notarielles Direct",
+          quality: "Notarielles",
+          language,
+          format: directStreamUrl.includes(".m3u8") ? "hls" : "mp4",
+          priority: language === "VF" ? 350 : 335,
+        });
+      }
+    }
+  } catch {
+    // keep embed fallback
+  }
+
+  const dedupe = new Set();
+  const normalized = sources.filter((sourceRow) => {
+    const key = String(sourceRow?.stream_url || "").trim();
+    if (!key || dedupe.has(key)) {
+      return false;
+    }
+    dedupe.add(key);
+    return true;
+  });
+  notariellesPageCache.set(pageUrl, {
+    sources: normalized,
+    expiresAt: Date.now() + NOTARIELLES_PAGE_CACHE_MS,
+  });
+  prunePidoovTimedCache(notariellesPageCache, 1200);
+  return normalized;
+}
+
+async function resolveNotariellesSourcesByEpisode(title, season, episode) {
+  const safeTitle = String(title || "").trim();
+  const safeSeason = toInt(season, 0, 0, 400);
+  const safeEpisode = toInt(episode, 0, 0, 20000);
+  if (safeTitle.length < 2 || safeSeason <= 0 || safeEpisode <= 0) {
+    return [];
+  }
+
+  const queryTitleKey = normalizeTitleKey(safeTitle);
+  if (!queryTitleKey) {
+    return [];
+  }
+
+  const cacheKey = `${queryTitleKey}|${safeSeason}|${safeEpisode}`;
+  const cached = readPidoovLookupCache(`notarielles:${cacheKey}`);
+  if (cached) {
+    return cached;
+  }
+
+  const index = await loadNotariellesIndex();
+  const ranked = (Array.isArray(index) ? index : [])
+    .map((entry) => ({
+      entry,
+      score: scoreNotariellesCandidate(entry, queryTitleKey, safeSeason, safeEpisode),
+    }))
+    .filter((row) => row.score > 120)
+    .sort((left, right) => right.score - left.score)
+    .slice(0, NOTARIELLES_MAX_MATCH_CANDIDATES);
+
+  if (ranked.length === 0) {
+    storePidoovLookupCache(`notarielles:${cacheKey}`, [], NOTARIELLES_SEARCH_CACHE_MS);
+    return [];
+  }
+
+  const merged = [];
+  const seen = new Set();
+  for (const row of ranked) {
+    let rows = [];
+    try {
+      rows = await loadNotariellesEntrySources(row.entry);
+    } catch {
+      rows = [];
+    }
+    rows.forEach((entry) => {
+      const key = String(entry?.stream_url || "").trim();
+      if (!key || seen.has(key)) {
+        return;
+      }
+      seen.add(key);
+      merged.push(entry);
+    });
+  }
+
+  storePidoovLookupCache(`notarielles:${cacheKey}`, merged, NOTARIELLES_SEARCH_CACHE_MS);
   return merged;
 }
 
@@ -3451,6 +4012,60 @@ async function handlePidoovSource(req, res, requestUrl) {
   }
 }
 
+async function handleNotariellesSource(req, res, requestUrl) {
+  if (requestUrl.pathname !== "/api/notarielles-source") {
+    return false;
+  }
+  if (req.method !== "GET") {
+    sendJson(res, 405, { error: "Method Not Allowed" });
+    return true;
+  }
+
+  const title = String(requestUrl.searchParams.get("title") || "").trim();
+  if (title.length < 2) {
+    sendJson(res, 400, { error: "Missing title" });
+    return true;
+  }
+  const season = toInt(requestUrl.searchParams.get("season"), 0, 0, 400);
+  const episode = toInt(requestUrl.searchParams.get("episode"), 0, 0, 20000);
+  if (season <= 0 || episode <= 0) {
+    sendJson(res, 400, { error: "Missing season/episode" });
+    return true;
+  }
+  const debugMode = String(requestUrl.searchParams.get("debug") || "").trim() === "1";
+
+  try {
+    const sources = await resolveNotariellesSourcesByEpisode(title, season, episode);
+    const payload = {
+      apiVersion: "zenix-notarielles-source-v1",
+      type: "success",
+      data: {
+        title,
+        season,
+        episode,
+        count: sources.length,
+        sources,
+      },
+    };
+    if (debugMode) {
+      payload.data.debug = {
+        indexSize: Array.isArray(notariellesIndexCache.entries) ? notariellesIndexCache.entries.length : 0,
+        loadedAt: Number(notariellesIndexCache.loadedAt || 0),
+        inFlight: Boolean(notariellesIndexCache.inFlight),
+        pageCacheSize: notariellesPageCache.size,
+      };
+    }
+    sendJson(res, 200, payload);
+    return true;
+  } catch (error) {
+    sendJson(res, 502, {
+      error: "Notarielles source unavailable",
+      reason: sanitizeToken(String(error?.message || ""), 120),
+    });
+    return true;
+  }
+}
+
 async function handleZenixOwnedSource(req, res, requestUrl) {
   if (requestUrl.pathname !== "/api/zenix-source") {
     return false;
@@ -3668,6 +4283,12 @@ const server = http.createServer((req, res) => {
     })
     .then((handledPidoovSource) => {
       if (handledPidoovSource) {
+        return true;
+      }
+      return handleNotariellesSource(req, res, requestUrl);
+    })
+    .then((handledNotariellesSource) => {
+      if (handledNotariellesSource) {
         return true;
       }
       return handleZenixOwnedSource(req, res, requestUrl);

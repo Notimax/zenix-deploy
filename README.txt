@@ -75,7 +75,26 @@ PIDOOV INTEGRATION (GLOBAL FALLBACK)
   - `PIDOOV_INDEX_CACHE_MS`
   - `PIDOOV_LOOKUP_CACHE_MS`
   - `PIDOOV_DETAIL_CACHE_MS`
-  - `PIDOOV_BOOTSTRAP_PAGES_PER_CATEGORY`
-  - `PIDOOV_MAX_PAGES_PER_CATEGORY`
-  - `PIDOOV_FETCH_CONCURRENCY`
-  - `PIDOOV_MAX_MATCH_CANDIDATES`
+- `PIDOOV_BOOTSTRAP_PAGES_PER_CATEGORY`
+- `PIDOOV_MAX_PAGES_PER_CATEGORY`
+- `PIDOOV_FETCH_CONCURRENCY`
+- `PIDOOV_MAX_MATCH_CANDIDATES`
+
+NOTARIELLES INTEGRATION (SERIES FALLBACK)
+- New backend endpoint: `/api/notarielles-source`
+- Target: series episodes by `title + season + episode`.
+- Index strategy:
+  - reads `https://notarielles.fr/sitemaps.xml` when available
+  - extracts episode URLs from seed pages (`/`, `/series-en-streaming/`, `series-VF`, `series-VOSTFR`)
+  - probes extra category pages from sitemap for recent episode links
+- Frontend injection:
+  - `zenix.js` now appends Notarielles sources for TV (non-anime) episodes.
+  - Merge order for episodes: Owned -> Notarielles -> Pidoov -> Anime Sibnet fallback.
+- Server-side cache controls:
+  - `NOTARIELLES_INDEX_CACHE_MS`
+  - `NOTARIELLES_SEARCH_CACHE_MS`
+  - `NOTARIELLES_PAGE_CACHE_MS`
+  - `NOTARIELLES_MAX_SITEMAPS`
+  - `NOTARIELLES_PAGE_PROBE_COUNT`
+  - `NOTARIELLES_FETCH_CONCURRENCY`
+  - `NOTARIELLES_MAX_MATCH_CANDIDATES`
