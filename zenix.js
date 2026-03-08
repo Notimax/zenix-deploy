@@ -5,7 +5,7 @@ const FAVORITES_KEY = "zenix-favorites-v1";
 const FAVORITES_BACKUP_KEY = "zenix-favorites-backup-v1";
 const RATINGS_KEY = "zenix-ratings-v1";
 const LANGUAGE_PREFS_KEY = "zenix-language-prefs-v1";
-const CATALOG_CACHE_KEY = "zenix-catalog-cache-v2";
+const CATALOG_CACHE_KEY = "zenix-catalog-cache-v3";
 const CLEANUP_KEY = "zenix-sw-cleaned-v4";
 const REFRESH_FEED_MS = 4 * 60 * 1000;
 const REFRESH_TOP_MS = 20 * 60 * 1000;
@@ -56,9 +56,7 @@ const STREAM_DIRECT_TIMEOUT_MS = 5200;
 const STREAM_DIRECT_PREFETCH_TIMEOUT_MS = 3600;
 const ANIME_SIBNET_TIMEOUT_MS = 11000;
 const ZENIX_OWNED_SOURCE_TIMEOUT_MS = 7000;
-const PIDOOV_SOURCE_TIMEOUT_MS = 14000;
-const NOTARIELLES_SOURCE_TIMEOUT_MS = 14000;
-const RENDEZVOUS_SOURCE_TIMEOUT_MS = 14000;
+const NAKIOS_SOURCE_TIMEOUT_MS = 14000;
 const SUPPLEMENTAL_CATALOG_TIMEOUT_MS = 14000;
 const EPISODE_SOON_VERIFY_TTL_MS = 3 * 60 * 1000;
 const EPISODE_SOON_VERIFY_LIMIT = 40;
@@ -4097,11 +4095,16 @@ function normalizeCatalogItem(raw) {
   const externalProvider = String(raw?.external_provider || raw?.externalProvider || "")
     .trim()
     .toLowerCase();
+  if (externalProvider && externalProvider !== "nakios") {
+    return null;
+  }
   const externalSeason = Math.max(0, Number(raw?.external_season ?? raw?.externalSeason ?? 0));
   const externalEpisode = Math.max(0, Number(raw?.external_episode ?? raw?.externalEpisode ?? 0));
   const externalYearRaw = Number(raw?.external_year ?? raw?.externalYear ?? 0);
+  const externalTmdbIdRaw = Number(raw?.external_tmdb_id ?? raw?.externalTmdbId ?? 0);
   const fallbackYear = Number.parseInt(getYear(releaseDate || ""), 10);
   const externalYear = Number.isFinite(externalYearRaw) && externalYearRaw > 0 ? externalYearRaw : fallbackYear > 0 ? fallbackYear : 0;
+  const externalTmdbId = Number.isFinite(externalTmdbIdRaw) && externalTmdbIdRaw > 0 ? externalTmdbIdRaw : 0;
   return {
     id,
     type,
@@ -4120,6 +4123,7 @@ function normalizeCatalogItem(raw) {
     externalKey: String(raw?.external_key || raw?.externalKey || "").trim(),
     externalDetailUrl: String(raw?.external_detail_url || raw?.externalDetailUrl || "").trim(),
     externalLanguage: normalizeLanguageLabel(raw?.external_language || raw?.externalLanguage || ""),
+    externalTmdbId,
     externalYear,
     externalSeason,
     externalEpisode,
@@ -6436,9 +6440,7 @@ async function syncDetailLanguageOptions(id, season, episode) {
   const baseSources = extractSources(payload);
   const autoSources = appendAutoZenixRelaySources(baseSources);
   const ownedSources = await appendZenixOwnedSources(item, season, episode, autoSources);
-  const notariellesSources = await appendNotariellesSources(item, season, episode, ownedSources);
-  const pidoovSources = await appendPidoovSources(item, season, episode, notariellesSources);
-  const sources = await appendRendezvousSources(item, season, episode, pidoovSources);
+  const sources = await appendNakiosSources(item, season, episode, ownedSources);
   const languages = getAvailableLanguages(sources);
   const selected = resolvePreferredLanguage(id, refs.detailLanguageSelect?.value || "", languages);
   populateLanguageSelect(refs.detailLanguageSelect, languages, selected);
@@ -6841,12 +6843,7 @@ function getExternalPlaybackContext(item) {
 
 async function resolveExternalItemSources(item) {
   const { season, episode } = getExternalPlaybackContext(item);
-  let merged = [];
-  if (item?.type === "tv" && !item?.isAnime) {
-    merged = await appendNotariellesSources(item, season, episode, merged);
-  }
-  merged = await appendPidoovSources(item, season, episode, merged);
-  merged = await appendRendezvousSources(item, season, episode, merged);
+  const merged = await appendNakiosSources(item, season, episode, []);
   return {
     sources: filterMovieSourcesForFrench(merged),
     season,
@@ -6878,9 +6875,8 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
     const baseMovieSources = extractSources(payload);
     const autoMovieSources = appendAutoZenixRelaySources(baseMovieSources);
     const ownedMovieSources = await appendZenixOwnedSources(item, 1, 1, autoMovieSources);
-    const pidoovMovieSources = await appendPidoovSources(item, 1, 1, ownedMovieSources);
-    const rendezvousMovieSources = await appendRendezvousSources(item, 1, 1, pidoovMovieSources);
-    state.sourcePool = filterMovieSourcesForFrench(rendezvousMovieSources);
+    const nakiosMovieSources = await appendNakiosSources(item, 1, 1, ownedMovieSources);
+    state.sourcePool = filterMovieSourcesForFrench(nakiosMovieSources);
   }
   state.allEpisodeSources = state.sourcePool.slice();
   state.sourceRetryAttempts.clear();
@@ -6918,14 +6914,8 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
       const refreshedMovieSources = extractSources(refreshedPayload);
       const refreshedAutoMovieSources = appendAutoZenixRelaySources(refreshedMovieSources);
       const refreshedOwnedMovieSources = await appendZenixOwnedSources(item, 1, 1, refreshedAutoMovieSources);
-      const refreshedPidoovMovieSources = await appendPidoovSources(item, 1, 1, refreshedOwnedMovieSources);
-      const refreshedRendezvousMovieSources = await appendRendezvousSources(
-        item,
-        1,
-        1,
-        refreshedPidoovMovieSources
-      );
-      state.sourcePool = filterMovieSourcesForFrench(refreshedRendezvousMovieSources);
+      const refreshedNakiosMovieSources = await appendNakiosSources(item, 1, 1, refreshedOwnedMovieSources);
+      state.sourcePool = filterMovieSourcesForFrench(refreshedNakiosMovieSources);
     }
     state.allEpisodeSources = state.sourcePool.slice();
     state.sourceRetryAttempts.clear();
@@ -6978,14 +6968,12 @@ async function loadEpisodeStream(
     const baseSources = extractSources(nextPayload);
     const autoMergedSources = appendAutoZenixRelaySources(baseSources);
     const ownedMergedSources = await appendZenixOwnedSources(item, season, episode, autoMergedSources);
-    const notariellesMergedSources = await appendNotariellesSources(item, season, episode, ownedMergedSources);
-    const pidoovMergedSources = await appendPidoovSources(item, season, episode, notariellesMergedSources);
-    const rendezvousMergedSources = await appendRendezvousSources(item, season, episode, pidoovMergedSources);
+    const nakiosMergedSources = await appendNakiosSources(item, season, episode, ownedMergedSources);
     state.allEpisodeSources = await appendAnimeSibnetSource(
       item,
       season,
       episode,
-      rendezvousMergedSources,
+      nakiosMergedSources,
       preferredLanguageInput
     );
     state.availableLanguages = getAvailableLanguages(state.allEpisodeSources);
@@ -7261,7 +7249,39 @@ async function appendZenixOwnedSources(item, season, episode, sources) {
   }
 }
 
-async function appendPidoovSources(item, season, episode, sources) {
+async function resolveNakiosTmdbId(item) {
+  const directTmdb = Number(
+    item?.tmdbId ||
+      item?.tmdb_id ||
+      item?.externalTmdbId ||
+      item?.external_tmdb_id ||
+      0
+  );
+  if (Number.isFinite(directTmdb) && directTmdb > 0) {
+    return directTmdb;
+  }
+
+  const mediaId = Number(item?.id || 0);
+  if (mediaId <= 0 || mediaId >= SUPPLEMENTAL_MEDIA_ID_MIN) {
+    return 0;
+  }
+
+  const cachedDetails = state.detailsCache.get(mediaId);
+  const cachedTmdbId = Number(cachedDetails?.tmdbId || cachedDetails?.tmdb_id || 0);
+  if (Number.isFinite(cachedTmdbId) && cachedTmdbId > 0) {
+    return cachedTmdbId;
+  }
+
+  try {
+    const details = await ensureDetails(mediaId);
+    const tmdbId = Number(details?.tmdbId || details?.tmdb_id || 0);
+    return Number.isFinite(tmdbId) && tmdbId > 0 ? tmdbId : 0;
+  } catch {
+    return 0;
+  }
+}
+
+async function appendNakiosSources(item, season, episode, sources) {
   const base = Array.isArray(sources) ? sources.slice() : [];
   if (!item) {
     return base;
@@ -7282,13 +7302,17 @@ async function appendPidoovSources(item, season, episode, sources) {
     season: String(safeSeason),
     episode: String(safeEpisode),
   });
+  const tmdbId = await resolveNakiosTmdbId(item);
+  if (tmdbId > 0) {
+    params.set("tmdbId", String(tmdbId));
+  }
   if (year > 0) {
     params.set("year", String(year));
   }
 
   try {
-    const payload = await fetchJson(`${API_BASE}/pidoov-source?${params.toString()}`, {
-      timeoutMs: PIDOOV_SOURCE_TIMEOUT_MS,
+    const payload = await fetchJson(`${API_BASE}/nakios-source?${params.toString()}`, {
+      timeoutMs: NAKIOS_SOURCE_TIMEOUT_MS,
       retryDelays: [400, 1000],
     });
     const raw = Array.isArray(payload?.data?.sources) ? payload.data.sources : [];
@@ -7297,12 +7321,12 @@ async function appendPidoovSources(item, season, episode, sources) {
     }
 
     const existing = new Set(base.map((entry) => getSourceDedupKey(entry)).filter(Boolean));
-    const pidoovSources = raw
+    const nakiosSources = raw
       .map((entry, index) =>
         normalizeSourceEntry(
           {
             ...entry,
-            source_name: String(entry?.source_name || entry?.name || "Pidoov").trim() || "Pidoov",
+            source_name: String(entry?.source_name || entry?.name || "NAKIOS").trim() || "NAKIOS",
           },
           index
         )
@@ -7319,142 +7343,29 @@ async function appendPidoovSources(item, season, episode, sources) {
         return true;
       });
 
-    if (pidoovSources.length === 0) {
+    if (nakiosSources.length === 0) {
       return base;
     }
-    return pidoovSources.concat(base);
+    return base.concat(nakiosSources);
   } catch {
     return base;
   }
+}
+
+// Legacy provider hooks intentionally disabled.
+async function appendPidoovSources(item, season, episode, sources) {
+  const base = Array.isArray(sources) ? sources.slice() : [];
+  return base;
 }
 
 async function appendNotariellesSources(item, season, episode, sources) {
   const base = Array.isArray(sources) ? sources.slice() : [];
-  if (!item || item.type !== "tv" || item.isAnime) {
-    return base;
-  }
-
-  const title = String(item?.title || "").trim();
-  if (title.length < 2) {
-    return base;
-  }
-
-  const safeSeason = Math.max(1, Number(season || 1));
-  const safeEpisode = Math.max(1, Number(episode || 1));
-  const params = new URLSearchParams({
-    title,
-    season: String(safeSeason),
-    episode: String(safeEpisode),
-  });
-
-  try {
-    const payload = await fetchJson(`${API_BASE}/notarielles-source?${params.toString()}`, {
-      timeoutMs: NOTARIELLES_SOURCE_TIMEOUT_MS,
-      retryDelays: [400, 1000],
-    });
-    const raw = Array.isArray(payload?.data?.sources) ? payload.data.sources : [];
-    if (raw.length === 0) {
-      return base;
-    }
-
-    const existing = new Set(base.map((entry) => getSourceDedupKey(entry)).filter(Boolean));
-    const notariellesSources = raw
-      .map((entry, index) =>
-        normalizeSourceEntry(
-          {
-            ...entry,
-            source_name: String(entry?.source_name || entry?.name || "Notarielles").trim() || "Notarielles",
-          },
-          index
-        )
-      )
-      .filter((entry) => {
-        if (!entry) {
-          return false;
-        }
-        const key = getSourceDedupKey(entry);
-        if (!key || existing.has(key)) {
-          return false;
-        }
-        existing.add(key);
-        return true;
-      });
-
-    if (notariellesSources.length === 0) {
-      return base;
-    }
-    return notariellesSources.concat(base);
-  } catch {
-    return base;
-  }
+  return base;
 }
 
 async function appendRendezvousSources(item, season, episode, sources) {
   const base = Array.isArray(sources) ? sources.slice() : [];
-  if (!item || item.isAnime) {
-    return base;
-  }
-
-  const title = String(item?.title || "").trim();
-  if (title.length < 2) {
-    return base;
-  }
-
-  const mediaType = getOwnedSourceMediaType(item);
-  const safeSeason = Math.max(1, Number(season || 1));
-  const safeEpisode = Math.max(1, Number(episode || 1));
-  const year = getItemReleaseYear(item);
-  const params = new URLSearchParams({
-    title,
-    type: mediaType,
-    season: String(safeSeason),
-    episode: String(safeEpisode),
-  });
-  if (year > 0) {
-    params.set("year", String(year));
-  }
-
-  try {
-    const payload = await fetchJson(`${API_BASE}/rendezvous-source?${params.toString()}`, {
-      timeoutMs: RENDEZVOUS_SOURCE_TIMEOUT_MS,
-      retryDelays: [450, 1100],
-    });
-    const raw = Array.isArray(payload?.data?.sources) ? payload.data.sources : [];
-    if (raw.length === 0) {
-      return base;
-    }
-
-    const existing = new Set(base.map((entry) => getSourceDedupKey(entry)).filter(Boolean));
-    const rendezvousSources = raw
-      .map((entry, index) =>
-        normalizeSourceEntry(
-          {
-            ...entry,
-            source_name: String(entry?.source_name || entry?.name || "Rendezvous").trim() || "Rendezvous",
-          },
-          index
-        )
-      )
-      .filter((entry) => {
-        if (!entry) {
-          return false;
-        }
-        const key = getSourceDedupKey(entry);
-        if (!key || existing.has(key)) {
-          return false;
-        }
-        existing.add(key);
-        return true;
-      });
-
-    if (rendezvousSources.length === 0) {
-      return base;
-    }
-    // Keep existing source priority, add rendezvous as extra fallback pool.
-    return base.concat(rendezvousSources);
-  } catch {
-    return base;
-  }
+  return base;
 }
 
 async function appendAnimeSibnetSource(item, season, episode, sources, language = "") {
@@ -8052,29 +7963,8 @@ function isBlockedPlaybackSourceUrl(rawUrl, formatHint = "") {
     return true;
   }
 
-  if (host === "notarielles.fr") {
-    if (
-      path.includes("/categorie-series/") ||
-      path.includes("/serie-vf.php") ||
-      path.includes("/regarder.php") ||
-      path.includes("/wb.php") ||
-      path.includes("/register.php")
-    ) {
-      return true;
-    }
-  }
-
-  if (host === "rendezvousmusical.fr") {
-    if (/\/vf-\d+-[^/]+\/stream-[^/]+\.html/.test(path) || path.includes("/wb.php") || path.includes("/register.php")) {
-      return true;
-    }
-    if (path === "/go.php" && !String(parsed.search || "").trim()) {
-      return true;
-    }
-  }
-
   const looksDirectMedia = /\.(m3u8|mp4|webm|m4s|mpd)(?:$|\?)/i.test(withQuery);
-  if (format === "embed" && !looksDirectMedia && (host === "notarielles.fr" || host === "rendezvousmusical.fr")) {
+  if (format === "embed" && !looksDirectMedia && /(?:^|\.)nakios\.site$/.test(host)) {
     return true;
   }
 

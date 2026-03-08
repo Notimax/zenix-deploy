@@ -43,7 +43,7 @@ STREAMING/PLAYBACK NOTES
   VF first, then MULTI, then VOSTFR (VO removed when FR-friendly sources exist).
 - Player tries to select French audio track automatically when a source exposes multiple audio tracks.
 - Playback hardening:
-  - non-playable embed/gate URLs are filtered before entering the player pool (Notarielles/Rendezvous page wrappers, ad/gate hosts, store links).
+  - non-playable embed/gate URLs are filtered before entering the player pool (ad/gate hosts, store links).
   - movie source ranking now prioritizes direct media formats (`hls/mp4/webm/dash`) over embeds.
   - if at least one direct movie source exists, embed-only alternatives are dropped for that movie.
 
@@ -78,85 +78,23 @@ OWNED SOURCES (LEGAL VF)
 - URLs are generated server-side to HLS manifests and injected as owned sources.
 - Example ready for movie `3940` exists in `zenix-owned-sources.example.json`.
 
-PIDOOV INTEGRATION (GLOBAL FALLBACK)
-- New backend endpoint: `/api/pidoov-source`
-- Purpose: title/year matching + extraction of pidoov player iframe URLs as extra fallback sources.
-- Includes static fallback file: `pidoov-static-sources.json` (used when runtime crawl is blocked upstream).
-- Frontend now injects pidoov sources automatically in:
-  - movie playback source pool
-  - episode playback source pool
-  - detail language compatibility sync
-- Server-side cache controls:
-  - `PIDOOV_INDEX_CACHE_MS`
-  - `PIDOOV_LOOKUP_CACHE_MS`
-  - `PIDOOV_DETAIL_CACHE_MS`
-- `PIDOOV_BOOTSTRAP_PAGES_PER_CATEGORY`
-- `PIDOOV_MAX_PAGES_PER_CATEGORY`
-- `PIDOOV_FETCH_CONCURRENCY`
-- `PIDOOV_MAX_MATCH_CANDIDATES`
-
-NOTARIELLES INTEGRATION (SERIES FALLBACK)
-- New backend endpoint: `/api/notarielles-source`
-- Target: series episodes by `title + season + episode`.
-- Index strategy:
-  - reads `https://notarielles.fr/sitemaps.xml` when available
-  - extracts episode URLs from seed pages (`/`, `/series-en-streaming/`, `series-VF`, `series-VOSTFR`)
-  - probes extra category pages from sitemap for recent episode links
-  - merges static fallback file `notarielles-static-sources.json` when live crawl is blocked
-- Frontend injection:
-  - `zenix.js` now appends Notarielles sources for TV (non-anime) episodes.
-  - Merge order for episodes: Owned -> Notarielles -> Pidoov -> Anime Sibnet fallback.
-- Page-level Notarielles fallbacks are disabled in backend source resolution to avoid `refused to connect` embeds.
-- Server-side cache controls:
-  - `NOTARIELLES_INDEX_CACHE_MS`
-  - `NOTARIELLES_SEARCH_CACHE_MS`
-  - `NOTARIELLES_PAGE_CACHE_MS`
-  - `NOTARIELLES_MAX_SITEMAPS`
-  - `NOTARIELLES_PAGE_PROBE_COUNT`
-  - `NOTARIELLES_FETCH_CONCURRENCY`
-  - `NOTARIELLES_MAX_MATCH_CANDIDATES`
-  - `NOTARIELLES_STATIC_SOURCES_FILE`
-
-RENDEZVOUS INTEGRATION (MOVIES + SERIES FALLBACK)
-- New backend endpoint: `/api/rendezvous-source`
-- Target: movies by `title + year` and episodes by `title + season + episode`.
-- Index strategy:
-  - reads `https://rendezvousmusical.fr/sitemaps.xml` when available
-  - extracts stream entry URLs from seed pages (`/`, `/films-gratuit/`, `/telecharger-series/`, `/page/2/`)
-  - probes sitemap pagination pages for fresh links
-  - merges static fallback file `rendezvous-static-sources.json` when live crawl is blocked
-- Frontend injection:
-  - `zenix.js` appends Rendezvous sources as additional fallback for movies and TV non-anime.
-  - Merge order for episodes: Owned -> Notarielles -> Pidoov -> Rendezvous -> Anime Sibnet fallback.
-  - Merge order for movies: existing sources -> Pidoov -> Rendezvous fallback.
-- Reader parsing now supports extended provider rows from source pages:
-  - server aliases in player tabs (`younetu/netu`, `dood/doodstream`, `fembed`, `uqload`, `uptostream`, `vidoza`, `upvid`)
-  - fallback text patterns like `Lien 1: netu ...`
-  - external `a.php?b=...` links (Rakuten/Google/Primevideo) are parsed but kept lower priority than streaming hosts.
-- Server-side cache controls:
-  - `RENDEZVOUS_INDEX_CACHE_MS`
-  - `RENDEZVOUS_SEARCH_CACHE_MS`
-  - `RENDEZVOUS_PAGE_CACHE_MS`
-  - `RENDEZVOUS_MAX_SITEMAPS`
-  - `RENDEZVOUS_PAGE_PROBE_COUNT`
-  - `RENDEZVOUS_FETCH_CONCURRENCY`
-  - `RENDEZVOUS_MAX_MATCH_CANDIDATES`
-  - `RENDEZVOUS_STATIC_SOURCES_FILE`
-
-MULTI-PROVIDER CATALOG + CALENDAR FUSION
-- New backend endpoint: `/api/catalog/supplemental`
-  - exposes normalized catalog rows from owned external providers (currently Pidoov + Rendezvous).
-  - page-compatible structure with `current_page`, `last_page`, `data`.
-- Frontend catalog sync now merges:
-  - Purstream catalog page + supplemental provider page
-  - semantic dedupe (`title + type + year + season + episode`) to avoid duplicates across providers.
-- Calendar overview now merges supplemental provider entries too:
-  - `/api/calendar/overview` includes `data.supplemental` block and `providerStatus.supplemental`.
-  - merged stream is now: Purstream + supplemental providers + Anime planning.
-- Supplemental tuning keys:
-  - `SUPPLEMENTAL_CATALOG_CACHE_MS`
-  - `SUPPLEMENTAL_CATALOG_PAGE_SIZE`
-  - `SUPPLEMENTAL_CALENDAR_LIMIT`
+NAKIOS INTEGRATION (MAIN EXTERNAL PROVIDER)
+- Legacy providers removed from runtime:
+  - `pidoov.com`
+  - `notarielles.fr`
+  - `rendezvousmusical.fr`
+- New backend endpoint: `/api/nakios-source`
+  - resolves movie/episode sources from Nakios (`api.nakios.site`) using `tmdbId` or `title + type + year`.
+  - frontend injection now uses Nakios as the external fallback pool for movies and series.
+- Supplemental catalog now uses Nakios only:
+  - endpoint remains `/api/catalog/supplemental`
+  - rows are built from Nakios movie/series feeds with semantic dedupe.
+  - provider marker is now `external_provider: nakios`.
+- Calendar overview still merges supplemental entries through `/api/calendar/overview`,
+  with source link set to Nakios.
+- Nakios tuning keys:
+  - `NAKIOS_CATALOG_PAGES_PER_FEED`
+  - `NAKIOS_LOOKUP_CACHE_MS`
 
 LATEST FIX LOG (2026-03-08)
 - High 404 noise fix:
@@ -169,6 +107,9 @@ LATEST FIX LOG (2026-03-08)
   - first supplemental page now returns mostly real covers instead of placeholders.
 - iframe warning fix:
   - removed redundant `allowfullscreen` attributes in `index.html` where `allow` already includes fullscreen.
+- Provider migration:
+  - removed runtime source/catalog integrations for Pidoov, Notarielles, and Rendezvous.
+  - Nakios is now the single external provider for fallback sources + supplemental catalog entries.
 
 BRUTE TEST COMMAND (REFERENCE)
 - Test file: `__tmp_brut_f1_mercredi_matrix.js`
@@ -213,3 +154,11 @@ LAST BRUTE RESULT (LIVE RERUN, 2026-03-08)
 - Notes:
   - F1 + Mercredi runs stayed stable on desktop and iPhone 13 WebKit.
   - iOS fallback statuses (`Fallback iOS actif`, `Lecture segment ...`) can appear transiently without playback failure.
+
+LAST BRUTE RESULT (LOCAL AFTER NAKIOS MIGRATION, 2026-03-08)
+- Source: `__tmp_brut_f1_mercredi_matrix_result_after_nakios_local_v2.json`
+- Summary:
+  - total runs: 8
+  - passed: 8
+  - failed: 0
+  - `/api/media/*/sheet` 404 count during matrix: 0

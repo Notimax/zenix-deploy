@@ -12,9 +12,35 @@ const CANONICAL_SCHEME =
 const REMOTE_API_BASE = "https://api.purstream.co/api/v1";
 const PURSTREAM_API_BASE = "https://api.purstream.co/api/v1";
 const PURSTREAM_WEB_BASE = "https://purstream.co";
+const NAKIOS_BASE = "https://nakios.site";
+const NAKIOS_HOST = "nakios.site";
+const NAKIOS_API_BASE = "https://api.nakios.site";
+const NAKIOS_API_HOST = "api.nakios.site";
 const DEFAULT_BROWSER_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 const DEFAULT_ACCEPT_LANGUAGE = "fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7";
+const NAKIOS_CATALOG_PAGES_PER_FEED = Math.max(
+  1,
+  toInt(process.env.NAKIOS_CATALOG_PAGES_PER_FEED, 2, 1, 6)
+);
+const NAKIOS_LOOKUP_CACHE_MS = Math.max(
+  60 * 1000,
+  Number(process.env.NAKIOS_LOOKUP_CACHE_MS || 30 * 60 * 1000)
+);
+const NAKIOS_FETCH_HEADERS = {
+  Referer: `${NAKIOS_BASE}/`,
+  Origin: NAKIOS_BASE,
+  "Accept-Language": DEFAULT_ACCEPT_LANGUAGE,
+};
+const NAKIOS_CATALOG_FEEDS = [
+  { mediaType: "movie", path: "/api/movies/popular" },
+  { mediaType: "movie", path: "/api/movies/trending" },
+  { mediaType: "movie", path: "/api/movies/upcoming" },
+  { mediaType: "movie", path: "/api/movies/top-rated" },
+  { mediaType: "tv", path: "/api/series/popular" },
+  { mediaType: "tv", path: "/api/series/trending" },
+  { mediaType: "tv", path: "/api/series/top-rated" },
+];
 const PIDOOV_BASE = "https://pidoov.com";
 const PIDOOV_HOST = "pidoov.com";
 const PIDOOV_HOME_PATH = "/xv5lzk";
@@ -197,6 +223,7 @@ const calendarCache = new Map();
 const animeSibnetCache = new Map();
 const pidoovDetailCache = new Map();
 const pidoovLookupCache = new Map();
+const nakiosLookupCache = new Map();
 const notariellesPageCache = new Map();
 const rendezvousPageCache = new Map();
 const zenixOwnedSourcesCache = {
@@ -240,6 +267,11 @@ const rendezvousStaticCache = {
   entries: [],
 };
 const supplementalCatalogCache = {
+  loadedAt: 0,
+  entries: [],
+  inFlight: null,
+};
+const nakiosCatalogCache = {
   loadedAt: 0,
   entries: [],
   inFlight: null,
@@ -3500,7 +3532,9 @@ function scoreSupplementalCandidate(entry) {
     score += 8;
   }
   const provider = String(entry.provider || "").trim().toLowerCase();
-  if (provider === "pidoov") {
+  if (provider === "nakios") {
+    score += 16;
+  } else if (provider === "pidoov") {
     score += 14;
   } else if (provider === "rendezvous") {
     score += 12;
@@ -3534,6 +3568,10 @@ function isAllowedSupplementalDetailHost(hostname) {
     return false;
   }
   return (
+    safeHost === NAKIOS_HOST ||
+    safeHost.endsWith(`.${NAKIOS_HOST}`) ||
+    safeHost === NAKIOS_API_HOST ||
+    safeHost.endsWith(`.${NAKIOS_API_HOST}`) ||
     safeHost === PIDOOV_HOST ||
     safeHost.endsWith(`.${PIDOOV_HOST}`) ||
     safeHost === RENDEZVOUS_HOST ||
@@ -4005,59 +4043,216 @@ function mapSupplementalCandidateToCatalogRow(entry, fallbackIdSet) {
   };
 }
 
-async function loadSupplementalCatalogEntries(force = false) {
+function toNakiosTmdbPosterUrl(posterPath) {
+  const pathRaw = String(posterPath || "").trim();
+  if (!pathRaw) {
+    return "";
+  }
+  const pathSafe = pathRaw.startsWith("/") ? pathRaw : `/${pathRaw}`;
+  return `https://www.themoviedb.org/t/p/w600_and_h900_bestv2${pathSafe}`;
+}
+
+function toNakiosTmdbBackdropUrl(backdropPath, fallbackPosterPath = "") {
+  const pathRaw = String(backdropPath || fallbackPosterPath || "").trim();
+  if (!pathRaw) {
+    return "";
+  }
+  const pathSafe = pathRaw.startsWith("/") ? pathRaw : `/${pathRaw}`;
+  return `https://www.themoviedb.org/t/p/w1920_and_h1080_bestv2${pathSafe}`;
+}
+
+function getNakiosTitle(entry, mediaType) {
+  if (mediaType === "tv") {
+    return String(entry?.name || entry?.title || "").trim();
+  }
+  return String(entry?.title || entry?.name || "").trim();
+}
+
+function getNakiosReleaseDate(entry, mediaType) {
+  const raw = mediaType === "tv" ? String(entry?.first_air_date || "").trim() : String(entry?.release_date || "").trim();
+  const iso = toIsoDate(raw);
+  return iso || "";
+}
+
+function scoreNakiosCatalogEntry(entry, mediaType) {
+  let score = 0;
+  const popularity = Number(entry?.popularity || 0);
+  const votes = Number(entry?.vote_count || 0);
+  const average = Number(entry?.vote_average || 0);
+  score += Math.max(0, Math.min(240, popularity / 2));
+  score += Math.max(0, Math.min(60, average * 6));
+  score += Math.max(0, Math.min(80, votes / 20));
+  if (String(entry?.poster_path || "").trim()) {
+    score += 24;
+  }
+  if (String(entry?.backdrop_path || "").trim()) {
+    score += 16;
+  }
+  if (mediaType === "tv") {
+    score += 6;
+  } else {
+    score += 8;
+  }
+  return Math.round(score);
+}
+
+function buildNakiosCatalogRow(entry, mediaType, fallbackIdSet) {
+  const tmdbId = toInt(entry?.id, 0, 0, 999999999);
+  if (tmdbId <= 0) {
+    return null;
+  }
+
+  const title = getNakiosTitle(entry, mediaType);
+  const titleKey = normalizeTitleKey(title);
+  if (!title || !titleKey) {
+    return null;
+  }
+
+  const releaseDate = getNakiosReleaseDate(entry, mediaType);
+  const year = toInt(parseYearFromText(releaseDate), 0, 0, 2099);
+  const poster = toNakiosTmdbPosterUrl(entry?.poster_path || "");
+  const backdrop = toNakiosTmdbBackdropUrl(entry?.backdrop_path || "", entry?.poster_path || "");
+  const rawKey = `${mediaType}:${tmdbId}`;
+
+  let id = buildSupplementalMediaId("nakios", rawKey);
+  if (id <= 0) {
+    return null;
+  }
+  const reserved = fallbackIdSet instanceof Set ? fallbackIdSet : new Set();
+  while (reserved.has(id)) {
+    id += 1;
+  }
+  reserved.add(id);
+
+  return {
+    id,
+    type: mediaType === "tv" ? "tv" : "movie",
+    title,
+    isAnime: false,
+    runtime: null,
+    release_date: releaseDate || null,
+    end_date: null,
+    lang: "VF",
+    language: "VF",
+    small_poster_path: poster,
+    large_poster_path: poster,
+    wallpaper_poster_path: backdrop || poster,
+    external_provider: "nakios",
+    external_key: rawKey,
+    external_tmdb_id: tmdbId,
+    external_year: year,
+    external_season: 0,
+    external_episode: 0,
+    external_language: "VF",
+    external_detail_url: `${NAKIOS_BASE}/catalogue?q=${encodeURIComponent(title)}`,
+    external_label: "NAKIOS",
+    supplemental_rank: scoreNakiosCatalogEntry(entry, mediaType),
+    supplemental_date: releaseDate || "",
+    title_key: titleKey,
+  };
+}
+
+function buildNakiosSemanticKey(row) {
+  const titleKey = normalizeTitleKey(row?.title || "");
+  const mediaType = String(row?.type || "").toLowerCase() === "tv" ? "tv" : "movie";
+  const year = toInt(row?.external_year, 0, 0, 2099);
+  return `${titleKey}::${mediaType}::${year}::0::0`;
+}
+
+function pickBestNakiosCatalogRow(current, next) {
+  if (!current) {
+    return next;
+  }
+  if (!next) {
+    return current;
+  }
+  const currentScore = Number(current?.supplemental_rank || 0);
+  const nextScore = Number(next?.supplemental_rank || 0);
+  if (nextScore > currentScore) {
+    return next;
+  }
+  if (nextScore < currentScore) {
+    return current;
+  }
+  const currentDate = Date.parse(String(current?.supplemental_date || current?.release_date || ""));
+  const nextDate = Date.parse(String(next?.supplemental_date || next?.release_date || ""));
+  const currentSafeDate = Number.isFinite(currentDate) ? currentDate : 0;
+  const nextSafeDate = Number.isFinite(nextDate) ? nextDate : 0;
+  if (nextSafeDate > currentSafeDate) {
+    return next;
+  }
+  const currentPoster = String(current?.large_poster_path || current?.small_poster_path || "").trim();
+  const nextPoster = String(next?.large_poster_path || next?.small_poster_path || "").trim();
+  if (!currentPoster && nextPoster) {
+    return next;
+  }
+  return current;
+}
+
+async function fetchNakiosFeedPage(feed, page) {
+  const mediaType = String(feed?.mediaType || "").toLowerCase() === "tv" ? "tv" : "movie";
+  const path = String(feed?.path || "").trim();
+  if (!path) {
+    return [];
+  }
+  const target = `${NAKIOS_API_BASE}${path}?page=${Math.max(1, Number(page || 1))}`;
+  const response = await fetchRemote(target, NAKIOS_FETCH_HEADERS);
+  if (response.status < 200 || response.status >= 300) {
+    return [];
+  }
+  const payload = parseJsonSafe(response.body);
+  const rows = Array.isArray(payload?.results) ? payload.results : [];
+  return rows.map((entry) => ({ mediaType, entry }));
+}
+
+async function loadNakiosCatalogEntries(force = false) {
   const now = Date.now();
   if (
     !force &&
-    supplementalCatalogCache.loadedAt > 0 &&
-    now - supplementalCatalogCache.loadedAt < SUPPLEMENTAL_CATALOG_CACHE_MS &&
-    Array.isArray(supplementalCatalogCache.entries) &&
-    supplementalCatalogCache.entries.length > 0
+    nakiosCatalogCache.loadedAt > 0 &&
+    now - nakiosCatalogCache.loadedAt < SUPPLEMENTAL_CATALOG_CACHE_MS &&
+    Array.isArray(nakiosCatalogCache.entries) &&
+    nakiosCatalogCache.entries.length > 0
   ) {
-    return supplementalCatalogCache.entries;
+    return nakiosCatalogCache.entries;
   }
-  if (supplementalCatalogCache.inFlight) {
-    return supplementalCatalogCache.inFlight;
+  if (nakiosCatalogCache.inFlight) {
+    return nakiosCatalogCache.inFlight;
   }
 
   const task = (async () => {
-    const [pidoovDynamicResult, rendezvousDynamicResult] = await Promise.allSettled([
-      loadPidoovIndex(false),
-      loadRendezvousIndex(false),
-    ]);
-    const pidoovStatic = loadPidoovStaticEntries();
-    const rendezvousStatic = loadRendezvousStaticEntries();
-
-    const pidoovDynamic =
-      pidoovDynamicResult.status === "fulfilled" && Array.isArray(pidoovDynamicResult.value)
-        ? pidoovDynamicResult.value
-        : [];
-    const rendezvousDynamic =
-      rendezvousDynamicResult.status === "fulfilled" && Array.isArray(rendezvousDynamicResult.value)
-        ? rendezvousDynamicResult.value
-        : [];
-
-    const candidates = []
-      .concat(buildPidoovSupplementalCandidates(pidoovDynamic, "Pidoov", false))
-      .concat(buildPidoovSupplementalCandidates(pidoovStatic, "Pidoov", true))
-      .concat(buildRendezvousSupplementalCandidates(rendezvousDynamic, "Rendezvous", false))
-      .concat(buildRendezvousSupplementalCandidates(rendezvousStatic, "Rendezvous", true));
-
-    const bySemantic = new Map();
-    candidates.forEach((candidate) => {
-      const key = buildSupplementalSemanticKey(candidate);
-      if (!key || key.startsWith("::")) {
-        return;
+    const jobs = [];
+    NAKIOS_CATALOG_FEEDS.forEach((feed) => {
+      for (let page = 1; page <= NAKIOS_CATALOG_PAGES_PER_FEED; page += 1) {
+        jobs.push({ feed, page });
       }
-      const current = bySemantic.get(key);
-      bySemantic.set(key, chooseBestSupplementalCandidate(current, candidate));
+    });
+
+    const results = await mapWithConcurrency(jobs, Math.min(6, jobs.length || 1), async (job) => {
+      try {
+        return await fetchNakiosFeedPage(job.feed, job.page);
+      } catch {
+        return [];
+      }
     });
 
     const reservedIds = new Set();
-    const rows = Array.from(bySemantic.values())
-      .map((entry) => mapSupplementalCandidateToCatalogRow(entry, reservedIds))
+    const candidates = results
+      .flat()
+      .map((row) => buildNakiosCatalogRow(row?.entry, row?.mediaType, reservedIds))
       .filter(Boolean);
 
+    const bySemantic = new Map();
+    candidates.forEach((row) => {
+      const key = buildNakiosSemanticKey(row);
+      if (!key || key.startsWith("::")) {
+        return;
+      }
+      const currentBest = bySemantic.get(key);
+      bySemantic.set(key, pickBestNakiosCatalogRow(currentBest, row));
+    });
+
+    const rows = Array.from(bySemantic.values());
     rows.sort((left, right) => {
       const leftRank = Number(left?.supplemental_rank || 0);
       const rightRank = Number(right?.supplemental_rank || 0);
@@ -4076,22 +4271,181 @@ async function loadSupplementalCatalogEntries(force = false) {
       });
     });
 
-    supplementalCatalogCache.entries = rows;
-    supplementalCatalogCache.loadedAt = Date.now();
-    return supplementalCatalogCache.entries;
+    nakiosCatalogCache.entries = rows;
+    nakiosCatalogCache.loadedAt = Date.now();
+    return nakiosCatalogCache.entries;
   })();
 
-  supplementalCatalogCache.inFlight = task;
+  nakiosCatalogCache.inFlight = task;
   try {
     return await task;
-  } catch (error) {
-    if (Array.isArray(supplementalCatalogCache.entries) && supplementalCatalogCache.entries.length > 0) {
-      return supplementalCatalogCache.entries;
-    }
-    throw error;
   } finally {
-    supplementalCatalogCache.inFlight = null;
+    nakiosCatalogCache.inFlight = null;
   }
+}
+
+async function resolveNakiosTmdbIdBySearch(title, mediaType, year = 0) {
+  const safeTitle = String(title || "").trim();
+  if (safeTitle.length < 2) {
+    return 0;
+  }
+  const normalizedType = String(mediaType || "").toLowerCase() === "tv" ? "tv" : "movie";
+  const safeYear = toInt(year, 0, 0, 2099);
+  const titleKey = normalizeTitleKey(safeTitle);
+  const cacheKey = `nakios:${titleKey}:${normalizedType}:${safeYear}`;
+  const cached = nakiosLookupCache.get(cacheKey);
+  if (cached && Date.now() < Number(cached.expiresAt || 0)) {
+    return Number(cached.tmdbId || 0);
+  }
+
+  const target = `${NAKIOS_API_BASE}/api/search/multi?query=${encodeURIComponent(safeTitle)}`;
+  const response = await fetchRemote(target, NAKIOS_FETCH_HEADERS);
+  if (response.status < 200 || response.status >= 300) {
+    nakiosLookupCache.set(cacheKey, {
+      tmdbId: 0,
+      expiresAt: Date.now() + Math.min(10 * 60 * 1000, NAKIOS_LOOKUP_CACHE_MS),
+    });
+    return 0;
+  }
+
+  const payload = parseJsonSafe(response.body);
+  const rows = Array.isArray(payload?.results) ? payload.results : [];
+  const queryTitleKey = normalizeTitleKey(safeTitle);
+  const scored = rows
+    .filter((entry) => {
+      const type = String(entry?.media_type || "").toLowerCase();
+      return type === normalizedType;
+    })
+    .map((entry) => {
+      const rowTitle = String(entry?.title || entry?.name || "").trim();
+      const rowTitleKey = normalizeTitleKey(rowTitle);
+      const rowYearRaw =
+        normalizedType === "tv"
+          ? String(entry?.first_air_date || "").trim()
+          : String(entry?.release_date || "").trim();
+      const rowYear = toInt(parseYearFromText(rowYearRaw), 0, 0, 2099);
+      let score = 0;
+      if (rowTitleKey === queryTitleKey) {
+        score += 140;
+      } else if (rowTitleKey.includes(queryTitleKey) || queryTitleKey.includes(rowTitleKey)) {
+        score += 80;
+      }
+      if (safeYear > 0 && rowYear > 0) {
+        const diff = Math.abs(rowYear - safeYear);
+        if (diff === 0) {
+          score += 70;
+        } else if (diff === 1) {
+          score += 38;
+        } else if (diff <= 2) {
+          score += 16;
+        } else {
+          score -= diff * 4;
+        }
+      }
+      score += Math.max(0, Math.min(120, Number(entry?.popularity || 0)));
+      return {
+        entry,
+        score,
+      };
+    })
+    .sort((left, right) => right.score - left.score);
+
+  const best = scored[0]?.entry;
+  const tmdbId = toInt(best?.id, 0, 0, 999999999);
+  nakiosLookupCache.set(cacheKey, {
+    tmdbId,
+    expiresAt: Date.now() + NAKIOS_LOOKUP_CACHE_MS,
+  });
+  prunePidoovTimedCache(nakiosLookupCache, 3200);
+  return tmdbId;
+}
+
+function normalizeNakiosSourceUrl(rawUrl) {
+  const value = String(rawUrl || "").trim();
+  if (!value) {
+    return "";
+  }
+  if (value.startsWith("//")) {
+    return `https:${value}`;
+  }
+  if (value.startsWith("/")) {
+    return `${NAKIOS_API_BASE}${value}`;
+  }
+  return value;
+}
+
+function guessNakiosSourceFormat(source, resolvedUrl) {
+  const raw = String(source?.format || "").trim().toLowerCase();
+  if (raw === "embed" || raw === "hls" || raw === "mp4") {
+    return raw;
+  }
+  if (source?.isEmbed === true) {
+    return "embed";
+  }
+  if (source?.isM3U8 === true || /\.m3u8(?:$|\?)/i.test(resolvedUrl)) {
+    return "hls";
+  }
+  if (/\.mp4(?:$|\?)/i.test(resolvedUrl)) {
+    return "mp4";
+  }
+  return "embed";
+}
+
+async function resolveNakiosSourcesByTmdbId(mediaType, tmdbId, season = 1, episode = 1) {
+  const safeTmdbId = toInt(tmdbId, 0, 0, 999999999);
+  if (safeTmdbId <= 0) {
+    return [];
+  }
+  const normalizedType = String(mediaType || "").toLowerCase() === "tv" ? "tv" : "movie";
+  const safeSeason = toInt(season, 1, 1, 500);
+  const safeEpisode = toInt(episode, 1, 1, 50000);
+  const target =
+    normalizedType === "tv"
+      ? `${NAKIOS_API_BASE}/api/sources/tv/${safeTmdbId}/${safeSeason}/${safeEpisode}`
+      : `${NAKIOS_API_BASE}/api/sources/movie/${safeTmdbId}`;
+
+  const response = await fetchRemote(target, NAKIOS_FETCH_HEADERS);
+  if (response.status < 200 || response.status >= 300) {
+    return [];
+  }
+  const payload = parseJsonSafe(response.body);
+  const rows = Array.isArray(payload?.sources) ? payload.sources : [];
+  const dedupe = new Set();
+  const out = [];
+  rows.forEach((sourceRow, index) => {
+    const resolvedUrl = normalizeNakiosSourceUrl(sourceRow?.url || sourceRow?.stream_url || "");
+    const parsed = parseSafeRemoteUrl(resolvedUrl);
+    if (!parsed) {
+      return;
+    }
+    const streamUrl = parsed.href;
+    if (!streamUrl || dedupe.has(streamUrl)) {
+      return;
+    }
+    dedupe.add(streamUrl);
+    const language = normalizePidoovLanguage(sourceRow?.lang || sourceRow?.language || sourceRow?.name || "") || "VF";
+    const sourceName = sanitizeToken(
+      String(sourceRow?.name || sourceRow?.provider || sourceRow?.original_player || "NAKIOS").trim(),
+      80
+    );
+    out.push({
+      stream_url: streamUrl,
+      source_name: sourceName || "NAKIOS",
+      quality: sanitizeToken(String(sourceRow?.quality || "HD"), 24) || "HD",
+      language,
+      format: guessNakiosSourceFormat(sourceRow, streamUrl),
+      priority: (language === "VF" ? 390 : language === "MULTI" ? 368 : language === "VOSTFR" ? 356 : 330) - Math.min(40, index * 4),
+    });
+  });
+  return out;
+}
+
+async function loadSupplementalCatalogEntries(force = false) {
+  const rows = await loadNakiosCatalogEntries(force);
+  supplementalCatalogCache.entries = Array.isArray(rows) ? rows : [];
+  supplementalCatalogCache.loadedAt = Date.now();
+  supplementalCatalogCache.inFlight = null;
+  return supplementalCatalogCache.entries;
 }
 
 function buildSupplementalCatalogPage(entries, page = 1, pageSize = SUPPLEMENTAL_CATALOG_PAGE_SIZE) {
@@ -5909,8 +6263,7 @@ async function handleCalendarOverview(req, res, requestUrl) {
         sourceLinks: {
           purstream: `${PURSTREAM_WEB_BASE}/calendar`,
           animeSama: ANIME_PLANNING_URL,
-          pidoov: PIDOOV_BASE,
-          rendezvous: RENDEZVOUS_BASE,
+          nakios: NAKIOS_BASE,
         },
         providerStatus: {
           catalog: purstreamResult.status === "fulfilled",
@@ -5971,8 +6324,7 @@ async function handleCatalogSupplemental(req, res, requestUrl) {
         generatedAt: new Date().toISOString(),
         items: pageData,
         providers: {
-          pidoov: PIDOOV_BASE,
-          rendezvous: RENDEZVOUS_BASE,
+          nakios: NAKIOS_BASE,
         },
       },
     });
@@ -6019,6 +6371,78 @@ async function handleAnimeSibnet(req, res, requestUrl) {
       reason.includes("not found") || reason.includes("unavailable") || reason.includes("missing") ? 404 : 502;
     sendJson(res, status, {
       error: "Anime sibnet unavailable",
+      reason: sanitizeToken(String(error?.message || ""), 120),
+    });
+    return true;
+  }
+}
+
+async function handleNakiosSource(req, res, requestUrl) {
+  if (requestUrl.pathname !== "/api/nakios-source") {
+    return false;
+  }
+  if (req.method !== "GET") {
+    sendJson(res, 405, { error: "Method Not Allowed" });
+    return true;
+  }
+
+  const mediaType = String(requestUrl.searchParams.get("type") || "movie").toLowerCase() === "tv" ? "tv" : "movie";
+  const title = String(requestUrl.searchParams.get("title") || "").trim();
+  const year = toInt(requestUrl.searchParams.get("year"), 0, 0, 2099);
+  const season = toInt(requestUrl.searchParams.get("season"), 1, 1, 500);
+  const episode = toInt(requestUrl.searchParams.get("episode"), 1, 1, 50000);
+  let tmdbId = toInt(requestUrl.searchParams.get("tmdbId"), 0, 0, 999999999);
+
+  if (tmdbId <= 0) {
+    if (title.length < 2) {
+      sendJson(res, 400, { error: "Missing title or tmdbId" });
+      return true;
+    }
+    try {
+      tmdbId = await resolveNakiosTmdbIdBySearch(title, mediaType, year);
+    } catch {
+      tmdbId = 0;
+    }
+  }
+
+  if (tmdbId <= 0) {
+    sendJson(res, 200, {
+      apiVersion: "zenix-nakios-source-v1",
+      type: "success",
+      data: {
+        title,
+        mediaType,
+        year,
+        season: mediaType === "tv" ? season : 1,
+        episode: mediaType === "tv" ? episode : 1,
+        tmdbId: 0,
+        count: 0,
+        sources: [],
+      },
+    });
+    return true;
+  }
+
+  try {
+    const sources = await resolveNakiosSourcesByTmdbId(mediaType, tmdbId, season, episode);
+    sendJson(res, 200, {
+      apiVersion: "zenix-nakios-source-v1",
+      type: "success",
+      data: {
+        title,
+        mediaType,
+        year,
+        season: mediaType === "tv" ? season : 1,
+        episode: mediaType === "tv" ? episode : 1,
+        tmdbId,
+        count: sources.length,
+        sources,
+      },
+    });
+    return true;
+  } catch (error) {
+    sendJson(res, 502, {
+      error: "Nakios source unavailable",
       reason: sanitizeToken(String(error?.message || ""), 120),
     });
     return true;
@@ -6422,22 +6846,10 @@ const server = http.createServer((req, res) => {
       if (handledAnimeSibnet) {
         return true;
       }
-      return handlePidoovSource(req, res, requestUrl);
+      return handleNakiosSource(req, res, requestUrl);
     })
-    .then((handledPidoovSource) => {
-      if (handledPidoovSource) {
-        return true;
-      }
-      return handleNotariellesSource(req, res, requestUrl);
-    })
-    .then((handledNotariellesSource) => {
-      if (handledNotariellesSource) {
-        return true;
-      }
-      return handleRendezvousSource(req, res, requestUrl);
-    })
-    .then((handledRendezvousSource) => {
-      if (handledRendezvousSource) {
+    .then((handledNakiosSource) => {
+      if (handledNakiosSource) {
         return true;
       }
       return handleZenixOwnedSource(req, res, requestUrl);
@@ -6514,19 +6926,6 @@ if (buildSuggestionsRelayUrl()) {
   console.log(`[suggestions] Relay enabled for ${SUGGESTIONS_EMAIL_TO}.`);
 } else {
   console.warn("[suggestions] Relay disabled: define SUGGESTIONS_RELAY_BASE and SUGGESTIONS_EMAIL_TO.");
-}
-
-const pidoovWarmupTimer = setTimeout(() => {
-  loadPidoovIndex(false)
-    .then(() => {
-      triggerPidoovFullIndexRefresh();
-    })
-    .catch(() => {
-      // best effort warmup only
-    });
-}, 2000);
-if (typeof pidoovWarmupTimer.unref === "function") {
-  pidoovWarmupTimer.unref();
 }
 
 server.listen(PORT, () => {
