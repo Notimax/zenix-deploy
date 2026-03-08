@@ -487,6 +487,7 @@ function applyDesktopMainNavFit() {
   }
   const isDesktop = window.matchMedia("(min-width: 1001px)").matches;
   refs.mainNav.classList.remove("is-tight", "is-ultra-tight");
+  document.body.classList.remove("nav-fit-stack");
   if (!isDesktop) {
     return;
   }
@@ -498,6 +499,9 @@ function applyDesktopMainNavFit() {
     return;
   }
   refs.mainNav.classList.add("is-ultra-tight");
+  if (refs.mainNav.scrollWidth > refs.mainNav.clientWidth + 1) {
+    document.body.classList.add("nav-fit-stack");
+  }
 }
 
 function scheduleDesktopMainNavFit(delayMs = 60) {

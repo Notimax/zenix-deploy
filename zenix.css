@@ -210,6 +210,29 @@ body.startup-lock {
   backdrop-filter: blur(14px);
 }
 
+body.nav-fit-stack .topbar {
+  grid-template-columns: 1fr;
+  gap: 10px;
+  padding: 12px 14px;
+}
+
+body.nav-fit-stack .main-nav {
+  justify-content: flex-start;
+}
+
+body.nav-fit-stack .header-tools {
+  justify-content: space-between;
+}
+
+body.nav-fit-stack .search-wrap {
+  min-width: 0;
+  width: 100%;
+}
+
+body.nav-fit-stack .search-input {
+  width: 100%;
+}
+
 .scroll-progress {
   position: absolute;
   top: 0;
