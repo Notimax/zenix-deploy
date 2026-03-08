@@ -66,6 +66,7 @@ const DASH_MIME = "application/dash+xml";
 const VIDEO_READY_TIMEOUT_MS = 12000;
 const HLS_READY_TIMEOUT_MS = 14000;
 const HLS_MANIFEST_TIMEOUT_MS = 15000;
+const EMBED_READY_TIMEOUT_MS = 12000;
 const HEARTBEAT_INTERVAL_MS = 30 * 1000;
 const HEARTBEAT_REQUEST_TIMEOUT_MS = 9000;
 const HEARTBEAT_KEY = "zenix-client-id-v1";
@@ -7189,14 +7190,78 @@ function resetPlayerEmbedFrame() {
   refs.playerEmbedFrame.setAttribute("src", "about:blank");
 }
 
-function showPlayerEmbedFrame(url) {
+function showPlayerEmbedFrame(url, options = {}) {
   if (!refs.playerEmbedFrame) {
     throw new Error("Embed frame unavailable");
   }
+  const frame = refs.playerEmbedFrame;
+  const safeUrl = String(url || "").trim();
+  if (!safeUrl) {
+    throw new Error("Embed source missing");
+  }
+
+  const token = Number(options?.token || 0);
+  const timeoutMs = Math.max(3000, Number(options?.timeoutMs || EMBED_READY_TIMEOUT_MS));
+
   refs.playerVideo.hidden = true;
   refs.playerVideo.controls = false;
-  refs.playerEmbedFrame.hidden = false;
-  refs.playerEmbedFrame.setAttribute("src", String(url || "").trim());
+  frame.hidden = false;
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let armed = false;
+    let timeoutId = 0;
+
+    const done = (error = null) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      frame.removeEventListener("load", onLoad);
+      frame.removeEventListener("error", onError);
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        timeoutId = 0;
+      }
+      if (error) {
+        reject(error);
+      } else {
+        resolve();
+      }
+    };
+
+    const onLoad = () => {
+      if (!armed) {
+        return;
+      }
+      if (token && token !== state.playToken) {
+        done();
+        return;
+      }
+      const current = String(frame.getAttribute("src") || "").trim();
+      if (!current || current === "about:blank") {
+        done(new Error("Embed source reset"));
+        return;
+      }
+      done();
+    };
+
+    const onError = () => {
+      done(new Error("Embed load error"));
+    };
+
+    frame.addEventListener("load", onLoad);
+    frame.addEventListener("error", onError);
+    frame.setAttribute("src", safeUrl);
+    armed = true;
+    timeoutId = window.setTimeout(() => {
+      if (token && token !== state.playToken) {
+        done();
+        return;
+      }
+      done(new Error("Embed timeout"));
+    }, timeoutMs);
+  });
 }
 
 function extractProxyTargetUrl(url) {
@@ -7438,7 +7503,11 @@ async function startPlayerSource(source, resumeTime, token) {
       try {
         teardownPlayerEngine(video);
         if (useEmbed) {
-          showPlayerEmbedFrame(streamUrl);
+          setPlayerStatus("Chargement source integree...");
+          await showPlayerEmbedFrame(streamUrl, {
+            token,
+            timeoutMs: EMBED_READY_TIMEOUT_MS,
+          });
           setPlayerStatus("Lecture en cours.");
         } else if (useHls) {
           resetPlayerEmbedFrame();
