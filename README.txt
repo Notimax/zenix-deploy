@@ -200,3 +200,16 @@ LAST BRUTE RESULT (LIVE ZENIX.BEST, 2026-03-08)
   - passed: 8
   - failed: 0
   - `/api/media/*/sheet` 404 count during matrix: 0
+
+LAST BRUTE RESULT (LIVE RERUN, 2026-03-08)
+- Source: `__tmp_brut_f1_mercredi_matrix_result_live_latest.json`
+- Command:
+  - `ZENIX_BASE_URL=https://zenix.best/ node __tmp_brut_f1_mercredi_matrix.js`
+- Summary:
+  - total runs: 8
+  - passed: 8
+  - failed: 0
+  - `/api/media/*/sheet` 404 count during matrix: 0
+- Notes:
+  - F1 + Mercredi runs stayed stable on desktop and iPhone 13 WebKit.
+  - iOS fallback statuses (`Fallback iOS actif`, `Lecture segment ...`) can appear transiently without playback failure.
