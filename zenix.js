@@ -3006,54 +3006,55 @@ function resolveCalendarEntryCover(entry, detailId = 0) {
   return cover || direct;
 }
 
-function hydrateCalendarCardFromDetails(card, detailId, fallbackTitle = "") {
-  const mediaId = Math.max(0, Number(detailId || 0));
-  if (!(card instanceof HTMLElement) || mediaId <= 0) {
+function hydrateCalendarCardsForMedia(mediaId, details = null) {
+  const safeId = Math.max(0, Number(mediaId || 0));
+  if (safeId <= 0) {
     return;
   }
 
-  ensureDetails(mediaId)
-    .then((details) => {
-      if (!card.isConnected || !details) {
-        return;
-      }
-      const mediaType = details.type === "tv" ? (Boolean(details.isAnime) ? "anime" : "serie") : "film";
-      const typeMap = {
-        film: "Film",
-        serie: "Serie",
-        anime: "Anime",
+  const apply = (resolved) => {
+    if (!resolved) {
+      return;
+    }
+    const mediaType = resolved.type === "tv" ? (Boolean(resolved.isAnime) ? "anime" : "serie") : "film";
+    const typeMap = {
+      film: "Film",
+      serie: "Serie",
+      anime: "Anime",
+    };
+    const item =
+      findItemById(safeId) || {
+        id: safeId,
+        type: resolved.type === "tv" ? "tv" : "movie",
+        title: String(resolved.title || "Sans titre"),
+        poster: normalizeImageUrl(resolved?.posters?.large || resolved?.posters?.small || resolved?.posters?.wallpaper || ""),
+        backdrop: normalizeImageUrl(
+          resolved?.posters?.wallpaper || resolved?.posters?.small || resolved?.posters?.large || ""
+        ),
+        isAnime: Boolean(resolved.isAnime),
       };
-      const badge = card.querySelector(".meta-pill");
-      if (badge) {
-        badge.textContent = typeMap[mediaType] || "Titre";
-      }
 
-      const image = card.querySelector("img");
-      if (image instanceof HTMLImageElement) {
-        const item =
-          findItemById(mediaId) || {
-            id: mediaId,
-            type: details.type === "tv" ? "tv" : "movie",
-            title: String(details.title || fallbackTitle || "Sans titre"),
-            poster: normalizeImageUrl(
-              details?.posters?.large || details?.posters?.small || details?.posters?.wallpaper || ""
-            ),
-            backdrop: normalizeImageUrl(
-              details?.posters?.wallpaper || details?.posters?.small || details?.posters?.large || ""
-            ),
-            isAnime: Boolean(details.isAnime),
-          };
-        setImageSourceSafely(
-          image,
-          resolveCardCover(item, details),
-          String(details.title || fallbackTitle || "Affiche"),
-          true
-        );
-      }
-    })
-    .catch(() => {
-      // best effort refresh only
-    });
+    document
+      .querySelectorAll(`.calendar-merged-card[data-calendar-media-id="${safeId}"]`)
+      .forEach((card) => {
+        const badge = card.querySelector(".meta-pill");
+        if (badge) {
+          badge.textContent = typeMap[mediaType] || "Titre";
+        }
+        const image = card.querySelector("img");
+        if (image instanceof HTMLImageElement) {
+          setImageSourceSafely(image, resolveCardCover(item, resolved), item.title || "Affiche", true);
+        }
+      });
+  };
+
+  if (details) {
+    apply(details);
+    return;
+  }
+  ensureDetails(safeId).then(apply).catch(() => {
+    // best effort refresh only
+  });
 }
 
 function renderCalendarSection() {
@@ -3116,6 +3117,7 @@ function renderCalendarSection() {
 
   refs.calendarMergedGrid.innerHTML = "";
   const mergedFragment = document.createDocumentFragment();
+  const pendingHydrateIds = new Set();
   const typeMap = {
     film: "Film",
     serie: "Serie",
@@ -3127,6 +3129,10 @@ function renderCalendarSection() {
     card.className = "calendar-merged-card media-card calendar-media-card";
     const detailId = resolveCalendarDetailId(entry);
     const hasDetails = detailId > 0;
+    if (hasDetails) {
+      card.dataset.calendarMediaId = String(detailId);
+      pendingHydrateIds.add(detailId);
+    }
     const linkLabel = hasDetails ? "Voir details" : "Bientot";
     const mediaType = getCalendarEntryMediaType(entry);
     const typeLabel = typeMap[mediaType] || "Titre";
@@ -3176,9 +3182,6 @@ function renderCalendarSection() {
 
     if (hasDetails) {
       card.classList.add("clickable");
-      if (index < 28) {
-        hydrateCalendarCardFromDetails(card, detailId, String(entry.title || "Affiche"));
-      }
       card.addEventListener("click", (event) => {
         const target = event.target;
         if (target instanceof HTMLElement && target.closest("button, a")) {
@@ -3205,6 +3208,9 @@ function renderCalendarSection() {
     refs.calendarMergedGrid.innerHTML = `<p class="empty">${escapeHtml(sourceHint)}</p>`;
   } else {
     refs.calendarMergedGrid.appendChild(mergedFragment);
+    pendingHydrateIds.forEach((mediaId) => {
+      hydrateCalendarCardsForMedia(mediaId);
+    });
     warmImageCacheFromPool(
       mergedRows.map((entry) => ({
         poster: resolveCalendarEntryCover(entry, Number(entry?.mediaId || 0)),
