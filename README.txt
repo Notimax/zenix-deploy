@@ -37,6 +37,7 @@ RELEASE QUALITY GATE (MANDATORY)
 - Before closing any streaming fix, run brute tests on BOTH desktop and phone:
   - Desktop: open detail + play + verify at least 20s continuous playback.
   - Phone simulation (iPhone 13 WebKit): run 3 tests of 20s each.
+  - Real phone check (iPhone Safari): run at least 1 manual 20s check on production, because automated WebKit in this environment can fail media codec playback.
   - If any run fails, keep iterating and redeploy until stable.
 
 KEY FILES
