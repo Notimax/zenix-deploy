@@ -376,6 +376,100 @@ const refs = {
 let searchDebounce = null;
 let lastProgressSave = 0;
 let toastTimer = null;
+let floatingNotificationGuardTimer = 0;
+
+function isLikelyFloatingThirdPartyNotification(node) {
+  if (!(node instanceof HTMLElement)) {
+    return false;
+  }
+  if (node === refs.toast || node === refs.backToTopBtn) {
+    return false;
+  }
+  if (node.closest?.(".player-overlay, .detail-modal")) {
+    return false;
+  }
+
+  const tag = String(node.tagName || "").toLowerCase();
+  if (tag !== "iframe" && tag !== "div") {
+    return false;
+  }
+
+  const style = window.getComputedStyle(node);
+  if (style.position !== "fixed") {
+    return false;
+  }
+
+  const rect = node.getBoundingClientRect();
+  if (rect.width < 70 || rect.width > 520 || rect.height < 40 || rect.height > 420) {
+    return false;
+  }
+
+  const top = Number.parseFloat(style.top);
+  const right = Number.parseFloat(style.right);
+  const nearTopRight = Number.isFinite(top) && top >= 0 && top <= 140 && Number.isFinite(right) && right >= 0 && right <= 140;
+
+  const src = tag === "iframe" ? String(node.getAttribute("src") || "").toLowerCase() : "";
+  const fromAdNetwork = src.includes("maddenwiped.com") || src.includes("adsterra") || src.includes("ads");
+  const classHint = String(node.className || "").toLowerCase();
+  const idHint = String(node.id || "").toLowerCase();
+  const hasNotifHint = /notif|push|social|adsterra|banner/.test(`${classHint} ${idHint}`);
+
+  return nearTopRight || fromAdNetwork || hasNotifHint;
+}
+
+function applyFloatingNotificationPosition(node) {
+  if (!(node instanceof HTMLElement)) {
+    return;
+  }
+  node.style.setProperty("top", "auto", "important");
+  node.style.setProperty("left", "auto", "important");
+  node.style.setProperty("right", "16px", "important");
+  node.style.setProperty("bottom", "16px", "important");
+  node.style.setProperty("z-index", "2147483000", "important");
+}
+
+function enforceFloatingNotificationsPlacement() {
+  const candidates = Array.from(document.querySelectorAll("iframe, div"));
+  candidates.forEach((entry) => {
+    if (!isLikelyFloatingThirdPartyNotification(entry)) {
+      return;
+    }
+    if (isLikelyMobileDevice()) {
+      entry.style.setProperty("display", "none", "important");
+      return;
+    }
+    applyFloatingNotificationPosition(entry);
+  });
+}
+
+function scheduleFloatingNotificationGuard() {
+  if (floatingNotificationGuardTimer) {
+    clearTimeout(floatingNotificationGuardTimer);
+  }
+  floatingNotificationGuardTimer = window.setTimeout(() => {
+    floatingNotificationGuardTimer = 0;
+    enforceFloatingNotificationsPlacement();
+  }, 90);
+}
+
+function initFloatingNotificationGuard() {
+  enforceFloatingNotificationsPlacement();
+  if (typeof MutationObserver !== "function") {
+    return;
+  }
+  const observer = new MutationObserver(() => {
+    scheduleFloatingNotificationGuard();
+  });
+  observer.observe(document.documentElement, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ["style", "class", "id", "src"],
+  });
+  window.addEventListener("resize", () => {
+    scheduleFloatingNotificationGuard();
+  });
+}
 
 function replayStartupSplashAnimations() {
   if (!refs.startupSplash) {
@@ -573,6 +667,7 @@ async function init() {
     document.body.classList.add("is-ready");
   });
   await completeStartupSplash(splashStartedAt);
+  initFloatingNotificationGuard();
 }
 
 function bindFastPress(target, callback, options = {}) {
@@ -8454,6 +8549,10 @@ function showToast(message, isError = false) {
 
   refs.toast.textContent = message;
   refs.toast.className = `toast${isError ? " error" : ""}`;
+  refs.toast.style.setProperty("top", "auto", "important");
+  refs.toast.style.setProperty("left", "auto", "important");
+  refs.toast.style.setProperty("right", "16px", "important");
+  refs.toast.style.setProperty("bottom", "16px", "important");
   refs.toast.hidden = false;
 
   if (toastTimer) {
