@@ -66,6 +66,7 @@ const DASH_MIME = "application/dash+xml";
 const VIDEO_READY_TIMEOUT_MS = 12000;
 const HLS_READY_TIMEOUT_MS = 14000;
 const HLS_MANIFEST_TIMEOUT_MS = 15000;
+const SEGMENT_FALLBACK_MAX_SEGMENTS = 1200;
 const EMBED_READY_TIMEOUT_MS = 12000;
 const HEARTBEAT_INTERVAL_MS = 30 * 1000;
 const HEARTBEAT_REQUEST_TIMEOUT_MS = 9000;
@@ -179,6 +180,7 @@ const state = {
   hlsScriptPromise: null,
   hlsInstance: null,
   hlsPlaylistBlobUrls: [],
+  segmentFallback: null,
   searchAbortController: null,
   apiCache: new Map(),
   streamPayloadCache: new Map(),
@@ -1493,6 +1495,9 @@ function bindEvents() {
   });
   refs.playerVideo.addEventListener("pause", () => {
     saveNowPlayingProgress({ force: true });
+    if (state.segmentFallback) {
+      return;
+    }
     const currentSource = state.sourcePool[state.sourceIndex] || null;
     if (isEmbedSource(currentSource)) {
       return;
@@ -6917,6 +6922,9 @@ function isAwaitingUserPlay() {
 }
 
 function shouldIgnoreVideoErrorFallback() {
+  if (state.segmentFallback) {
+    return true;
+  }
   const currentSource = state.sourcePool[state.sourceIndex] || null;
   if (isEmbedSource(currentSource)) {
     return true;
@@ -6966,6 +6974,9 @@ function startPlaybackGuard() {
       return;
     }
     if (switchingSource) {
+      return;
+    }
+    if (state.segmentFallback) {
       return;
     }
     if (state.sourceLoading || state.sourceIndex < 0 || state.manualSourceLock) {
@@ -7060,6 +7071,9 @@ function schedulePlaybackHealthMonitor(token, step = 0) {
   const delay = step === 0 ? 2200 : 3200;
   state.playbackHealthTimer = window.setTimeout(() => {
     if (token !== state.playToken) {
+      return;
+    }
+    if (state.segmentFallback) {
       return;
     }
     const currentSource = state.sourcePool[state.sourceIndex] || null;
@@ -7866,6 +7880,21 @@ function clearHlsPlaylistBlobs() {
   });
 }
 
+function clearSegmentFallbackSession() {
+  const session = state.segmentFallback;
+  if (!session) {
+    return;
+  }
+  state.segmentFallback = null;
+  const video = refs.playerVideo;
+  if (video && session.onEnded) {
+    video.removeEventListener("ended", session.onEnded);
+  }
+  if (video && session.onError) {
+    video.removeEventListener("error", session.onError);
+  }
+}
+
 function registerHlsPlaylistBlob(blobUrl) {
   const safe = String(blobUrl || "").trim();
   if (!safe) {
@@ -8068,6 +8097,60 @@ async function buildDecodedHlsBlobUrl(streamUrl) {
   const blobUrl = URL.createObjectURL(blob);
   registerHlsPlaylistBlob(blobUrl);
   return blobUrl;
+}
+
+async function resolveHlsMediaPlaylist(streamUrl) {
+  const masterText = await fetchDecodedHlsPlaylistText(streamUrl);
+  if (!masterText.includes("#EXTM3U")) {
+    throw new Error("Invalid HLS manifest");
+  }
+
+  let mediaText = masterText;
+  let mediaBase = toAbsoluteUrl(streamUrl);
+
+  if (/#EXT-X-STREAM-INF/i.test(masterText)) {
+    const variantUrl = pickFirstHlsVariantUrl(masterText, mediaBase);
+    if (variantUrl) {
+      const variantText = await fetchDecodedHlsPlaylistText(variantUrl);
+      if (variantText.includes("#EXTM3U")) {
+        mediaText = variantText;
+        mediaBase = variantUrl;
+      }
+    }
+  }
+
+  return {
+    mediaText,
+    mediaBase,
+  };
+}
+
+function extractTsSegmentUrlsFromPlaylist(playlistText, baseUrl) {
+  const originBase = extractProxyTargetUrl(baseUrl) || baseUrl;
+  const lines = String(playlistText || "").split(/\r?\n/);
+  const urls = [];
+  for (const line of lines) {
+    const trimmed = String(line || "").trim();
+    if (!trimmed || trimmed.startsWith("#")) {
+      continue;
+    }
+    const absolute = toAbsoluteUrl(trimmed, originBase);
+    if (!absolute || /\.m3u8(?:$|\?)/i.test(absolute)) {
+      continue;
+    }
+    const direct = extractProxyTargetUrl(absolute) || absolute;
+    if (!/^https?:\/\//i.test(direct)) {
+      continue;
+    }
+    if (!/\.(ts|m4s|mp4)(?:$|\?)/i.test(direct)) {
+      continue;
+    }
+    urls.push(direct);
+    if (urls.length >= SEGMENT_FALLBACK_MAX_SEGMENTS) {
+      break;
+    }
+  }
+  return Array.from(new Set(urls));
 }
 
 function getSourceDedupKey(source) {
@@ -8450,6 +8533,107 @@ async function tryDecodedHlsBlobPlayback(video, streamUrl, timeoutMs = HLS_READY
   await waitVideoReady(video, timeoutMs);
 }
 
+async function loadSegmentFallbackIndex(video, session, index) {
+  if (!session || !Array.isArray(session.segments)) {
+    throw new Error("Segment fallback unavailable");
+  }
+  const nextUrl = String(session.segments[index] || "").trim();
+  if (!nextUrl) {
+    throw new Error("Missing fallback segment");
+  }
+  video.src = nextUrl;
+  video.load();
+  await waitVideoReady(video, Math.min(VIDEO_READY_TIMEOUT_MS, 5200));
+  await video.play();
+}
+
+async function startTsSegmentFallbackPlayback(video, streamUrl, token) {
+  if (!shouldUseNativeHls(video) || !isLikelyMobileDevice()) {
+    return false;
+  }
+
+  const { mediaText, mediaBase } = await resolveHlsMediaPlaylist(streamUrl);
+  const segments = extractTsSegmentUrlsFromPlaylist(mediaText, mediaBase);
+  if (segments.length < 2) {
+    return false;
+  }
+
+  clearSegmentFallbackSession();
+  const session = {
+    token,
+    segments,
+    index: 0,
+    switching: false,
+    onEnded: null,
+    onError: null,
+  };
+
+  session.onEnded = () => {
+    if (state.segmentFallback !== session || session.switching) {
+      return;
+    }
+    if (session.token !== state.playToken) {
+      clearSegmentFallbackSession();
+      return;
+    }
+    const nextIndex = session.index + 1;
+    if (nextIndex >= session.segments.length) {
+      clearSegmentFallbackSession();
+      onPlayerEnded();
+      return;
+    }
+    session.switching = true;
+    setPlayerStatus(`Lecture segment ${nextIndex + 1}/${session.segments.length}...`);
+    loadSegmentFallbackIndex(video, session, nextIndex)
+      .then(() => {
+        if (state.segmentFallback !== session) {
+          return;
+        }
+        session.index = nextIndex;
+        session.switching = false;
+        setPlayerStatus("Lecture en cours.");
+      })
+      .catch(() => {
+        session.switching = false;
+        clearSegmentFallbackSession();
+        trySwitchToNextSource().catch(() => {
+          setPlayerStatus("Erreur video detectee. Choisis une autre source.", true);
+        });
+      });
+  };
+
+  session.onError = () => {
+    if (state.segmentFallback !== session || session.switching || shouldIgnoreVideoErrorFallback()) {
+      return;
+    }
+    const code = Number(video?.error?.code || 0);
+    if (code <= 0) {
+      return;
+    }
+    const nextIndex = session.index + 1;
+    if (nextIndex < session.segments.length) {
+      session.onEnded();
+      return;
+    }
+    clearSegmentFallbackSession();
+    trySwitchToNextSource().catch(() => {
+      setPlayerStatus("Erreur video detectee. Choisis une autre source.", true);
+    });
+  };
+
+  state.segmentFallback = session;
+  video.addEventListener("ended", session.onEnded);
+  video.addEventListener("error", session.onError);
+  setPlayerStatus("Fallback iOS actif...");
+  try {
+    await loadSegmentFallbackIndex(video, session, 0);
+  } catch (error) {
+    clearSegmentFallbackSession();
+    throw error;
+  }
+  return true;
+}
+
 async function startHlsPlayback(video, streamUrl, token) {
   if (shouldUseNativeHls(video)) {
     video.src = streamUrl;
@@ -8466,6 +8650,14 @@ async function startHlsPlayback(video, streamUrl, token) {
         await tryDecodedHlsBlobPlayback(video, streamUrl, Math.min(HLS_READY_TIMEOUT_MS + 2600, 7600));
         return;
       } catch (decodedError) {
+        try {
+          const segmentFallbackStarted = await startTsSegmentFallbackPlayback(video, streamUrl, token);
+          if (segmentFallbackStarted) {
+            return;
+          }
+        } catch {
+          // Keep original bootstrap error below.
+        }
         throw decodedError || nativeError || new Error("Native HLS bootstrap failed");
       }
     }
@@ -8555,6 +8747,7 @@ async function startHlsPlayback(video, streamUrl, token) {
 function teardownPlayerEngine(video) {
   state.ignoreVideoErrorUntil = Date.now() + 1400;
   clearPlaybackHealthMonitor();
+  clearSegmentFallbackSession();
   resetPlayerEmbedFrame();
   clearHlsPlaylistBlobs();
   destroyHlsInstance();
@@ -8752,6 +8945,9 @@ function onPlayerProgress() {
 }
 
 function onPlayerEnded() {
+  if (state.segmentFallback) {
+    return;
+  }
   clearPlaybackHealthMonitor();
   if (!state.nowPlaying) {
     return;
