@@ -143,6 +143,8 @@ const state = {
   calendarData: null,
   calendarOverviewUnavailable: false,
   calendarTypeFilters: { film: true, serie: true, anime: true },
+  calendarTypeByMediaId: new Map(),
+  calendarTypeReconcileTimer: 0,
   searchToken: 0,
   page: 0,
   totalPages: 0,
@@ -2583,11 +2585,30 @@ function hasCalendarAnimationCategory(entry) {
   });
 }
 
+function scheduleCalendarTypeReconcile() {
+  if (state.calendarTypeReconcileTimer) {
+    return;
+  }
+  state.calendarTypeReconcileTimer = window.setTimeout(() => {
+    state.calendarTypeReconcileTimer = 0;
+    if (state.view !== "calendar") {
+      return;
+    }
+    renderCalendarSection();
+  }, 120);
+}
+
 function getCalendarEntryMediaType(entry) {
   if (!entry || typeof entry !== "object") {
     return "film";
   }
   const mediaId = Number(entry.mediaId || 0);
+  if (mediaId > 0) {
+    const resolved = String(state.calendarTypeByMediaId.get(mediaId) || "").trim();
+    if (resolved === "film" || resolved === "serie" || resolved === "anime") {
+      return resolved;
+    }
+  }
   if (isTruthyDataFlag(entry.isAnime) || hasCalendarAnimationCategory(entry)) {
     return "anime";
   }
@@ -3017,6 +3038,11 @@ function hydrateCalendarCardsForMedia(mediaId, details = null) {
       return;
     }
     const mediaType = resolved.type === "tv" ? (Boolean(resolved.isAnime) ? "anime" : "serie") : "film";
+    const previousType = String(state.calendarTypeByMediaId.get(safeId) || "").trim();
+    const typeChanged = previousType !== mediaType;
+    if (typeChanged) {
+      state.calendarTypeByMediaId.set(safeId, mediaType);
+    }
     const typeMap = {
       film: "Film",
       serie: "Serie",
@@ -3046,6 +3072,9 @@ function hydrateCalendarCardsForMedia(mediaId, details = null) {
           setImageSourceSafely(image, resolveCardCover(item, resolved), item.title || "Affiche", true);
         }
       });
+    if (typeChanged) {
+      scheduleCalendarTypeReconcile();
+    }
   };
 
   if (details) {
