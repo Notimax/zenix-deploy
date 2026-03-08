@@ -26,6 +26,10 @@ STREAMING/PLAYBACK NOTES
 - HLS proxy endpoint: /api/hls-proxy
 - Some upstream providers return numeric-encoded playlists.
   Server now decodes numeric playlists more robustly before rewriting.
+- Desktop playback resize-loop guard:
+  - main nav fit recalculation is deferred while player/detail overlays are open.
+  - deferred nav fit is flushed when overlays close.
+  - stable scrollbar gutter is enforced to prevent width oscillation on laptop viewports.
 - iOS fallback: when native HLS manifest bootstrap fails, player now switches to direct TS segment playback
   (segment chain) to avoid instant block on iPhone/WebKit environments.
 - Movie source ordering for FR audience is now strict:

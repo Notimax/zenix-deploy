@@ -17,6 +17,10 @@ Last update: 2026-03-08
   - preferred order: `VF`, `VOSTFR`, `MULTI`, then `VO`
   - avoid pure `VO` when a French-friendly source exists
 - Auto-switch source must trigger when playback is blocked.
+- Desktop playback resize-loop hardening:
+  - nav-fit recalculation is deferred while player/detail overlays are open.
+  - deferred nav-fit recalculation is flushed on overlay close.
+  - CSS scrollbar gutter is kept stable to avoid width/scrollbar oscillation on laptop resolutions.
 - Added iOS-specific resilience:
   - if native HLS manifest playback fails, fallback to direct TS segment chain playback.
   - this is intended to avoid instant playback block in iPhone/WebKit edge cases.
