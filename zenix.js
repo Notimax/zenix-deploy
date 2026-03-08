@@ -8002,10 +8002,14 @@ function buildPlayableSourceCandidates(source, options = {}) {
 
   if (looksLikeHls && forceProxyHls) {
     if (isProxied) {
-      return Array.from(new Set([normalizedProxyAbsolute].filter(Boolean)));
+      const fallbackRows = [normalizedProxyAbsolute];
+      if (proxiedTarget) {
+        fallbackRows.push(proxiedTarget);
+      }
+      return Array.from(new Set(fallbackRows.filter(Boolean)));
     }
     if (proxyUrl) {
-      return Array.from(new Set([proxyUrl].filter(Boolean)));
+      return Array.from(new Set([proxyUrl, absolute].filter(Boolean)));
     }
     return Array.from(new Set([absolute].filter(Boolean)));
   }
