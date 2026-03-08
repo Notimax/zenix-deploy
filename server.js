@@ -3285,6 +3285,7 @@ async function handlePidoovSource(req, res, requestUrl) {
   const year = toInt(requestUrl.searchParams.get("year"), 0, 0, 2099);
   const season = toInt(requestUrl.searchParams.get("season"), 1, 1, 500);
   const episode = toInt(requestUrl.searchParams.get("episode"), 1, 1, 50000);
+  const debugMode = String(requestUrl.searchParams.get("debug") || "").trim() === "1";
 
   try {
     const sources = await resolvePidoovSourcesByTitle(title, {
@@ -3293,7 +3294,7 @@ async function handlePidoovSource(req, res, requestUrl) {
       season,
       episode,
     });
-    sendJson(res, 200, {
+    const payload = {
       apiVersion: "zenix-pidoov-source-v1",
       type: "success",
       data: {
@@ -3305,7 +3306,18 @@ async function handlePidoovSource(req, res, requestUrl) {
         count: sources.length,
         sources,
       },
-    });
+    };
+    if (debugMode) {
+      payload.data.debug = {
+        indexSize: Array.isArray(pidoovIndexCache.entries) ? pidoovIndexCache.entries.length : 0,
+        indexFull: Boolean(pidoovIndexCache.full),
+        indexLoadedAt: Number(pidoovIndexCache.loadedAt || 0),
+        lookupCacheSize: pidoovLookupCache.size,
+        detailCacheSize: pidoovDetailCache.size,
+        inFlight: Boolean(pidoovIndexCache.inFlight),
+      };
+    }
+    sendJson(res, 200, payload);
     return true;
   } catch (error) {
     sendJson(res, 502, {
