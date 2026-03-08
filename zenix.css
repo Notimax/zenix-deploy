@@ -295,15 +295,31 @@ body.startup-lock {
 }
 
 .main-nav {
+  --nav-gap: 8px;
+  --nav-pill-font-size: 0.84rem;
+  --nav-pill-padding-x: 13px;
   display: flex;
   justify-content: center;
-  gap: 8px;
+  gap: var(--nav-gap);
   overflow-x: auto;
   scrollbar-width: none;
+  min-width: 0;
 }
 
 .main-nav::-webkit-scrollbar {
   display: none;
+}
+
+.main-nav.is-tight {
+  --nav-gap: 6px;
+  --nav-pill-font-size: 0.79rem;
+  --nav-pill-padding-x: 10px;
+}
+
+.main-nav.is-ultra-tight {
+  --nav-gap: 4px;
+  --nav-pill-font-size: 0.74rem;
+  --nav-pill-padding-x: 8px;
 }
 
 .nav-pill {
@@ -312,8 +328,8 @@ body.startup-lock {
   background: transparent;
   color: var(--muted);
   font: inherit;
-  font-size: 0.84rem;
-  padding: 8px 13px;
+  font-size: var(--nav-pill-font-size);
+  padding: 8px var(--nav-pill-padding-x);
   min-height: 40px;
   cursor: pointer;
   white-space: nowrap;

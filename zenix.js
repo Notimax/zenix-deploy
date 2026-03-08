@@ -275,6 +275,7 @@ const refs = {
   scrollProgress: document.getElementById("scrollProgress"),
   scrollProgressFill: document.getElementById("scrollProgressFill"),
   backToTopBtn: document.getElementById("backToTopBtn"),
+  mainNav: document.querySelector(".main-nav"),
   navPills: Array.from(document.querySelectorAll(".nav-pill[data-view]")),
   quickLinks: Array.from(document.querySelectorAll(".quick-link[data-view-jump]")),
   filterChips: document.getElementById("filterChips"),
@@ -385,6 +386,7 @@ let searchDebounce = null;
 let lastProgressSave = 0;
 let toastTimer = null;
 let floatingNotificationGuardTimer = 0;
+let mainNavFitTimer = 0;
 
 function isLikelyFloatingThirdPartyNotification(node) {
   if (!(node instanceof HTMLElement)) {
@@ -477,6 +479,36 @@ function initFloatingNotificationGuard() {
   window.addEventListener("resize", () => {
     scheduleFloatingNotificationGuard();
   });
+}
+
+function applyDesktopMainNavFit() {
+  if (!(refs.mainNav instanceof HTMLElement)) {
+    return;
+  }
+  const isDesktop = window.matchMedia("(min-width: 1001px)").matches;
+  refs.mainNav.classList.remove("is-tight", "is-ultra-tight");
+  if (!isDesktop) {
+    return;
+  }
+  if (refs.mainNav.scrollWidth <= refs.mainNav.clientWidth + 1) {
+    return;
+  }
+  refs.mainNav.classList.add("is-tight");
+  if (refs.mainNav.scrollWidth <= refs.mainNav.clientWidth + 1) {
+    return;
+  }
+  refs.mainNav.classList.add("is-ultra-tight");
+}
+
+function scheduleDesktopMainNavFit(delayMs = 60) {
+  if (mainNavFitTimer) {
+    clearTimeout(mainNavFitTimer);
+    mainNavFitTimer = 0;
+  }
+  mainNavFitTimer = window.setTimeout(() => {
+    mainNavFitTimer = 0;
+    applyDesktopMainNavFit();
+  }, Math.max(0, Number(delayMs || 0)));
 }
 
 function replayStartupSplashAnimations() {
@@ -622,6 +654,16 @@ async function init() {
   });
 
   renderAll();
+  scheduleDesktopMainNavFit(0);
+  if (document.fonts?.ready && typeof document.fonts.ready.then === "function") {
+    document.fonts.ready
+      .then(() => {
+        scheduleDesktopMainNavFit(0);
+      })
+      .catch(() => {
+        // best effort only
+      });
+  }
   topTask
     .then(() => {
       if (state.topDaily.length === 0) {
@@ -811,6 +853,14 @@ function bindEvents() {
       handleViewSelection(view);
     });
   });
+
+  window.addEventListener(
+    "resize",
+    () => {
+      scheduleDesktopMainNavFit(50);
+    },
+    { passive: true }
+  );
 
   refs.quickLinks.forEach((button) => {
     bindFastPress(button, () => {
@@ -1749,6 +1799,7 @@ function setActiveNav(view) {
   refs.navPills.forEach((entry) => {
     entry.classList.toggle("active", (entry.dataset.view || "") === targetView);
   });
+  scheduleDesktopMainNavFit(10);
 }
 
 function isCatalogCategoryView(view) {
@@ -5876,6 +5927,24 @@ function filterMovieSourcesForFrench(sources) {
   return withoutVo.length > 0 ? withoutVo : rows;
 }
 
+function shouldAllowPremiumRescueForMovie(sources, video) {
+  const rows = Array.isArray(sources) ? sources : [];
+  if (!rows.length) {
+    return false;
+  }
+  const premiumCount = rows.filter((entry) => Boolean(entry?.premiumHint)).length;
+  const freeCount = rows.length - premiumCount;
+  if (premiumCount === 0 || freeCount === 0) {
+    return false;
+  }
+  const mobileNativeHls = shouldUseNativeHls(video) && isLikelyMobileDevice();
+  if (!mobileNativeHls) {
+    return true;
+  }
+  // On iPhone/iPad, allow premium rescue only when free catalog is too small.
+  return freeCount <= 1;
+}
+
 async function syncDetailLanguageOptions(id, season, episode) {
   const item = findItemById(id);
   if (!item || item.type !== "tv") {
@@ -6305,7 +6374,7 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
   }
   state.sourceIndex = -1;
   renderPlayerSourceOptions();
-  const allowPremiumRescue = !(shouldUseNativeHls(refs.playerVideo) && isLikelyMobileDevice());
+  const allowPremiumRescue = shouldAllowPremiumRescueForMovie(state.sourcePool, refs.playerVideo);
   try {
     await playFromSourcePoolWithRescue(resumeTime, token, {
       startIndex: 0,
