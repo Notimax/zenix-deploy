@@ -55,3 +55,10 @@ KEY FILES
 - zenix.css (layout/toast/splash styles)
 - server.js (API proxy + HLS proxy)
 - PROJECT_MEMORY.md (extended working memory)
+
+OWNED SOURCES (LEGAL VF)
+- `server.js` supports provider shortcuts in `zenix-owned-sources.json`:
+  - Cloudflare Stream: `provider=cloudflare_stream`, `customer_code`, `uid`
+  - Bunny Stream: `provider=bunny_stream`, `pull_zone_url`, `video_id`
+- URLs are generated server-side to HLS manifests and injected as owned sources.
+- Example ready for movie `3940` exists in `zenix-owned-sources.example.json`.

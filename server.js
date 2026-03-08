@@ -1247,8 +1247,78 @@ function inferOwnedSourceFormat(url, hint = "") {
   return "unknown";
 }
 
+function normalizeProviderName(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+}
+
+function sanitizeDomainLike(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//i, "")
+    .replace(/\/+$/, "")
+    .replace(/^www\./, "");
+}
+
+function buildCloudflareStreamUrl(entry) {
+  const uid = String(entry?.uid || entry?.video_uid || entry?.videoId || entry?.playback_id || "").trim();
+  if (!uid) {
+    return "";
+  }
+  const explicit = String(entry?.customer_code || entry?.customerCode || "").trim();
+  const fallback = String(process.env.CLOUDFLARE_STREAM_CUSTOMER_CODE || "").trim();
+  const code = explicit || fallback;
+  if (!code) {
+    return "";
+  }
+  return `https://customer-${code}.cloudflarestream.com/${uid}/manifest/video.m3u8`;
+}
+
+function buildBunnyStreamUrl(entry) {
+  const videoId = String(entry?.video_id || entry?.videoId || "").trim();
+  if (!videoId) {
+    return "";
+  }
+  const explicit = sanitizeDomainLike(entry?.pull_zone_url || entry?.pullZoneUrl || "");
+  const fallback = sanitizeDomainLike(process.env.BUNNY_STREAM_PULL_ZONE || "");
+  const pullZone = explicit || fallback;
+  if (!pullZone) {
+    return "";
+  }
+  return `https://${pullZone}.b-cdn.net/${videoId}/playlist.m3u8`;
+}
+
+function resolveOwnedProviderUrl(entry) {
+  const provider = normalizeProviderName(entry?.provider || entry?.provider_name || "");
+  if (!provider) {
+    return "";
+  }
+  if (provider === "cloudflare" || provider === "cloudflare_stream") {
+    return buildCloudflareStreamUrl(entry);
+  }
+  if (provider === "bunny" || provider === "bunny_stream") {
+    return buildBunnyStreamUrl(entry);
+  }
+  return "";
+}
+
+function defaultOwnedSourceName(entry) {
+  const provider = normalizeProviderName(entry?.provider || entry?.provider_name || "");
+  if (provider === "cloudflare" || provider === "cloudflare_stream") {
+    return "Cloudflare Stream";
+  }
+  if (provider === "bunny" || provider === "bunny_stream") {
+    return "Bunny Stream";
+  }
+  return "Zenix Source";
+}
+
 function normalizeOwnedSourceEntry(entry, index = 0) {
-  const url = String(entry?.stream_url || entry?.url || entry?.file || "").trim();
+  const providerUrl = resolveOwnedProviderUrl(entry);
+  const url = String(entry?.stream_url || entry?.url || entry?.file || providerUrl || "").trim();
   if (!url) {
     return null;
   }
@@ -1259,10 +1329,10 @@ function normalizeOwnedSourceEntry(entry, index = 0) {
 
   return {
     stream_url: parsed.href,
-    source_name: String(entry?.source_name || entry?.name || "Zenix Source").trim() || "Zenix Source",
+    source_name: String(entry?.source_name || entry?.name || defaultOwnedSourceName(entry)).trim() || "Zenix Source",
     quality: String(entry?.quality || entry?.resolution || "Zenix").trim() || "Zenix",
     language: normalizeOwnedSourceLanguage(entry?.language || entry?.lang || ""),
-    format: inferOwnedSourceFormat(parsed.href, entry?.format || entry?.type || ""),
+    format: inferOwnedSourceFormat(parsed.href, entry?.format || entry?.type || "hls"),
     priority: toInt(entry?.priority, Math.max(0, 1000 - index), -100000, 100000),
   };
 }

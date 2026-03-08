@@ -1,5 +1,29 @@
 {
   "movies": {
+    "3940": {
+      "sources": [
+        {
+          "provider": "cloudflare_stream",
+          "customer_code": "YOUR_CLOUDFLARE_CUSTOMER_CODE",
+          "uid": "YOUR_CLOUDFLARE_VIDEO_UID",
+          "format": "hls",
+          "quality": "1080p",
+          "language": "VF",
+          "source_name": "Cloudflare Stream VF",
+          "priority": 220
+        },
+        {
+          "provider": "bunny_stream",
+          "pull_zone_url": "YOUR_BUNNY_PULLZONE",
+          "video_id": "YOUR_BUNNY_VIDEO_ID",
+          "format": "hls",
+          "quality": "1080p",
+          "language": "VF",
+          "source_name": "Bunny Stream VF",
+          "priority": 210
+        }
+      ]
+    },
     "2203": {
       "sources": [
         {

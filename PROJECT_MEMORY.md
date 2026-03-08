@@ -22,6 +22,10 @@ Last update: 2026-03-08
   - this is intended to avoid instant playback block in iPhone/WebKit edge cases.
   - source ordering for movies is now stricter at runtime: `VF`, then `MULTI`, then `VOSTFR`.
   - when audio tracks are exposed, player attempts to force French track.
+- Owned source providers supported in backend:
+  - `cloudflare_stream` (`customer_code` + `uid`)
+  - `bunny_stream` (`pull_zone_url` + `video_id`)
+  - Intended for legal/self-hosted VF streams.
 
 ## Mobile robustness
 - Startup splash must never block app forever.
