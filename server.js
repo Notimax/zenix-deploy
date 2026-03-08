@@ -2991,6 +2991,19 @@ async function loadRendezvousEntrySources(entry) {
     });
   });
 
+  const parsedPageUrl = parseSafeRemoteUrl(pageUrl);
+  if (parsedPageUrl) {
+    // Keep a final page-level fallback for environments where upstream crawl is blocked.
+    pushSource({
+      stream_url: parsedPageUrl.href,
+      source_name: "Rendezvous Page",
+      quality: "Rendezvous",
+      language,
+      format: "embed",
+      priority: 280,
+    });
+  }
+
   let pageHtml = "";
   try {
     const response = await fetchRemoteText(pageUrl, "text/html,application/xhtml+xml", {
