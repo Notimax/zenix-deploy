@@ -79,6 +79,12 @@ const ZENIX_OWNED_SOURCES_FILE = path.resolve(
     ? String(process.env.ZENIX_OWNED_SOURCES_FILE || "").trim()
     : String(process.env.ZENIX_OWNED_SOURCES_FILE || "zenix-owned-sources.json").trim()
 );
+const PIDOOV_STATIC_SOURCES_FILE = path.resolve(
+  ROOT,
+  path.isAbsolute(String(process.env.PIDOOV_STATIC_SOURCES_FILE || "").trim())
+    ? String(process.env.PIDOOV_STATIC_SOURCES_FILE || "").trim()
+    : String(process.env.PIDOOV_STATIC_SOURCES_FILE || "pidoov-static-sources.json").trim()
+);
 const proxyCache = new Map();
 const calendarCache = new Map();
 const animeSibnetCache = new Map();
@@ -98,6 +104,11 @@ const pidoovIndexCache = {
   entries: [],
   full: false,
   inFlight: null,
+};
+const pidoovStaticCache = {
+  loadedAt: 0,
+  mtimeMs: 0,
+  entries: [],
 };
 const analyticsClients = new Map();
 const analyticsEvents = [];
@@ -1142,6 +1153,68 @@ function readPidoovLookupCache(key) {
   return Array.isArray(row.value) ? row.value : [];
 }
 
+function loadPidoovStaticEntries() {
+  const now = Date.now();
+  const ttl = 10 * 1000;
+  if (pidoovStaticCache.loadedAt > 0 && now - pidoovStaticCache.loadedAt < ttl) {
+    return Array.isArray(pidoovStaticCache.entries) ? pidoovStaticCache.entries : [];
+  }
+
+  let entries = [];
+  let mtimeMs = 0;
+  try {
+    const stats = fs.statSync(PIDOOV_STATIC_SOURCES_FILE);
+    if (stats.isFile()) {
+      mtimeMs = Number(stats.mtimeMs || 0);
+      if (mtimeMs !== Number(pidoovStaticCache.mtimeMs || 0)) {
+        const raw = fs.readFileSync(PIDOOV_STATIC_SOURCES_FILE, "utf8");
+        const parsed = JSON.parse(raw);
+        const list = Array.isArray(parsed?.entries) ? parsed.entries : [];
+        entries = list
+          .map((entry) => {
+            const title = String(entry?.title || "").trim();
+            const titleKey = String(entry?.titleKey || normalizeTitleKey(title)).trim();
+            const sources = Array.isArray(entry?.sources) ? entry.sources : [];
+            if (!title || !titleKey || sources.length === 0) {
+              return null;
+            }
+            return {
+              title,
+              titleKey,
+              year: toInt(entry?.year, 0, 0, 2099),
+              language: normalizePidoovLanguage(entry?.language || entry?.label || "") || "VF",
+              detailPath: normalizePidoovPath(entry?.detailPath || ""),
+              sources: sources
+                .map((source) => {
+                  const parsedUrl = parseSafeRemoteUrl(source?.stream_url || source?.url || "");
+                  if (!parsedUrl) {
+                    return null;
+                  }
+                  const format = String(source?.format || "").trim().toLowerCase();
+                  return {
+                    stream_url: parsedUrl.href,
+                    format: format === "hls" || format === "mp4" || format === "embed" ? format : "embed",
+                  };
+                })
+                .filter(Boolean),
+            };
+          })
+          .filter((entry) => entry && Array.isArray(entry.sources) && entry.sources.length > 0);
+      } else {
+        entries = Array.isArray(pidoovStaticCache.entries) ? pidoovStaticCache.entries : [];
+      }
+    }
+  } catch {
+    entries = [];
+    mtimeMs = 0;
+  }
+
+  pidoovStaticCache.loadedAt = now;
+  pidoovStaticCache.mtimeMs = mtimeMs;
+  pidoovStaticCache.entries = entries;
+  return entries;
+}
+
 async function loadPidoovIndex(force = false) {
   const now = Date.now();
   const hasCache = Array.isArray(pidoovIndexCache.entries) && pidoovIndexCache.entries.length > 0;
@@ -1348,6 +1421,49 @@ function pickBestPidoovCandidates(entries, title, year = 0) {
   return selected;
 }
 
+function resolvePidoovSourcesFromStatic(title, options = {}) {
+  const safeTitle = String(title || "").trim();
+  if (safeTitle.length < 2) {
+    return [];
+  }
+  const year = toInt(options?.year, 0, 0, 2099);
+  const entries = loadPidoovStaticEntries();
+  if (!Array.isArray(entries) || entries.length === 0) {
+    return [];
+  }
+
+  const candidates = pickBestPidoovCandidates(entries, safeTitle, year);
+  if (candidates.length === 0) {
+    return [];
+  }
+
+  const merged = [];
+  const seen = new Set();
+  candidates.forEach((candidate) => {
+    const language = normalizePidoovLanguage(candidate?.language || "") || "VF";
+    const sourceName = candidate?.year ? `Pidoov ${candidate.year}` : "Pidoov";
+    const basePriority = language === "VF" ? 380 : language === "MULTI" ? 360 : language === "VOSTFR" ? 340 : 320;
+    const rows = Array.isArray(candidate?.sources) ? candidate.sources : [];
+    rows.forEach((entry, index) => {
+      const url = String(entry?.stream_url || "").trim();
+      if (!url || seen.has(url)) {
+        return;
+      }
+      seen.add(url);
+      merged.push({
+        stream_url: url,
+        source_name: sourceName,
+        quality: "Pidoov",
+        language,
+        format: String(entry?.format || "").trim() || "embed",
+        priority: basePriority - Math.min(40, index * 6),
+      });
+    });
+  });
+
+  return merged;
+}
+
 function parsePidoovDetailSources(html) {
   const source = String(html || "");
   const output = [];
@@ -1465,6 +1581,12 @@ async function resolvePidoovSourcesByTitle(title, options = {}) {
   const cached = readPidoovLookupCache(lookupKey);
   if (cached) {
     return cached;
+  }
+
+  const staticSources = resolvePidoovSourcesFromStatic(safeTitle, { year, type, season, episode });
+  if (staticSources.length > 0) {
+    storePidoovLookupCache(lookupKey, staticSources);
+    return staticSources;
   }
 
   const index = await loadPidoovIndex();
@@ -3312,6 +3434,7 @@ async function handlePidoovSource(req, res, requestUrl) {
         indexSize: Array.isArray(pidoovIndexCache.entries) ? pidoovIndexCache.entries.length : 0,
         indexFull: Boolean(pidoovIndexCache.full),
         indexLoadedAt: Number(pidoovIndexCache.loadedAt || 0),
+        staticSize: Array.isArray(loadPidoovStaticEntries()) ? loadPidoovStaticEntries().length : 0,
         lookupCacheSize: pidoovLookupCache.size,
         detailCacheSize: pidoovDetailCache.size,
         inFlight: Boolean(pidoovIndexCache.inFlight),

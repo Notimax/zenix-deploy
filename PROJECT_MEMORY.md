@@ -28,6 +28,7 @@ Last update: 2026-03-08
   - Intended for legal/self-hosted VF streams.
 - Pidoov provider integration added (owner-confirmed):
   - Backend endpoint `/api/pidoov-source` resolves by title/year and extracts embed/player URLs.
+  - Static fallback source index file: `pidoov-static-sources.json` for environments where live crawl is blocked.
   - Frontend injects pidoov sources automatically for movies and episodes (not only F1).
   - Matching logic favors strict title/year and FR-friendly labels to reduce wrong picks.
   - Caching/env tuning keys:

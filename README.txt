@@ -66,6 +66,7 @@ OWNED SOURCES (LEGAL VF)
 PIDOOV INTEGRATION (GLOBAL FALLBACK)
 - New backend endpoint: `/api/pidoov-source`
 - Purpose: title/year matching + extraction of pidoov player iframe URLs as extra fallback sources.
+- Includes static fallback file: `pidoov-static-sources.json` (used when runtime crawl is blocked upstream).
 - Frontend now injects pidoov sources automatically in:
   - movie playback source pool
   - episode playback source pool
