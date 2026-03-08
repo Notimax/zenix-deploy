@@ -103,6 +103,8 @@ const INTEREST_HOME_LIMIT = 10;
 const SEARCH_SIGNAL_MAX = 220;
 const SEARCH_SIGNAL_MAX_AGE_MS = 180 * 24 * 60 * 60 * 1000;
 const LOCK_VISIBLE_ROOT_URL = true;
+const EXTERNAL_GUARD_ALLOW_HOSTS = new Set(["zenix.best", "www.zenix.best", "discord.com", "www.discord.com", "discord.gg", "www.discord.gg"]);
+const EXTERNAL_GUARD_TRUST_WINDOW_MS = 1300;
 
 const FALLBACK_ITEMS = [
   {
@@ -387,6 +389,7 @@ let lastProgressSave = 0;
 let toastTimer = null;
 let floatingNotificationGuardTimer = 0;
 let mainNavFitTimer = 0;
+let lastTrustedExternalIntentAt = 0;
 
 function isLikelyFloatingThirdPartyNotification(node) {
   if (!(node instanceof HTMLElement)) {
@@ -515,6 +518,66 @@ function scheduleDesktopMainNavFit(delayMs = 60) {
   }, Math.max(0, Number(delayMs || 0)));
 }
 
+function normalizeHostname(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/^www\./, "");
+}
+
+function isExternalHostWhitelisted(url) {
+  const raw = String(url || "").trim();
+  if (!raw) {
+    return false;
+  }
+  try {
+    const parsed = new URL(raw, window.location.href);
+    const host = normalizeHostname(parsed.hostname);
+    const appHost = normalizeHostname(window.location.hostname);
+    if (!host) {
+      return false;
+    }
+    if (host === appHost) {
+      return true;
+    }
+    return EXTERNAL_GUARD_ALLOW_HOSTS.has(host) || EXTERNAL_GUARD_ALLOW_HOSTS.has(`www.${host}`);
+  } catch {
+    return false;
+  }
+}
+
+function initExternalNavigationGuard() {
+  const nativeOpen = typeof window.open === "function" ? window.open.bind(window) : null;
+  if (!nativeOpen) {
+    return;
+  }
+
+  document.addEventListener(
+    "pointerdown",
+    (event) => {
+      const target = event.target;
+      if (!(target instanceof Element)) {
+        return;
+      }
+      if (target.closest(".sponsor-slot, .detail-native-ad, [data-allow-external='1']")) {
+        lastTrustedExternalIntentAt = Date.now();
+      }
+    },
+    { capture: true, passive: true }
+  );
+
+  window.open = function guardedWindowOpen(url, ...rest) {
+    const targetUrl = String(url || "").trim();
+    const allowByHost = isExternalHostWhitelisted(targetUrl);
+    const allowByGesture = Date.now() - lastTrustedExternalIntentAt <= EXTERNAL_GUARD_TRUST_WINDOW_MS;
+    if (!allowByHost && !allowByGesture) {
+      showToast("Navigation externe bloquee hors zone sponsorisee.", true);
+      return null;
+    }
+    return nativeOpen(url, ...rest);
+  };
+}
+
 function replayStartupSplashAnimations() {
   if (!refs.startupSplash) {
     return;
@@ -616,6 +679,7 @@ async function init() {
     // cleanup best effort only
   });
   bindEvents();
+  initExternalNavigationGuard();
   refreshSuggestionClientTimestamp();
   hydrateLanguagePrefsMap();
   initCalendarControls();
@@ -8052,6 +8116,10 @@ function buildPlayableSourceCandidates(source, options = {}) {
 
 function shouldPreferProxyFirstForHls(video, source) {
   if (!shouldUseNativeHls(video)) {
+    return false;
+  }
+  if (isLikelyMobileDevice()) {
+    // On iPhone/iPad, prefer direct HLS first to reduce random proxy 502 failures.
     return false;
   }
   const absolute = toAbsoluteUrl(source?.url || "");
