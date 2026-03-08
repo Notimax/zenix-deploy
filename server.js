@@ -2056,8 +2056,19 @@ async function handleHlsProxy(req, res, requestUrl) {
         return true;
       }
       const buffer = Buffer.from(await upstream.arrayBuffer());
-      const bodyText = decodeNumericPlaylistBody(buffer.toString("utf8"));
-      const rewritten = rewriteHlsPlaylistBody(bodyText, target.href);
+      const rawPlaylist = buffer.toString("utf8");
+      const bodyText = decodeNumericPlaylistBody(rawPlaylist);
+      let rewritten = rewriteHlsPlaylistBody(bodyText, target.href);
+      if (!rewritten.includes("#EXTM3U")) {
+        const rescueDecoded = decodeNumericPlaylistBySeparators(rewritten) || decodeNumericPlaylistBySeparators(rawPlaylist);
+        if (rescueDecoded.includes("#EXTM3U")) {
+          rewritten = rewriteHlsPlaylistBody(rescueDecoded, target.href);
+        }
+      }
+      if (!rewritten.includes("#EXTM3U")) {
+        sendJson(res, 502, { error: "Invalid playlist format" });
+        return true;
+      }
       res.writeHead(status, {
         "Content-Type": "application/vnd.apple.mpegurl; charset=utf-8",
         "Cache-Control": "no-cache",
