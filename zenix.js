@@ -6461,6 +6461,8 @@ function clearPlaybackGuard() {
 
 function startPlaybackGuard(token) {
   clearPlaybackGuard();
+  let lastObservedTime = 0;
+  let lastAdvanceAt = Date.now();
   state.playbackGuardTimer = window.setInterval(() => {
     if (token !== state.playToken || refs.playerOverlay.hidden) {
       clearPlaybackGuard();
@@ -6482,12 +6484,26 @@ function startPlaybackGuard(token) {
     const readyState = Number(video.readyState || 0);
     const networkState = Number(video.networkState || 0);
     const awaitingUser = isAwaitingUserPlay();
+    if (currentTime > lastObservedTime + 0.08) {
+      lastObservedTime = currentTime;
+      lastAdvanceAt = Date.now();
+    }
+    const stalledForMs = Date.now() - lastAdvanceAt;
     const blockedAtStart = !awaitingUser && video.paused && currentTime < 1.2 && readyState >= 2;
     const noSourceAtStart = !awaitingUser && video.paused && currentTime < 0.25 && readyState === 0 && networkState === 3;
-    if (errorCode <= 0 && !blockedAtStart && !noSourceAtStart) {
+    const stalledDuringPlayback =
+      !awaitingUser &&
+      !video.paused &&
+      currentTime > 0.6 &&
+      stalledForMs > 8500 &&
+      (readyState <= 2 || networkState === 2 || networkState === 3);
+    if (errorCode <= 0 && !blockedAtStart && !noSourceAtStart && !stalledDuringPlayback) {
       return;
     }
     clearPlaybackGuard();
+    if (stalledDuringPlayback) {
+      setPlayerStatus("Lecture bloquee, bascule automatique...", true);
+    }
     trySwitchToNextSource().catch(() => {
       setPlayerStatus("Erreur video detectee. Choisis une autre source.", true);
     });
@@ -7272,9 +7288,10 @@ function buildPlayableSourceCandidates(source, options = {}) {
 
 async function startPlayerSource(source, resumeTime, token) {
   const video = refs.playerVideo;
+  const preferDirectHls = shouldUseNativeHls(video);
   const streamCandidates = buildPlayableSourceCandidates(source, {
-    // Keep HLS proxy first on every platform to reduce host/referrer variance.
-    preferDirectHls: false,
+    // Native Safari/iOS handles direct HLS better; keep proxy as fallback.
+    preferDirectHls,
   });
   if (streamCandidates.length === 0) {
     throw new Error("Missing source URL");
