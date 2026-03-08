@@ -38,6 +38,10 @@ const PIDOOV_MAX_MATCH_CANDIDATES = Math.max(
   1,
   toInt(process.env.PIDOOV_MAX_MATCH_CANDIDATES, 3, 1, 6)
 );
+const PIDOOV_FETCH_HEADERS = {
+  Referer: `${PIDOOV_BASE}/`,
+  "Accept-Language": DEFAULT_ACCEPT_LANGUAGE,
+};
 const NOTARIELLES_BASE = "https://notarielles.fr";
 const NOTARIELLES_HOST = "notarielles.fr";
 const NOTARIELLES_SITEMAP_INDEX_URL = `${NOTARIELLES_BASE}/sitemaps.xml`;
@@ -1272,7 +1276,7 @@ async function fetchPidoovCategoryEntries(categoryId, maxPagesPerCategory = PIDO
     return [];
   }
   const firstUrl = `${PIDOOV_BASE}${PIDOOV_HOME_PATH}/c/pidoov/${cat}/0`;
-  const firstResponse = await fetchRemoteText(firstUrl, "text/html,application/xhtml+xml");
+  const firstResponse = await fetchRemoteText(firstUrl, "text/html,application/xhtml+xml", PIDOOV_FETCH_HEADERS);
   if (firstResponse.status < 200 || firstResponse.status >= 300) {
     throw new Error(`Pidoov category ${cat} unavailable`);
   }
@@ -1292,7 +1296,7 @@ async function fetchPidoovCategoryEntries(categoryId, maxPagesPerCategory = PIDO
 
   const nextRows = await mapWithConcurrency(pages, PIDOOV_FETCH_CONCURRENCY, async (pageNumber) => {
     const pageUrl = `${PIDOOV_BASE}${PIDOOV_HOME_PATH}/c/pidoov/${cat}/${pageNumber}`;
-    const response = await fetchRemoteText(pageUrl, "text/html,application/xhtml+xml");
+    const response = await fetchRemoteText(pageUrl, "text/html,application/xhtml+xml", PIDOOV_FETCH_HEADERS);
     if (response.status < 200 || response.status >= 300) {
       return [];
     }
@@ -1874,7 +1878,7 @@ async function loadPidoovDetailSources(detailPath) {
   }
 
   const target = `${PIDOOV_BASE}${safePath}`;
-  const response = await fetchRemoteText(target, "text/html,application/xhtml+xml");
+  const response = await fetchRemoteText(target, "text/html,application/xhtml+xml", PIDOOV_FETCH_HEADERS);
   if (response.status < 200 || response.status >= 300) {
     throw new Error("Pidoov detail unavailable");
   }
@@ -3715,7 +3719,9 @@ async function resolveSupplementalCoverFromDetail(entry) {
 
   const provider = String(entry?.external_provider || entry?.provider || "").trim().toLowerCase();
   const requestHeaders =
-    provider === "rendezvous"
+    provider === "pidoov"
+      ? PIDOOV_FETCH_HEADERS
+      : provider === "rendezvous"
       ? RENDEZVOUS_FETCH_HEADERS
       : provider === "notarielles"
         ? NOTARIELLES_FETCH_HEADERS
