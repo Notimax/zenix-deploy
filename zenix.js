@@ -2559,9 +2559,42 @@ function normalizeCalendarMediaType(value) {
   return "";
 }
 
+function hasCalendarAnimationCategory(entry) {
+  const rows = Array.isArray(entry?.categories)
+    ? entry.categories
+    : Array.isArray(entry?.genres)
+      ? entry.genres
+      : [];
+  return rows.some((row) => {
+    const label = normalizeTitleKey(row?.name || row?.label || row || "");
+    return (
+      label.includes("animation") ||
+      label.includes("anime") ||
+      label.includes("japanimation") ||
+      label.includes("dessin anime")
+    );
+  });
+}
+
 function getCalendarEntryMediaType(entry) {
   if (!entry || typeof entry !== "object") {
     return "film";
+  }
+  const mediaId = Number(entry.mediaId || 0);
+  if (Boolean(entry.isAnime) || hasCalendarAnimationCategory(entry)) {
+    return "anime";
+  }
+  if (mediaId > 0) {
+    const mapped = findItemById(mediaId);
+    if (mapped?.isAnime) {
+      return "anime";
+    }
+    if (mapped?.type === "tv") {
+      return "serie";
+    }
+    if (mapped?.type === "movie") {
+      return "film";
+    }
   }
   const explicit = normalizeCalendarMediaType(
     entry.type || entry.kind || entry.mediaType || entry.media_type || entry.category || ""
@@ -2797,6 +2830,22 @@ function normalizeDirectCalendarType(movie) {
   if (!movie || String(movie.type || "").toLowerCase() !== "tv") {
     return "film";
   }
+  if (Boolean(movie?.isAnime)) {
+    return "anime";
+  }
+  const categories = Array.isArray(movie?.categories) ? movie.categories : [];
+  const hasAnimationCategory = categories.some((entry) => {
+    const label = normalizeTitleKey(entry?.name || entry?.label || "");
+    return (
+      label.includes("animation") ||
+      label.includes("anime") ||
+      label.includes("japanimation") ||
+      label.includes("dessin anime")
+    );
+  });
+  if (hasAnimationCategory) {
+    return "anime";
+  }
   return Boolean(movie.isAnime) ? "anime" : "serie";
 }
 
@@ -2816,10 +2865,6 @@ function buildCalendarFallbackFromDirect(payload, month, year) {
     }
 
     const type = normalizeDirectCalendarType(movie);
-    if (type === "anime") {
-      return;
-    }
-
     const key = String(movie?.calendarId || `${yearSafe}-${monthSafe}-${dayNumber}-${mediaId}`);
     if (dedupe.has(key)) {
       return;
@@ -2838,11 +2883,13 @@ function buildCalendarFallbackFromDirect(payload, month, year) {
       title: String(movie?.title || "Sans titre"),
       type,
       kind: type,
+      isAnime: type === "anime",
       language: String(movie?.lang || "").trim().toUpperCase(),
       season: Number(movie?.season || 0),
       episode: Number(movie?.episode || 0),
       supplemental: String(movie?.calendarSupplemental || ""),
-      poster: String(posters.small || posters.large || posters.wallpaper || ""),
+      poster: String(posters.large || posters.small || posters.wallpaper || ""),
+      categories: Array.isArray(movie?.categories) ? movie.categories : [],
       url: "",
     });
   });
@@ -2942,6 +2989,21 @@ function resolveCalendarDetailId(entry) {
   return Number(match?.id || 0);
 }
 
+function resolveCalendarEntryCover(entry, detailId = 0) {
+  const direct = normalizeImageUrl(entry?.poster || "");
+  const mediaId = Math.max(0, Number(detailId || entry?.mediaId || 0));
+  if (mediaId <= 0) {
+    return direct;
+  }
+  const item = findItemById(mediaId);
+  if (!item) {
+    return direct;
+  }
+  const cachedDetails = state.detailsCache.get(mediaId) || null;
+  const cover = resolveCardCover(item, cachedDetails);
+  return cover || direct;
+}
+
 function renderCalendarSection() {
   if (!refs.calendarSection || !refs.calendarMergedGrid) {
     return;
@@ -3016,7 +3078,7 @@ function renderCalendarSection() {
     const linkLabel = hasDetails ? "Voir details" : "Bientot";
     const mediaType = getCalendarEntryMediaType(entry);
     const typeLabel = typeMap[mediaType] || "Titre";
-    const poster = normalizeImageUrl(entry.poster || "");
+    const poster = resolveCalendarEntryCover(entry, detailId);
     const dateLabel = formatCalendarDateLabel(entry);
     card.innerHTML = `
       <div class="media-shell">
@@ -3027,6 +3089,7 @@ function renderCalendarSection() {
             loading="${index < 24 ? "eager" : "lazy"}"
             decoding="async"
             fetchpriority="${index < 10 ? "high" : "auto"}"
+            ${hasDetails ? `data-cover-id="${detailId}"` : ""}
           />
           <span class="calendar-date-pill">${escapeHtml(dateLabel)}</span>
           ${
@@ -3088,7 +3151,10 @@ function renderCalendarSection() {
   } else {
     refs.calendarMergedGrid.appendChild(mergedFragment);
     warmImageCacheFromPool(
-      mergedRows.map((entry) => ({ poster: normalizeImageUrl(entry.poster || ""), backdrop: "" })),
+      mergedRows.map((entry) => ({
+        poster: resolveCalendarEntryCover(entry, Number(entry?.mediaId || 0)),
+        backdrop: "",
+      })),
       80
     );
   }

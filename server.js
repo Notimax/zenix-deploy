@@ -888,8 +888,29 @@ function normalizeTypeFromPurstream(movie) {
   if (!movie || movie.type !== "tv") {
     return "film";
   }
-  const urls = String(movie.urls || "").toLowerCase();
-  if (urls.includes("animes/")) {
+  if (Boolean(movie?.isAnime)) {
+    return "anime";
+  }
+  const categories = Array.isArray(movie?.categories) ? movie.categories : [];
+  const hasAnimationCategory = categories.some((entry) => {
+    const label = normalizeTitleKey(entry?.name || entry?.label || "");
+    return (
+      label.includes("animation") ||
+      label.includes("anime") ||
+      label.includes("japanimation") ||
+      label.includes("dessin anime")
+    );
+  });
+  if (hasAnimationCategory) {
+    return "anime";
+  }
+  const supplemental = normalizeTitleKey(movie?.calendarSupplemental || movie?.supplemental || "");
+  if (supplemental.includes("anime") || supplemental.includes("japanimation")) {
+    return "anime";
+  }
+  const urlsRaw = Array.isArray(movie?.urls) ? movie.urls.join(" ") : movie?.urls;
+  const urls = String(urlsRaw || "").toLowerCase();
+  if (urls.includes("/animes/") || urls.includes("/anime/")) {
     return "anime";
   }
   return "serie";
@@ -920,9 +941,6 @@ function parsePurstreamCalendar(payload, month, year) {
     const dateIso = `${year}-${monthSafe}-${daySafe}`;
     const posters = movie.posters || {};
     const type = normalizeTypeFromPurstream(movie);
-    if (type === "anime") {
-      continue;
-    }
     const semanticKey = `${normalizeTitleKey(movie.title || "")}::${type}::${dayNumber}::${Number(movie.season || 0)}::${Number(movie.episode || 0)}`;
     if (semanticDedupe.has(semanticKey)) {
       continue;
@@ -936,11 +954,13 @@ function parsePurstreamCalendar(payload, month, year) {
       mediaId,
       title: String(movie.title || "Sans titre"),
       type,
+      isAnime: type === "anime",
       language: String(movie.lang || "").trim().toUpperCase(),
       supplemental: String(movie.calendarSupplemental || "").trim(),
       season: Number(movie.season || 0),
       episode: Number(movie.episode || 0),
-      poster: String(posters.small || posters.large || posters.wallpaper || ""),
+      poster: String(posters.large || posters.small || posters.wallpaper || ""),
+      categories: Array.isArray(movie.categories) ? movie.categories : [],
       url: `${PURSTREAM_WEB_BASE}/calendar`,
     });
   }
