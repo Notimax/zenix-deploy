@@ -2559,6 +2559,14 @@ function normalizeCalendarMediaType(value) {
   return "";
 }
 
+function isTruthyDataFlag(value) {
+  if (value === true || value === 1) {
+    return true;
+  }
+  const raw = String(value || "").trim().toLowerCase();
+  return raw === "1" || raw === "true" || raw === "yes" || raw === "oui";
+}
+
 function hasCalendarAnimationCategory(entry) {
   const rows = Array.isArray(entry?.categories)
     ? entry.categories
@@ -2568,7 +2576,6 @@ function hasCalendarAnimationCategory(entry) {
   return rows.some((row) => {
     const label = normalizeTitleKey(row?.name || row?.label || row || "");
     return (
-      label.includes("animation") ||
       label.includes("anime") ||
       label.includes("japanimation") ||
       label.includes("dessin anime")
@@ -2581,7 +2588,7 @@ function getCalendarEntryMediaType(entry) {
     return "film";
   }
   const mediaId = Number(entry.mediaId || 0);
-  if (Boolean(entry.isAnime) || hasCalendarAnimationCategory(entry)) {
+  if (isTruthyDataFlag(entry.isAnime) || hasCalendarAnimationCategory(entry)) {
     return "anime";
   }
   if (mediaId > 0) {
@@ -2830,23 +2837,18 @@ function normalizeDirectCalendarType(movie) {
   if (!movie || String(movie.type || "").toLowerCase() !== "tv") {
     return "film";
   }
-  if (Boolean(movie?.isAnime)) {
+  if (isTruthyDataFlag(movie?.isAnime)) {
     return "anime";
   }
-  const categories = Array.isArray(movie?.categories) ? movie.categories : [];
-  const hasAnimationCategory = categories.some((entry) => {
-    const label = normalizeTitleKey(entry?.name || entry?.label || "");
-    return (
-      label.includes("animation") ||
-      label.includes("anime") ||
-      label.includes("japanimation") ||
-      label.includes("dessin anime")
-    );
-  });
-  if (hasAnimationCategory) {
+  if (hasCalendarAnimationCategory(movie)) {
     return "anime";
   }
-  return Boolean(movie.isAnime) ? "anime" : "serie";
+  const urlsRaw = Array.isArray(movie?.urls) ? movie.urls.join(" ") : movie?.urls;
+  const urls = String(urlsRaw || "").toLowerCase();
+  if (urls.includes("/animes/") || urls.includes("/anime/")) {
+    return "anime";
+  }
+  return "serie";
 }
 
 function buildCalendarFallbackFromDirect(payload, month, year) {

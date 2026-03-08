@@ -884,28 +884,19 @@ function normalizeTitleKey(value) {
     .trim();
 }
 
+function isTruthyFlag(value) {
+  if (value === true || value === 1) {
+    return true;
+  }
+  const raw = String(value || "").trim().toLowerCase();
+  return raw === "1" || raw === "true" || raw === "yes" || raw === "oui";
+}
+
 function normalizeTypeFromPurstream(movie) {
   if (!movie || movie.type !== "tv") {
     return "film";
   }
-  if (Boolean(movie?.isAnime)) {
-    return "anime";
-  }
-  const categories = Array.isArray(movie?.categories) ? movie.categories : [];
-  const hasAnimationCategory = categories.some((entry) => {
-    const label = normalizeTitleKey(entry?.name || entry?.label || "");
-    return (
-      label.includes("animation") ||
-      label.includes("anime") ||
-      label.includes("japanimation") ||
-      label.includes("dessin anime")
-    );
-  });
-  if (hasAnimationCategory) {
-    return "anime";
-  }
-  const supplemental = normalizeTitleKey(movie?.calendarSupplemental || movie?.supplemental || "");
-  if (supplemental.includes("anime") || supplemental.includes("japanimation")) {
+  if (isTruthyFlag(movie?.isAnime)) {
     return "anime";
   }
   const urlsRaw = Array.isArray(movie?.urls) ? movie.urls.join(" ") : movie?.urls;
