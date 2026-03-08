@@ -7743,6 +7743,17 @@ function buildPlayableSourceCandidates(source, options = {}) {
   const normalizedProxyAbsolute = toAbsoluteUrl(toHlsProxyUrl(absolute) || absolute);
   const proxyUrl = !isProxied && isRemoteHttp ? `${API_BASE}/hls-proxy?url=${encodeURIComponent(absolute)}` : "";
   const proxiedTarget = isProxied ? extractProxyTargetUrl(absolute) : "";
+  const forceProxyHls = Boolean(options.forceProxyHls);
+
+  if (looksLikeHls && forceProxyHls) {
+    if (isProxied) {
+      return Array.from(new Set([normalizedProxyAbsolute].filter(Boolean)));
+    }
+    if (proxyUrl) {
+      return Array.from(new Set([proxyUrl].filter(Boolean)));
+    }
+    return Array.from(new Set([absolute].filter(Boolean)));
+  }
 
   if (looksLikeHls && isProxied) {
     if (options.preferDirectHls && proxiedTarget) {
@@ -7805,10 +7816,12 @@ function shouldPreferProxyFirstForHls(video, source) {
 
 async function startPlayerSource(source, resumeTime, token) {
   const video = refs.playerVideo;
-  const preferDirectHls = shouldUseNativeHls(video) && !shouldPreferProxyFirstForHls(video, source);
+  const forceProxyHls = shouldPreferProxyFirstForHls(video, source);
+  const preferDirectHls = shouldUseNativeHls(video) && !forceProxyHls;
   const streamCandidates = buildPlayableSourceCandidates(source, {
-    // Native Safari/iOS handles direct HLS better; keep proxy as fallback.
+    // Native Safari/iOS often needs local relay for remote hosts with unstable playlists.
     preferDirectHls,
+    forceProxyHls,
   });
   if (streamCandidates.length === 0) {
     throw new Error("Missing source URL");
