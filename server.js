@@ -2025,13 +2025,19 @@ async function handleHlsProxy(req, res, requestUrl) {
   const timeoutId = setTimeout(() => controller.abort(), Math.max(18000, PROXY_TIMEOUT_MS));
   try {
     const range = String(req.headers.range || "").trim();
-    let upstream = await fetchHlsUpstreamWithFallback(target, range, controller.signal, requestMethod);
+    const likelyPlaylistPath = String(target.pathname || "").toLowerCase().endsWith(".m3u8");
+    let upstream = await fetchHlsUpstreamWithFallback(
+      target,
+      likelyPlaylistPath ? "" : range,
+      controller.signal,
+      requestMethod
+    );
     if (
       requestMethod === "HEAD" &&
       [400, 401, 403, 404, 405, 429, 500, 501].includes(Number(upstream.status || 0))
     ) {
       // Some hosts don't support HEAD reliably; fall back to GET headers for player probes.
-      upstream = await fetchHlsUpstreamWithFallback(target, range, controller.signal, "GET");
+      upstream = await fetchHlsUpstreamWithFallback(target, likelyPlaylistPath ? "" : range, controller.signal, "GET");
     }
 
     const status = Number(upstream.status || 502);
@@ -2042,6 +2048,16 @@ async function handleHlsProxy(req, res, requestUrl) {
       contentType.includes("vnd.apple.mpegurl");
 
     if (isPlaylist) {
+      // Always return full playlists to Safari/iOS. Partial ranged playlist responses can
+      // break HLS parsing and trigger instant "no supported source" errors.
+      if (range) {
+        try {
+          await upstream.arrayBuffer();
+        } catch {
+          // ignore body drain issues
+        }
+        upstream = await fetchHlsUpstreamWithFallback(target, "", controller.signal, "GET");
+      }
       if (requestMethod === "HEAD") {
         const headers = {
           "Content-Type": "application/vnd.apple.mpegurl; charset=utf-8",
@@ -2051,7 +2067,7 @@ async function handleHlsProxy(req, res, requestUrl) {
         if (contentLength) {
           headers["Content-Length"] = String(contentLength);
         }
-        res.writeHead(status, headers);
+        res.writeHead(200, headers);
         res.end();
         return true;
       }
@@ -2069,7 +2085,7 @@ async function handleHlsProxy(req, res, requestUrl) {
         sendJson(res, 502, { error: "Invalid playlist format" });
         return true;
       }
-      res.writeHead(status, {
+      res.writeHead(200, {
         "Content-Type": "application/vnd.apple.mpegurl; charset=utf-8",
         "Cache-Control": "no-cache",
       });
