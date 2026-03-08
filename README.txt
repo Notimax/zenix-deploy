@@ -190,3 +190,13 @@ LAST BRUTE RESULT (LOCAL, 2026-03-08)
 - Notes:
   - iPhone runs can show iOS segment fallback status (`Lecture segment ...`) during playback.
   - playback remained valid for all required 20s runs.
+
+LAST BRUTE RESULT (LIVE ZENIX.BEST, 2026-03-08)
+- Source: `__tmp_brut_f1_mercredi_matrix_result_live.json`
+- Command:
+  - `ZENIX_BASE_URL=https://zenix.best/ node __tmp_brut_f1_mercredi_matrix.js`
+- Summary:
+  - total runs: 8
+  - passed: 8
+  - failed: 0
+  - `/api/media/*/sheet` 404 count during matrix: 0
