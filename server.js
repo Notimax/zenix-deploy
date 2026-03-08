@@ -23,6 +23,13 @@ const PIDOOV_MAX_PAGES_PER_CATEGORY = Math.max(
   1,
   toInt(process.env.PIDOOV_MAX_PAGES_PER_CATEGORY, 25, 1, 120)
 );
+const PIDOOV_BOOTSTRAP_PAGES_PER_CATEGORY = Math.max(
+  1,
+  Math.min(
+    PIDOOV_MAX_PAGES_PER_CATEGORY,
+    toInt(process.env.PIDOOV_BOOTSTRAP_PAGES_PER_CATEGORY, 2, 1, 20)
+  )
+);
 const PIDOOV_FETCH_CONCURRENCY = Math.max(1, toInt(process.env.PIDOOV_FETCH_CONCURRENCY, 4, 1, 8));
 const PIDOOV_MAX_MATCH_CANDIDATES = Math.max(
   1,
@@ -89,6 +96,7 @@ const zenixOwnedSourcesCache = {
 const pidoovIndexCache = {
   loadedAt: 0,
   entries: [],
+  full: false,
   inFlight: null,
 };
 const analyticsClients = new Map();
@@ -1056,7 +1064,7 @@ async function mapWithConcurrency(values, concurrency, mapper) {
   return results;
 }
 
-async function fetchPidoovCategoryEntries(categoryId) {
+async function fetchPidoovCategoryEntries(categoryId, maxPagesPerCategory = PIDOOV_MAX_PAGES_PER_CATEGORY) {
   const cat = Number(categoryId || 0);
   if (!Number.isInteger(cat) || cat <= 0) {
     return [];
@@ -1069,7 +1077,8 @@ async function fetchPidoovCategoryEntries(categoryId) {
 
   const firstRows = parsePidoovCategoryPage(cat, 0, firstResponse.body);
   const maxPage = parsePidoovCategoryMaxPage(cat, firstResponse.body);
-  const cappedMaxPage = Math.max(0, Math.min(maxPage, PIDOOV_MAX_PAGES_PER_CATEGORY - 1));
+  const cap = Math.max(1, toInt(maxPagesPerCategory, PIDOOV_MAX_PAGES_PER_CATEGORY, 1, 120));
+  const cappedMaxPage = Math.max(0, Math.min(maxPage, cap - 1));
   if (cappedMaxPage <= 0) {
     return firstRows;
   }
@@ -1135,21 +1144,36 @@ function readPidoovLookupCache(key) {
 
 async function loadPidoovIndex(force = false) {
   const now = Date.now();
-  if (!force && pidoovIndexCache.loadedAt > 0 && now - pidoovIndexCache.loadedAt < PIDOOV_INDEX_CACHE_MS) {
+  const hasCache = Array.isArray(pidoovIndexCache.entries) && pidoovIndexCache.entries.length > 0;
+  const isFresh = pidoovIndexCache.loadedAt > 0 && now - pidoovIndexCache.loadedAt < PIDOOV_INDEX_CACHE_MS;
+
+  if (!force && hasCache && isFresh) {
+    return Array.isArray(pidoovIndexCache.entries) ? pidoovIndexCache.entries : [];
+  }
+  if (force && pidoovIndexCache.full && hasCache && isFresh) {
     return Array.isArray(pidoovIndexCache.entries) ? pidoovIndexCache.entries : [];
   }
   if (pidoovIndexCache.inFlight) {
-    return pidoovIndexCache.inFlight;
+    if (!force && hasCache) {
+      return Array.isArray(pidoovIndexCache.entries) ? pidoovIndexCache.entries : [];
+    }
+    return await pidoovIndexCache.inFlight;
   }
+
+  const fullMode = Boolean(force);
+  const pagesPerCategory = fullMode ? PIDOOV_MAX_PAGES_PER_CATEGORY : PIDOOV_BOOTSTRAP_PAGES_PER_CATEGORY;
+  const crawlConcurrency = fullMode
+    ? Math.max(1, Math.min(PIDOOV_FETCH_CONCURRENCY, 3))
+    : Math.max(1, Math.min(PIDOOV_FETCH_CONCURRENCY, 2));
 
   const task = (async () => {
     const byPath = new Map();
     const categoryRows = await mapWithConcurrency(
       PIDOOV_CATEGORY_IDS,
-      Math.min(PIDOOV_FETCH_CONCURRENCY, PIDOOV_CATEGORY_IDS.length),
+      Math.min(crawlConcurrency, PIDOOV_CATEGORY_IDS.length),
       async (categoryId) => {
         try {
-          return await fetchPidoovCategoryEntries(categoryId);
+          return await fetchPidoovCategoryEntries(categoryId, pagesPerCategory);
         } catch {
           return [];
         }
@@ -1168,14 +1192,20 @@ async function loadPidoovIndex(force = false) {
       });
     });
     const entries = Array.from(byPath.values());
-    pidoovIndexCache.entries = entries;
+    if (entries.length > 0 || !hasCache) {
+      pidoovIndexCache.entries = entries;
+      pidoovIndexCache.full = fullMode;
+    } else if (fullMode && hasCache) {
+      pidoovIndexCache.full = pidoovIndexCache.full || fullMode;
+    }
     pidoovIndexCache.loadedAt = Date.now();
-    return entries;
+    return Array.isArray(pidoovIndexCache.entries) ? pidoovIndexCache.entries : entries;
   })();
 
   pidoovIndexCache.inFlight = task;
   try {
-    return await task;
+    const result = await task;
+    return Array.isArray(result) ? result : [];
   } catch (error) {
     const fallback = Array.isArray(pidoovIndexCache.entries) ? pidoovIndexCache.entries : [];
     if (fallback.length > 0) {
@@ -1185,6 +1215,15 @@ async function loadPidoovIndex(force = false) {
   } finally {
     pidoovIndexCache.inFlight = null;
   }
+}
+
+function triggerPidoovFullIndexRefresh() {
+  if (pidoovIndexCache.full || pidoovIndexCache.inFlight) {
+    return;
+  }
+  loadPidoovIndex(true).catch(() => {
+    // best effort async refresh
+  });
 }
 
 function getPidoovTitleTokens(value) {
@@ -1432,6 +1471,9 @@ async function resolvePidoovSourcesByTitle(title, options = {}) {
   const candidates = pickBestPidoovCandidates(index, safeTitle, year);
   if (candidates.length === 0) {
     storePidoovLookupCache(lookupKey, []);
+    if (!pidoovIndexCache.full) {
+      triggerPidoovFullIndexRefresh();
+    }
     return [];
   }
 
@@ -1475,6 +1517,9 @@ async function resolvePidoovSourcesByTitle(title, options = {}) {
   }
 
   storePidoovLookupCache(lookupKey, merged);
+  if (merged.length === 0 && !pidoovIndexCache.full) {
+    triggerPidoovFullIndexRefresh();
+  }
   return merged;
 }
 
@@ -3564,6 +3609,19 @@ if (buildSuggestionsRelayUrl()) {
   console.log(`[suggestions] Relay enabled for ${SUGGESTIONS_EMAIL_TO}.`);
 } else {
   console.warn("[suggestions] Relay disabled: define SUGGESTIONS_RELAY_BASE and SUGGESTIONS_EMAIL_TO.");
+}
+
+const pidoovWarmupTimer = setTimeout(() => {
+  loadPidoovIndex(false)
+    .then(() => {
+      triggerPidoovFullIndexRefresh();
+    })
+    .catch(() => {
+      // best effort warmup only
+    });
+}, 2000);
+if (typeof pidoovWarmupTimer.unref === "function") {
+  pidoovWarmupTimer.unref();
 }
 
 server.listen(PORT, () => {
