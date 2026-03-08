@@ -12,6 +12,9 @@ const CANONICAL_SCHEME =
 const REMOTE_API_BASE = "https://api.purstream.co/api/v1";
 const PURSTREAM_API_BASE = "https://api.purstream.co/api/v1";
 const PURSTREAM_WEB_BASE = "https://purstream.co";
+const DEFAULT_BROWSER_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+const DEFAULT_ACCEPT_LANGUAGE = "fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7";
 const PIDOOV_BASE = "https://pidoov.com";
 const PIDOOV_HOST = "pidoov.com";
 const PIDOOV_HOME_PATH = "/xv5lzk";
@@ -61,6 +64,10 @@ const NOTARIELLES_MAX_MATCH_CANDIDATES = Math.max(
   toInt(process.env.NOTARIELLES_MAX_MATCH_CANDIDATES, 3, 1, 6)
 );
 const NOTARIELLES_SEED_PATHS = ["/", "/series-en-streaming/", "/categorie-series/series-VF/", "/categorie-series/series-VOSTFR/"];
+const NOTARIELLES_FETCH_HEADERS = {
+  Referer: `${NOTARIELLES_BASE}/`,
+  "Accept-Language": DEFAULT_ACCEPT_LANGUAGE,
+};
 const ANIME_PLANNING_URL = "https://anime-sama.tv/planning/";
 const ANIME_SAMA_BASE = "https://anime-sama.to";
 const ANIME_SAMA_SEARCH_ENDPOINT = `${ANIME_SAMA_BASE}/template-php/defaut/fetch.php`;
@@ -1758,7 +1765,11 @@ async function loadNotariellesEpisodeEntriesFromPages(pageUrls) {
     Math.min(NOTARIELLES_FETCH_CONCURRENCY, targets.length || 1),
     async (pageUrl) => {
       try {
-        const response = await fetchRemoteText(pageUrl, "text/html,application/xhtml+xml");
+        const response = await fetchRemoteText(
+          pageUrl,
+          "text/html,application/xhtml+xml",
+          NOTARIELLES_FETCH_HEADERS
+        );
         if (response.status < 200 || response.status >= 300) {
           return [];
         }
@@ -1924,7 +1935,11 @@ async function loadNotariellesIndex(force = false) {
   const task = (async () => {
     let sitemapUrls = [];
     try {
-      const indexResponse = await fetchRemoteText(NOTARIELLES_SITEMAP_INDEX_URL, "application/xml,text/xml");
+      const indexResponse = await fetchRemoteText(
+        NOTARIELLES_SITEMAP_INDEX_URL,
+        "application/xml,text/xml",
+        NOTARIELLES_FETCH_HEADERS
+      );
       if (indexResponse.status >= 200 && indexResponse.status < 300) {
         sitemapUrls = parseXmlLocValues(indexResponse.body)
           .filter((entry) => {
@@ -1945,7 +1960,7 @@ async function loadNotariellesIndex(force = false) {
             async (sitemapUrl) => {
               let response = null;
               try {
-                response = await fetchRemoteText(sitemapUrl, "application/xml,text/xml");
+                response = await fetchRemoteText(sitemapUrl, "application/xml,text/xml", NOTARIELLES_FETCH_HEADERS);
               } catch {
                 return [];
               }
@@ -2092,7 +2107,7 @@ async function loadNotariellesEntrySources(entry) {
     return Array.isArray(cached.sources) ? cached.sources : [];
   }
 
-  const pageResponse = await fetchRemoteText(pageUrl, "text/html,application/xhtml+xml");
+  const pageResponse = await fetchRemoteText(pageUrl, "text/html,application/xhtml+xml", NOTARIELLES_FETCH_HEADERS);
   if (pageResponse.status < 200 || pageResponse.status >= 300) {
     throw new Error("Notarielles page unavailable");
   }
@@ -2114,7 +2129,11 @@ async function loadNotariellesEntrySources(entry) {
   ];
 
   try {
-    const playerResponse = await fetchRemoteText(playerPageUrl, "text/html,application/xhtml+xml");
+    const playerResponse = await fetchRemoteText(
+      playerPageUrl,
+      "text/html,application/xhtml+xml",
+      NOTARIELLES_FETCH_HEADERS
+    );
     if (playerResponse.status >= 200 && playerResponse.status < 300) {
       const directStreamUrl = parseNotariellesDirectStreamUrl(playerResponse.body, playerPageUrl);
       if (directStreamUrl) {
@@ -2792,7 +2811,8 @@ async function fetchRemote(target, extraHeaders = {}) {
       method: "GET",
       headers: {
         Accept: "application/json",
-        "User-Agent": "Mozilla/5.0 (ZenixStream)",
+        "User-Agent": DEFAULT_BROWSER_UA,
+        "Accept-Language": DEFAULT_ACCEPT_LANGUAGE,
         ...extraHeaders,
       },
       signal: controller.signal,
@@ -2808,7 +2828,7 @@ async function fetchRemote(target, extraHeaders = {}) {
   }
 }
 
-async function fetchRemoteText(target, accept = "text/html") {
+async function fetchRemoteText(target, accept = "text/html", extraHeaders = {}) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), PROXY_TIMEOUT_MS);
   try {
@@ -2816,7 +2836,9 @@ async function fetchRemoteText(target, accept = "text/html") {
       method: "GET",
       headers: {
         Accept: accept,
-        "User-Agent": "Mozilla/5.0 (ZenixStream)",
+        "User-Agent": DEFAULT_BROWSER_UA,
+        "Accept-Language": DEFAULT_ACCEPT_LANGUAGE,
+        ...extraHeaders,
       },
       signal: controller.signal,
     });
@@ -2841,7 +2863,8 @@ async function fetchRemoteForm(target, formData = {}, accept = "text/html", extr
       headers: {
         Accept: accept,
         "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-        "User-Agent": "Mozilla/5.0 (ZenixStream)",
+        "User-Agent": DEFAULT_BROWSER_UA,
+        "Accept-Language": DEFAULT_ACCEPT_LANGUAGE,
         ...extraHeaders,
       },
       body,
