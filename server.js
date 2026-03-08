@@ -118,6 +118,12 @@ const PIDOOV_STATIC_SOURCES_FILE = path.resolve(
     ? String(process.env.PIDOOV_STATIC_SOURCES_FILE || "").trim()
     : String(process.env.PIDOOV_STATIC_SOURCES_FILE || "pidoov-static-sources.json").trim()
 );
+const NOTARIELLES_STATIC_SOURCES_FILE = path.resolve(
+  ROOT,
+  path.isAbsolute(String(process.env.NOTARIELLES_STATIC_SOURCES_FILE || "").trim())
+    ? String(process.env.NOTARIELLES_STATIC_SOURCES_FILE || "").trim()
+    : String(process.env.NOTARIELLES_STATIC_SOURCES_FILE || "notarielles-static-sources.json").trim()
+);
 const proxyCache = new Map();
 const calendarCache = new Map();
 const animeSibnetCache = new Map();
@@ -145,6 +151,11 @@ const notariellesIndexCache = {
   inFlight: null,
 };
 const pidoovStaticCache = {
+  loadedAt: 0,
+  mtimeMs: 0,
+  entries: [],
+};
+const notariellesStaticCache = {
   loadedAt: 0,
   mtimeMs: 0,
   entries: [],
@@ -1254,6 +1265,46 @@ function loadPidoovStaticEntries() {
   return entries;
 }
 
+function loadNotariellesStaticEntries() {
+  const now = Date.now();
+  const ttl = 10 * 1000;
+  if (notariellesStaticCache.loadedAt > 0 && now - notariellesStaticCache.loadedAt < ttl) {
+    return Array.isArray(notariellesStaticCache.entries) ? notariellesStaticCache.entries : [];
+  }
+
+  let entries = [];
+  let mtimeMs = 0;
+  try {
+    const stats = fs.statSync(NOTARIELLES_STATIC_SOURCES_FILE);
+    if (stats.isFile()) {
+      mtimeMs = Number(stats.mtimeMs || 0);
+      if (mtimeMs !== Number(notariellesStaticCache.mtimeMs || 0)) {
+        const raw = fs.readFileSync(NOTARIELLES_STATIC_SOURCES_FILE, "utf8");
+        const parsed = JSON.parse(raw);
+        const list = Array.isArray(parsed?.entries) ? parsed.entries : Array.isArray(parsed) ? parsed : [];
+        entries = list
+          .map((entry) => {
+            if (entry && typeof entry === "object" && typeof entry.pageUrl === "string") {
+              return parseNotariellesEntryFromUrl(entry.pageUrl);
+            }
+            return parseNotariellesEntryFromUrl(entry);
+          })
+          .filter(Boolean);
+      } else {
+        entries = Array.isArray(notariellesStaticCache.entries) ? notariellesStaticCache.entries : [];
+      }
+    }
+  } catch {
+    entries = [];
+    mtimeMs = 0;
+  }
+
+  notariellesStaticCache.loadedAt = now;
+  notariellesStaticCache.mtimeMs = mtimeMs;
+  notariellesStaticCache.entries = entries;
+  return entries;
+}
+
 async function loadPidoovIndex(force = false) {
   const now = Date.now();
   const hasCache = Array.isArray(pidoovIndexCache.entries) && pidoovIndexCache.entries.length > 0;
@@ -2022,6 +2073,15 @@ async function loadNotariellesIndex(force = false) {
 
     const seedEntries = await loadNotariellesEpisodeEntriesFromPages(probeUrls);
     seedEntries.forEach((entry) => {
+      const key = String(entry?.pageUrl || "").trim();
+      if (!key || dedupe.has(key)) {
+        return;
+      }
+      dedupe.set(key, entry);
+    });
+
+    const staticEntries = loadNotariellesStaticEntries();
+    staticEntries.forEach((entry) => {
       const key = String(entry?.pageUrl || "").trim();
       if (!key || dedupe.has(key)) {
         return;
@@ -4076,6 +4136,7 @@ async function handleNotariellesSource(req, res, requestUrl) {
         loadedAt: Number(notariellesIndexCache.loadedAt || 0),
         inFlight: Boolean(notariellesIndexCache.inFlight),
         pageCacheSize: notariellesPageCache.size,
+        staticSize: Array.isArray(loadNotariellesStaticEntries()) ? loadNotariellesStaticEntries().length : 0,
       };
     }
     sendJson(res, 200, payload);

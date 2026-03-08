@@ -43,6 +43,7 @@ Last update: 2026-03-08
   - Backend endpoint `/api/notarielles-source` resolves series episode sources by `title + season + episode`.
   - Backend index is resilient: uses sitemap when possible and also scrapes episode links from seed pages
     (`/`, `/series-en-streaming/`, `series-VF`, `series-VOSTFR`) plus extra category probes.
+  - Static fallback file `notarielles-static-sources.json` is merged to keep results when live crawl is blocked upstream.
   - Frontend injects Notarielles sources for TV non-anime episodes before other fallback providers.
   - Caching/env tuning keys:
     - `NOTARIELLES_INDEX_CACHE_MS`
@@ -52,6 +53,7 @@ Last update: 2026-03-08
     - `NOTARIELLES_PAGE_PROBE_COUNT`
     - `NOTARIELLES_FETCH_CONCURRENCY`
     - `NOTARIELLES_MAX_MATCH_CANDIDATES`
+    - `NOTARIELLES_STATIC_SOURCES_FILE`
 
 ## Mobile robustness
 - Startup splash must never block app forever.

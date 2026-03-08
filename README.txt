@@ -87,6 +87,7 @@ NOTARIELLES INTEGRATION (SERIES FALLBACK)
   - reads `https://notarielles.fr/sitemaps.xml` when available
   - extracts episode URLs from seed pages (`/`, `/series-en-streaming/`, `series-VF`, `series-VOSTFR`)
   - probes extra category pages from sitemap for recent episode links
+  - merges static fallback file `notarielles-static-sources.json` when live crawl is blocked
 - Frontend injection:
   - `zenix.js` now appends Notarielles sources for TV (non-anime) episodes.
   - Merge order for episodes: Owned -> Notarielles -> Pidoov -> Anime Sibnet fallback.
@@ -98,3 +99,4 @@ NOTARIELLES INTEGRATION (SERIES FALLBACK)
   - `NOTARIELLES_PAGE_PROBE_COUNT`
   - `NOTARIELLES_FETCH_CONCURRENCY`
   - `NOTARIELLES_MAX_MATCH_CANDIDATES`
+  - `NOTARIELLES_STATIC_SOURCES_FILE`
