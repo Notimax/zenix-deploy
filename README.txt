@@ -157,3 +157,36 @@ MULTI-PROVIDER CATALOG + CALENDAR FUSION
   - `SUPPLEMENTAL_CATALOG_CACHE_MS`
   - `SUPPLEMENTAL_CATALOG_PAGE_SIZE`
   - `SUPPLEMENTAL_CALENDAR_LIMIT`
+
+LATEST FIX LOG (2026-03-08)
+- High 404 noise fix:
+  - `zenix.js` now keeps a `detailsMissing` cache.
+  - `ensureDetails()` no longer retries `/api/media/{id}/sheet` for known-missing IDs.
+  - external provider IDs are skipped for Purstream sheet fetches.
+- Cover fix for added providers (Pidoov/Rendezvous):
+  - `server.js` now hydrates missing posters from provider detail pages (cached).
+  - hydrated covers are injected into supplemental catalog rows and reused by calendar mapping.
+  - first supplemental page now returns mostly real covers instead of placeholders.
+- iframe warning fix:
+  - removed redundant `allowfullscreen` attributes in `index.html` where `allow` already includes fullscreen.
+
+BRUTE TEST COMMAND (REFERENCE)
+- Test file: `__tmp_brut_f1_mercredi_matrix.js`
+- Result file: `__tmp_brut_f1_mercredi_matrix_result.json`
+- Local run command:
+  - start server: `node server.js`
+  - run matrix: `node __tmp_brut_f1_mercredi_matrix.js`
+- Matrix includes:
+  - Desktop Chromium: F1 (20s), Mercredi (20s)
+  - iPhone 13 WebKit: F1 (3 x 20s), Mercredi (3 x 20s)
+
+LAST BRUTE RESULT (LOCAL, 2026-03-08)
+- Source: `__tmp_brut_f1_mercredi_matrix_result.json`
+- Summary:
+  - total runs: 8
+  - passed: 8
+  - failed: 0
+  - `/api/media/*/sheet` 404 count during matrix: 0
+- Notes:
+  - iPhone runs can show iOS segment fallback status (`Lecture segment ...`) during playback.
+  - playback remained valid for all required 20s runs.

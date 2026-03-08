@@ -33,6 +33,9 @@ Last update: 2026-03-08
   - when audio tracks are exposed, player attempts to force French track.
   - hard filter now removes known non-playable embed/gate URLs before playback (Notarielles/Rendezvous page wrappers, ad-gate hosts, store links).
   - for movies, direct media formats (`hls/mp4/webm/dash`) are prioritized and embeds are dropped when at least one direct source exists.
+- Frontend detail warmup hardening:
+  - `ensureDetails()` now caches missing sheet IDs (`detailsMissing`) and skips repeat `/api/media/{id}/sheet` calls.
+  - external provider IDs are excluded from Purstream sheet fetches to avoid mass 404 noise.
 - Owned source providers supported in backend:
   - `cloudflare_stream` (`customer_code` + `uid`)
   - `bunny_stream` (`pull_zone_url` + `video_id`)
@@ -91,10 +94,12 @@ Last update: 2026-03-08
 - Multi-provider catalog/calendar fusion added:
   - Backend endpoint `/api/catalog/supplemental` exposes normalized provider entries
     (currently Pidoov + Rendezvous) with pagination.
+  - Missing provider covers are hydrated from provider detail pages (cached) before catalog response when possible.
   - Frontend catalog sync merges Purstream + supplemental entries on each page.
   - Semantic dedupe now prevents duplicates across providers using
     `title + mediaType + year + season + episode`.
   - Calendar overview (`/api/calendar/overview`) now includes `supplemental` items and provider status.
+  - Calendar supplemental rows now reuse hydrated poster fields (`large/small/wallpaper`) when available.
   - Supplemental entries are integrated in merged calendar without perturbing existing anime/purstream flows.
   - Tuning keys:
     - `SUPPLEMENTAL_CATALOG_CACHE_MS`

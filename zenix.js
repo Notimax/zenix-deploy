@@ -164,6 +164,7 @@ const state = {
   activeHeroId: null,
   selectedDetailId: null,
   detailsCache: new Map(),
+  detailsMissing: new Set(),
   trailersCache: new Map(),
   seasonsCache: new Map(),
   progress: loadProgress(),
@@ -5809,28 +5810,51 @@ function updateSyncText(customText = "") {
 }
 
 async function ensureDetails(id) {
-  if (!id || state.detailsCache.has(id)) {
-    return state.detailsCache.get(id) || null;
+  const mediaId = Number(id || 0);
+  if (mediaId <= 0) {
+    return null;
   }
-  if (state.detailsInFlight.has(id)) {
-    return state.detailsInFlight.get(id);
+  if (state.detailsCache.has(mediaId)) {
+    return state.detailsCache.get(mediaId) || null;
+  }
+  if (state.detailsMissing.has(mediaId)) {
+    return null;
+  }
+
+  const linkedItem = findItemById(mediaId);
+  if (linkedItem?.isExternal) {
+    state.detailsMissing.add(mediaId);
+    return null;
+  }
+  if (state.detailsInFlight.has(mediaId)) {
+    return state.detailsInFlight.get(mediaId);
   }
 
   const task = (async () => {
-    const payload = await fetchJson(`${API_BASE}/media/${id}/sheet`);
-    const details = payload?.data?.items;
-    if (details && typeof details === "object") {
-      state.detailsCache.set(id, details);
-      return details;
+    try {
+      const payload = await fetchJson(`${API_BASE}/media/${mediaId}/sheet`);
+      const details = payload?.data?.items;
+      if (details && typeof details === "object") {
+        state.detailsCache.set(mediaId, details);
+        return details;
+      }
+      state.detailsMissing.add(mediaId);
+      return null;
+    } catch (error) {
+      const message = String(error?.message || "").toLowerCase();
+      if (message.includes("http 404") || message.includes("not found")) {
+        state.detailsMissing.add(mediaId);
+        return null;
+      }
+      throw error;
     }
-    return null;
   })();
-  state.detailsInFlight.set(id, task);
+  state.detailsInFlight.set(mediaId, task);
 
   try {
     return await task;
   } finally {
-    state.detailsInFlight.delete(id);
+    state.detailsInFlight.delete(mediaId);
   }
 }
 

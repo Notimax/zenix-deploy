@@ -110,6 +110,22 @@ const SUPPLEMENTAL_CALENDAR_LIMIT = Math.max(
   20,
   toInt(process.env.SUPPLEMENTAL_CALENDAR_LIMIT, 180, 20, 360)
 );
+const SUPPLEMENTAL_COVER_CACHE_MS = Math.max(
+  5 * 60 * 1000,
+  Number(process.env.SUPPLEMENTAL_COVER_CACHE_MS || 8 * 60 * 60 * 1000)
+);
+const SUPPLEMENTAL_COVER_EMPTY_CACHE_MS = Math.max(
+  60 * 1000,
+  Number(process.env.SUPPLEMENTAL_COVER_EMPTY_CACHE_MS || 20 * 60 * 1000)
+);
+const SUPPLEMENTAL_COVER_FETCH_CONCURRENCY = Math.max(
+  1,
+  toInt(process.env.SUPPLEMENTAL_COVER_FETCH_CONCURRENCY, 4, 1, 8)
+);
+const SUPPLEMENTAL_COVER_MAX_PER_RESPONSE = Math.max(
+  6,
+  toInt(process.env.SUPPLEMENTAL_COVER_MAX_PER_RESPONSE, 36, 6, 120)
+);
 const ANIME_PLANNING_URL = "https://anime-sama.tv/planning/";
 const ANIME_SAMA_BASE = "https://anime-sama.to";
 const ANIME_SAMA_SEARCH_ENDPOINT = `${ANIME_SAMA_BASE}/template-php/defaut/fetch.php`;
@@ -224,6 +240,8 @@ const supplementalCatalogCache = {
   entries: [],
   inFlight: null,
 };
+const supplementalCoverCache = new Map();
+const supplementalCoverInFlight = new Map();
 const analyticsClients = new Map();
 const analyticsEvents = [];
 const suggestionRateLimitMap = new Map();
@@ -1357,6 +1375,14 @@ function loadPidoovStaticEntries() {
               year: toInt(entry?.year, 0, 0, 2099),
               language: normalizePidoovLanguage(entry?.language || entry?.label || "") || "VF",
               detailPath: normalizePidoovPath(entry?.detailPath || ""),
+              poster: normalizeSupplementalCoverCandidate(
+                entry?.poster || entry?.cover || entry?.image || entry?.poster_url || "",
+                PIDOOV_BASE
+              ),
+              backdrop: normalizeSupplementalCoverCandidate(
+                entry?.backdrop || entry?.wallpaper || entry?.backdrop_url || "",
+                PIDOOV_BASE
+              ),
               sources: sources
                 .map((source) => {
                   const parsedUrl = parseSafeRemoteUrl(source?.stream_url || source?.url || "");
@@ -1458,6 +1484,14 @@ function loadRendezvousStaticEntries() {
 
             const normalizedLanguage =
               normalizePidoovLanguage(entry?.language || entry?.label || "") || baseEntry.language || "VF";
+            const normalizedPoster = normalizeSupplementalCoverCandidate(
+              entry?.poster || entry?.cover || entry?.image || entry?.poster_url || "",
+              pageUrl || `${RENDEZVOUS_BASE}/`
+            );
+            const normalizedBackdrop = normalizeSupplementalCoverCandidate(
+              entry?.backdrop || entry?.wallpaper || entry?.backdrop_url || normalizedPoster,
+              pageUrl || `${RENDEZVOUS_BASE}/`
+            );
             const rawSources = Array.isArray(entry?.sources) ? entry.sources : [];
             const staticSources = rawSources
               .map((source, index) => {
@@ -1480,6 +1514,8 @@ function loadRendezvousStaticEntries() {
             return {
               ...baseEntry,
               language: normalizedLanguage,
+              poster: normalizedPoster,
+              backdrop: normalizedBackdrop || normalizedPoster,
               lastmod: toIsoDate(entry?.lastmod || entry?.updatedAt || ""),
               staticSources,
             };
@@ -3488,6 +3524,282 @@ function sanitizeSupplementalTitle(value) {
   return title || String(value || "").trim();
 }
 
+function isAllowedSupplementalDetailHost(hostname) {
+  const safeHost = normalizeHostName(hostname);
+  if (!safeHost) {
+    return false;
+  }
+  return (
+    safeHost === PIDOOV_HOST ||
+    safeHost.endsWith(`.${PIDOOV_HOST}`) ||
+    safeHost === RENDEZVOUS_HOST ||
+    safeHost.endsWith(`.${RENDEZVOUS_HOST}`) ||
+    safeHost === NOTARIELLES_HOST ||
+    safeHost.endsWith(`.${NOTARIELLES_HOST}`)
+  );
+}
+
+function decodeHtmlAttribute(value) {
+  return String(value || "")
+    .replace(/&amp;/gi, "&")
+    .replace(/&#x2f;/gi, "/")
+    .replace(/&#47;/gi, "/")
+    .replace(/&quot;/gi, "\"")
+    .replace(/&#39;/gi, "'");
+}
+
+function normalizeSupplementalCoverCandidate(value, baseUrl = "") {
+  const decoded = decodeHtmlAttribute(value);
+  if (!decoded) {
+    return "";
+  }
+  let candidate = String(decoded || "").trim();
+  if (!candidate) {
+    return "";
+  }
+  const wrapped = candidate.match(/^url\((?<inner>.+)\)$/i);
+  if (wrapped) {
+    candidate = String(wrapped.groups?.inner || "").trim();
+  }
+  candidate = candidate.replace(/^['"]+/, "").replace(/['"]+$/, "").trim();
+  if (!candidate || /^data:/i.test(candidate) || /^javascript:/i.test(candidate)) {
+    return "";
+  }
+  let absolute = candidate;
+  try {
+    absolute = new URL(candidate, String(baseUrl || "") || undefined).href;
+  } catch {
+    return "";
+  }
+  const parsed = parseSafeRemoteUrl(absolute);
+  if (!parsed) {
+    return "";
+  }
+
+  const host = normalizeHostName(parsed.hostname);
+  const lowerPath = String(parsed.pathname || "").toLowerCase();
+  const imageExtension = /\.(?:jpe?g|png|webp|avif)(?:$|\?)/i.test(lowerPath);
+  const hasCoverToken =
+    lowerPath.includes("/uploads/posts/covers/") ||
+    lowerPath.includes("/t/p/") ||
+    lowerPath.includes("cover") ||
+    lowerPath.includes("poster");
+  const blocked =
+    lowerPath.includes("/templates/") ||
+    lowerPath.includes("loading.gif") ||
+    lowerPath.includes("favicon") ||
+    lowerPath.includes("/logo");
+  if (blocked) {
+    return "";
+  }
+
+  const trustedHost =
+    isAllowedSupplementalDetailHost(host) ||
+    host === "themoviedb.org" ||
+    host.endsWith(".themoviedb.org") ||
+    host === "tmdb.org" ||
+    host.endsWith(".tmdb.org");
+  if (!trustedHost && !(imageExtension && hasCoverToken)) {
+    return "";
+  }
+  if (!imageExtension && !hasCoverToken) {
+    return "";
+  }
+  return parsed.href;
+}
+
+function scoreSupplementalCoverUrl(url) {
+  const lower = String(url || "").toLowerCase();
+  if (!lower) {
+    return Number.NEGATIVE_INFINITY;
+  }
+  let score = 0;
+  if (lower.includes("/uploads/posts/covers/")) {
+    score += 320;
+  }
+  if (lower.includes("themoviedb.org/t/p/")) {
+    score += 300;
+  }
+  if (lower.includes("/covers/")) {
+    score += 190;
+  }
+  if (lower.includes("poster")) {
+    score += 70;
+  }
+  if (/\.(?:jpe?g|png|webp|avif)(?:$|\?)/i.test(lower)) {
+    score += 40;
+  }
+  if (lower.includes("logo") || lower.includes("favicon") || lower.includes("loading.gif")) {
+    score -= 600;
+  }
+  return score;
+}
+
+function extractSupplementalCoverFromHtml(html, baseUrl = "") {
+  const source = String(html || "");
+  if (!source) {
+    return "";
+  }
+
+  const rawCandidates = [];
+  const collect = (regex) => {
+    let match = null;
+    while ((match = regex.exec(source)) !== null) {
+      rawCandidates.push(String(match?.[1] || "").trim());
+    }
+  };
+
+  collect(/<meta[^>]+(?:property|name)=["'](?:og:image|twitter:image)["'][^>]+content=["']([^"']+)["']/gi);
+  collect(/<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["'](?:og:image|twitter:image)["'][^>]*>/gi);
+  collect(/background-image\s*:\s*url\(([^)]+)\)/gi);
+  collect(/<div[^>]+class=["'][^"']*pmovie__poster[^"']*["'][\s\S]{0,1600}?<img[^>]+(?:data-src|src)=["']([^"']+)["']/gi);
+  collect(/<p[^>]*>\s*<img[^>]+src=["']([^"']+)["'][^>]*>\s*<\/p>/gi);
+  collect(/<img[^>]+(?:data-src|src)=["']([^"']+)["'][^>]*>/gi);
+
+  let bestUrl = "";
+  let bestScore = Number.NEGATIVE_INFINITY;
+  for (const candidate of rawCandidates) {
+    const normalized = normalizeSupplementalCoverCandidate(candidate, baseUrl);
+    if (!normalized) {
+      continue;
+    }
+    const score = scoreSupplementalCoverUrl(normalized);
+    if (score > bestScore) {
+      bestScore = score;
+      bestUrl = normalized;
+    }
+  }
+  return bestScore > 0 ? bestUrl : "";
+}
+
+function supplementalRowNeedsCover(entry) {
+  if (!entry || typeof entry !== "object") {
+    return false;
+  }
+  return !String(entry?.large_poster_path || entry?.small_poster_path || entry?.wallpaper_poster_path || "").trim();
+}
+
+function applySupplementalCoverToRow(entry, coverUrl) {
+  const normalized = normalizeSupplementalCoverCandidate(coverUrl);
+  if (!entry || !normalized) {
+    return;
+  }
+  if (!String(entry.small_poster_path || "").trim()) {
+    entry.small_poster_path = normalized;
+  }
+  if (!String(entry.large_poster_path || "").trim()) {
+    entry.large_poster_path = normalized;
+  }
+  if (!String(entry.wallpaper_poster_path || "").trim()) {
+    entry.wallpaper_poster_path = normalized;
+  }
+}
+
+async function resolveSupplementalCoverFromDetail(entry) {
+  const detailUrl = String(entry?.external_detail_url || entry?.detailUrl || entry?.pageUrl || "").trim();
+  if (!detailUrl) {
+    return "";
+  }
+  const parsedDetail = parseSafeRemoteUrl(detailUrl);
+  if (!parsedDetail || !isAllowedSupplementalDetailHost(parsedDetail.hostname)) {
+    return "";
+  }
+  const cacheKey = parsedDetail.href;
+  const cached = supplementalCoverCache.get(cacheKey);
+  if (cached && Date.now() < Number(cached.expiresAt || 0)) {
+    return String(cached.cover || "");
+  }
+  if (supplementalCoverInFlight.has(cacheKey)) {
+    return supplementalCoverInFlight.get(cacheKey);
+  }
+
+  const provider = String(entry?.external_provider || entry?.provider || "").trim().toLowerCase();
+  const requestHeaders =
+    provider === "rendezvous"
+      ? RENDEZVOUS_FETCH_HEADERS
+      : provider === "notarielles"
+        ? NOTARIELLES_FETCH_HEADERS
+        : undefined;
+
+  const task = (async () => {
+    let cover = "";
+    try {
+      const response = await fetchRemoteText(
+        parsedDetail.href,
+        "text/html,application/xhtml+xml",
+        requestHeaders || undefined
+      );
+      if (response.status >= 200 && response.status < 300) {
+        cover = extractSupplementalCoverFromHtml(response.body, parsedDetail.href);
+      }
+    } catch {
+      cover = "";
+    }
+    supplementalCoverCache.set(cacheKey, {
+      cover,
+      expiresAt: Date.now() + (cover ? SUPPLEMENTAL_COVER_CACHE_MS : SUPPLEMENTAL_COVER_EMPTY_CACHE_MS),
+    });
+    prunePidoovTimedCache(supplementalCoverCache, 9000);
+    return cover;
+  })();
+
+  supplementalCoverInFlight.set(cacheKey, task);
+  try {
+    return await task;
+  } finally {
+    supplementalCoverInFlight.delete(cacheKey);
+  }
+}
+
+async function hydrateSupplementalRowCovers(entries, limit = SUPPLEMENTAL_COVER_MAX_PER_RESPONSE) {
+  const rows = Array.isArray(entries) ? entries : [];
+  if (rows.length === 0) {
+    return;
+  }
+  const cap = Math.max(1, Number(limit || SUPPLEMENTAL_COVER_MAX_PER_RESPONSE));
+  const grouped = new Map();
+  rows.forEach((entry) => {
+    if (!supplementalRowNeedsCover(entry)) {
+      return;
+    }
+    const detailUrl = String(entry?.external_detail_url || "").trim();
+    if (!detailUrl) {
+      return;
+    }
+    const parsed = parseSafeRemoteUrl(detailUrl);
+    if (!parsed || !isAllowedSupplementalDetailHost(parsed.hostname)) {
+      return;
+    }
+    const key = parsed.href;
+    if (!grouped.has(key)) {
+      grouped.set(key, []);
+    }
+    grouped.get(key).push(entry);
+  });
+  const targets = Array.from(grouped.entries()).slice(0, cap);
+  if (targets.length === 0) {
+    return;
+  }
+
+  await mapWithConcurrency(
+    targets,
+    Math.min(SUPPLEMENTAL_COVER_FETCH_CONCURRENCY, targets.length || 1),
+    async ([, group]) => {
+      const sample = Array.isArray(group) ? group[0] : null;
+      if (!sample) {
+        return;
+      }
+      const cover = await resolveSupplementalCoverFromDetail(sample);
+      if (!cover) {
+        return;
+      }
+      group.forEach((entry) => {
+        applySupplementalCoverToRow(entry, cover);
+      });
+    }
+  );
+}
+
 function buildPidoovSupplementalCandidates(entries, providerLabel = "Pidoov", isStatic = false) {
   const rows = [];
   const list = Array.isArray(entries) ? entries : [];
@@ -3510,6 +3822,14 @@ function buildPidoovSupplementalCandidates(entries, providerLabel = "Pidoov", is
     const language = normalizePidoovLanguage(entry?.language || entry?.label || "") || "VF";
     const detailUrl = detailPath ? `${PIDOOV_BASE}${detailPath}` : "";
     const rawKey = detailPath || `${titleKey}:${year}:${season}:${episode}:${language}`;
+    const poster = normalizeSupplementalCoverCandidate(
+      entry?.poster || entry?.cover || entry?.image || entry?.poster_url || "",
+      detailUrl || `${PIDOOV_BASE}/`
+    );
+    const backdrop = normalizeSupplementalCoverCandidate(
+      entry?.backdrop || entry?.wallpaper || entry?.backdrop_url || poster,
+      detailUrl || `${PIDOOV_BASE}/`
+    );
 
     rows.push({
       provider: "pidoov",
@@ -3526,6 +3846,8 @@ function buildPidoovSupplementalCandidates(entries, providerLabel = "Pidoov", is
       detailUrl,
       pageUrl: detailUrl,
       lastmod: "",
+      poster,
+      backdrop,
     });
   });
   return rows;
@@ -3555,6 +3877,14 @@ function buildRendezvousSupplementalCandidates(entries, providerLabel = "Rendezv
     const episode = mediaType === "tv" ? toInt(entry?.episode, 0, 0, 50000) : 0;
     const year = toInt(entry?.year, 0, 0, 2099);
     const language = normalizePidoovLanguage(entry?.language || "") || "VF";
+    const poster = normalizeSupplementalCoverCandidate(
+      entry?.poster || entry?.cover || entry?.image || entry?.poster_url || "",
+      pageUrl
+    );
+    const backdrop = normalizeSupplementalCoverCandidate(
+      entry?.backdrop || entry?.wallpaper || entry?.backdrop_url || poster,
+      pageUrl
+    );
 
     rows.push({
       provider: "rendezvous",
@@ -3571,6 +3901,8 @@ function buildRendezvousSupplementalCandidates(entries, providerLabel = "Rendezv
       detailUrl: pageUrl,
       pageUrl,
       lastmod: toIsoDate(entry?.lastmod || ""),
+      poster,
+      backdrop,
     });
   });
   return rows;
@@ -3598,6 +3930,11 @@ function chooseBestSupplementalCandidate(current, next) {
   if (nextSafeDate > currentSafeDate) {
     return next;
   }
+  const currentPoster = String(current?.poster || "").trim();
+  const nextPoster = String(next?.poster || "").trim();
+  if (!currentPoster && nextPoster) {
+    return next;
+  }
   return current;
 }
 
@@ -3615,6 +3952,15 @@ function mapSupplementalCandidateToCatalogRow(entry, fallbackIdSet) {
   const episode = mediaType === "tv" ? toInt(entry?.episode, 0, 0, 50000) : 0;
   const releaseDate = toSupplementalReleaseDate(entry);
   const rawKey = String(entry?.rawKey || `${titleKey}:${mediaType}:${year}:${season}:${episode}`).trim();
+  const detailUrl = String(entry?.detailUrl || entry?.pageUrl || "").trim();
+  const poster = normalizeSupplementalCoverCandidate(
+    entry?.poster || entry?.cover || entry?.image || entry?.poster_url || "",
+    detailUrl || undefined
+  );
+  const backdrop = normalizeSupplementalCoverCandidate(
+    entry?.backdrop || entry?.wallpaper || entry?.backdrop_url || poster,
+    detailUrl || undefined
+  );
 
   let id = buildSupplementalMediaId(entry?.provider || "supp", rawKey);
   if (id <= 0) {
@@ -3636,16 +3982,16 @@ function mapSupplementalCandidateToCatalogRow(entry, fallbackIdSet) {
     end_date: null,
     lang: language,
     language,
-    small_poster_path: "",
-    large_poster_path: "",
-    wallpaper_poster_path: "",
+    small_poster_path: poster,
+    large_poster_path: poster,
+    wallpaper_poster_path: backdrop || poster,
     external_provider: String(entry?.provider || "").trim(),
     external_key: rawKey,
     external_year: year,
     external_season: season,
     external_episode: episode,
     external_language: language,
-    external_detail_url: String(entry?.detailUrl || entry?.pageUrl || "").trim(),
+    external_detail_url: detailUrl,
     external_label: String(entry?.providerLabel || "").trim(),
     supplemental_rank: scoreSupplementalCandidate(entry),
     supplemental_date: releaseDate || "",
@@ -3801,8 +4147,8 @@ function buildSupplementalCalendarItems(entries, month, year, limit = SUPPLEMENT
       mediaId: Number(entry?.id || 0),
       title: String(entry?.title || "").trim() || "Sans titre",
       type,
-      poster: "",
-      backdrop: "",
+      poster: String(entry?.large_poster_path || entry?.small_poster_path || entry?.wallpaper_poster_path || "").trim(),
+      backdrop: String(entry?.wallpaper_poster_path || entry?.large_poster_path || entry?.small_poster_path || "").trim(),
       season: Number(entry?.external_season || 0),
       episode: Number(entry?.external_episode || 0),
       supplemental: String(entry?.external_label || provider || "Provider"),
@@ -5503,8 +5849,17 @@ async function handleCalendarOverview(req, res, requestUrl) {
 
     if (supplementalResult.status === "fulfilled") {
       try {
+        const supplementalRows = Array.isArray(supplementalResult.value) ? supplementalResult.value : [];
+        const monthToken = `${year}-${String(month).padStart(2, "0")}-`;
+        const monthlyRows = supplementalRows.filter((entry) => {
+          const dateIso = toIsoDate(String(entry?.supplemental_date || entry?.release_date || "").trim());
+          return Boolean(dateIso) && dateIso.startsWith(monthToken);
+        });
+        if (monthlyRows.length > 0) {
+          await hydrateSupplementalRowCovers(monthlyRows, SUPPLEMENTAL_COVER_MAX_PER_RESPONSE);
+        }
         supplemental = {
-          items: buildSupplementalCalendarItems(supplementalResult.value, month, year),
+          items: buildSupplementalCalendarItems(supplementalRows, month, year),
         };
       } catch {
         supplemental = {
@@ -5597,6 +5952,12 @@ async function handleCatalogSupplemental(req, res, requestUrl) {
   try {
     const entries = await loadSupplementalCatalogEntries(false);
     const pageData = buildSupplementalCatalogPage(entries, page, perPage);
+    if (Array.isArray(pageData.data) && pageData.data.length > 0) {
+      await hydrateSupplementalRowCovers(
+        pageData.data,
+        Math.max(12, Math.min(SUPPLEMENTAL_COVER_MAX_PER_RESPONSE, pageData.data.length))
+      );
+    }
     sendJson(res, 200, {
       apiVersion: "zenix-supplemental-catalog-v1",
       type: "success",
