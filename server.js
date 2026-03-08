@@ -2952,52 +2952,176 @@ async function loadRendezvousIndex(force = false) {
   }
 }
 
+function decodeRendezvousHtmlEntities(value) {
+  const source = String(value || "");
+  if (!source) {
+    return "";
+  }
+  return source
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&#x([0-9a-f]+);/gi, (_match, hex) => {
+      const code = Number.parseInt(String(hex || ""), 16);
+      if (!Number.isFinite(code) || code <= 0) {
+        return "";
+      }
+      try {
+        return String.fromCharCode(code);
+      } catch {
+        return "";
+      }
+    })
+    .replace(/&#(\d+);/g, (_match, dec) => {
+      const code = Number.parseInt(String(dec || ""), 10);
+      if (!Number.isFinite(code) || code <= 0) {
+        return "";
+      }
+      try {
+        return String.fromCharCode(code);
+      } catch {
+        return "";
+      }
+    });
+}
+
+function normalizeRendezvousPlayerName(value) {
+  const raw = sanitizeToken(value, 80).toLowerCase();
+  if (!raw) {
+    return "";
+  }
+  const compact = raw.replace(/[^a-z0-9]+/g, "");
+  const aliasMap = new Map([
+    ["lecteurhd", "hd"],
+    ["hd", "hd"],
+    ["younetu", "younetu"],
+    ["netu", "netu"],
+    ["dood", "dood"],
+    ["doodstream", "doodstream"],
+    ["fembed", "fembed"],
+    ["uqload", "uqload"],
+    ["uptostream", "uptostream"],
+    ["vidoza", "vidoza"],
+    ["upvid", "upvid"],
+    ["rakuten", "rakuten"],
+    ["google", "google"],
+    ["primevideo", "primevideo"],
+  ]);
+  if (aliasMap.has(compact)) {
+    return String(aliasMap.get(compact) || "");
+  }
+  return raw.replace(/\s+/g, " ").trim();
+}
+
+function toRendezvousGoCandidates(token, name) {
+  const safeToken = sanitizeToken(token, 90);
+  const safeName = normalizeRendezvousPlayerName(name);
+  if (!safeToken || !safeName) {
+    return [];
+  }
+  const variants = new Set([safeName]);
+  if (safeName === "netu") {
+    variants.add("younetu");
+  }
+  if (safeName === "younetu") {
+    variants.add("netu");
+  }
+
+  const urls = [];
+  variants.forEach((variant) => {
+    [
+      `${RENDEZVOUS_BASE}/go.php?id=${encodeURIComponent(safeToken)}&name=${encodeURIComponent(variant)}`,
+      `${RENDEZVOUS_BASE}/go.php?name=${encodeURIComponent(variant)}&id=${encodeURIComponent(safeToken)}`,
+      `${RENDEZVOUS_BASE}/go.php?data=${encodeURIComponent(safeToken)}&name=${encodeURIComponent(variant)}`,
+    ].forEach((candidate) => {
+      const parsed = parseSafeRemoteUrl(candidate);
+      if (parsed && normalizeHostName(parsed.hostname) === RENDEZVOUS_HOST) {
+        urls.push(parsed.href);
+      }
+    });
+  });
+  return urls;
+}
+
+function resolveRendezvousOutboundHref(rawHref, pageUrl) {
+  const source = decodeRendezvousHtmlEntities(String(rawHref || "").trim());
+  if (!source) {
+    return "";
+  }
+  let absolute = source;
+  try {
+    absolute = new URL(source, String(pageUrl || `${RENDEZVOUS_BASE}/`)).href;
+  } catch {
+    absolute = source;
+  }
+  const parsed = parseSafeRemoteUrl(absolute);
+  if (!parsed) {
+    return "";
+  }
+  if (normalizeHostName(parsed.hostname) === RENDEZVOUS_HOST && /\/a\.php$/i.test(String(parsed.pathname || ""))) {
+    const forwarded = decodeRendezvousHtmlEntities(parsed.searchParams.get("b") || "");
+    const direct = parseSafeRemoteUrl(forwarded);
+    if (direct) {
+      return direct.href;
+    }
+  }
+  return parsed.href;
+}
+
 function parseRendezvousPlayerRowsFromHtml(html, pageUrl) {
   const source = String(html || "");
   if (!source) {
     return [];
   }
+
   const rows = [];
-  const liRegex = /<li[^>]*class=["'][^"']*(?:nopls|nopl|ser_pl)[^"']*["'][^>]*>/gi;
+  const knownTokens = [];
+  const liRegex = /<li\b(?<attrs>[^>]*)>(?<body>[\s\S]*?)<\/li>/gi;
   let match = null;
   while ((match = liRegex.exec(source)) !== null) {
-    const rawTag = String(match[0] || "");
-    const idMatch = rawTag.match(/\sdata-id=["'](?<id>[^"']+)["']/i);
-    const nameMatch = rawTag.match(/\sdata-name=["'](?<name>[^"']+)["']/i);
-    const pLinkMatch = rawTag.match(/\sdata-plink=["'](?<plink>[^"']+)["']/i);
+    const attrs = String(match.groups?.attrs || "");
+    const body = String(match.groups?.body || "");
+    const classMatch = attrs.match(/\sclass=["'](?<classes>[^"']+)["']/i);
+    const className = String(classMatch?.groups?.classes || "").toLowerCase();
+    if (!/(?:^|\s)(?:nopls|nopl|ser_pl)(?:\s|$)/i.test(className)) {
+      continue;
+    }
 
-    const rawName = String(nameMatch?.groups?.name || "").trim();
-    const safeName = sanitizeToken(rawName, 80).toLowerCase();
+    const idMatch = attrs.match(/\sdata-id=["'](?<id>[^"']+)["']/i);
+    const nameMatch = attrs.match(/\sdata-name=["'](?<name>[^"']+)["']/i);
+    const pLinkMatch = attrs.match(/\sdata-plink=["'](?<plink>[^"']+)["']/i);
     const token = sanitizeToken(String(idMatch?.groups?.id || "").trim(), 90);
+    if (token) {
+      knownTokens.push(token);
+    }
+
+    const serverNameMatch = body.match(/pmovie__stream-select-server[^>]*>(?<label>[\s\S]*?)<\/div>/i);
+    const labelText = sanitizeToken(
+      decodeRendezvousHtmlEntities(String(serverNameMatch?.groups?.label || ""))
+        .replace(/<[^>]+>/g, " ")
+        .replace(/\s+/g, " "),
+      80
+    );
+    const rawName = String(nameMatch?.groups?.name || "").trim() || labelText;
+    const safeName = normalizeRendezvousPlayerName(rawName) || "hd";
+
     const dataPLink = String(pLinkMatch?.groups?.plink || "").trim();
     if (dataPLink) {
-      let absolute = dataPLink;
-      try {
-        absolute = new URL(dataPLink, String(pageUrl || `${RENDEZVOUS_BASE}/`)).href;
-      } catch {
-        absolute = dataPLink;
-      }
-      const parsed = parseSafeRemoteUrl(absolute);
-      if (parsed && normalizeHostName(parsed.hostname) === RENDEZVOUS_HOST) {
+      const href = resolveRendezvousOutboundHref(dataPLink, pageUrl);
+      const parsed = parseSafeRemoteUrl(href);
+      if (parsed) {
         rows.push({
           type: "plink",
-          name: safeName || "hd",
+          name: safeName,
           urls: [parsed.href],
         });
       }
     }
+
     if (token && safeName) {
-      const candidates = [];
-      [
-        `${RENDEZVOUS_BASE}/go.php?id=${encodeURIComponent(token)}&name=${encodeURIComponent(safeName)}`,
-        `${RENDEZVOUS_BASE}/go.php?name=${encodeURIComponent(safeName)}&id=${encodeURIComponent(token)}`,
-        `${RENDEZVOUS_BASE}/go.php?data=${encodeURIComponent(token)}&name=${encodeURIComponent(safeName)}`,
-      ].forEach((candidate) => {
-        const parsed = parseSafeRemoteUrl(candidate);
-        if (parsed && normalizeHostName(parsed.hostname) === RENDEZVOUS_HOST) {
-          candidates.push(parsed.href);
-        }
-      });
+      const candidates = toRendezvousGoCandidates(token, safeName);
       if (candidates.length > 0) {
         rows.push({
           type: "token",
@@ -3006,6 +3130,43 @@ function parseRendezvousPlayerRowsFromHtml(html, pageUrl) {
           urls: candidates,
         });
       }
+    }
+
+    const anchorRegex = /<a[^>]+href=["'](?<href>[^"']+)["'][^>]*>/gi;
+    let anchorMatch = null;
+    while ((anchorMatch = anchorRegex.exec(body)) !== null) {
+      const href = resolveRendezvousOutboundHref(anchorMatch.groups?.href || "", pageUrl);
+      const parsed = parseSafeRemoteUrl(href);
+      if (!parsed) {
+        continue;
+      }
+      rows.push({
+        type: "anchor",
+        name: safeName,
+        urls: [parsed.href],
+      });
+    }
+  }
+
+  const seedToken = knownTokens.find(Boolean) || "";
+  if (seedToken) {
+    const listedNameRegex = /Lien\s*\d+\s*:\s*(?<name>[A-Za-z0-9_-]{2,40})\s*(?:Add|Ajouter|HDTV)?/gi;
+    let listed = null;
+    while ((listed = listedNameRegex.exec(source)) !== null) {
+      const safeName = normalizeRendezvousPlayerName(listed.groups?.name || "");
+      if (!safeName) {
+        continue;
+      }
+      const urls = toRendezvousGoCandidates(seedToken, safeName);
+      if (urls.length === 0) {
+        continue;
+      }
+      rows.push({
+        type: "token-list",
+        name: safeName,
+        token: seedToken,
+        urls,
+      });
     }
   }
 
@@ -3146,21 +3307,27 @@ async function loadRendezvousEntrySources(entry) {
       const rowName = String(row?.name || "").trim().toUpperCase() || "HD";
       const basePriority = language === "VF" ? 336 : 322;
       const rowPenalty = Math.min(36, index * 6);
+      const rowType = String(row?.type || "").trim().toLowerCase();
+      const typePenalty = rowType === "anchor" ? 72 : 0;
       (Array.isArray(row?.urls) ? row.urls : []).forEach((url, urlIndex) => {
         const parsed = parseSafeRemoteUrl(url);
         if (!parsed) {
           return;
         }
         const href = parsed.href;
+        const host = normalizeHostName(parsed.hostname || "");
+        const canProbe =
+          host === RENDEZVOUS_HOST ||
+          /(?:^|\.)((?:netu|younetu|doodstream|dood|uqload|uptostream|upvid|vidoza|fembed))(?:\.|$)/i.test(host);
         pushSource({
           stream_url: href,
           source_name: rowName ? `Rendezvous ${rowName}` : "Rendezvous",
           quality: "Rendezvous",
           language,
           format: "embed",
-          priority: basePriority - rowPenalty - Math.min(12, urlIndex * 3),
+          priority: basePriority - rowPenalty - typePenalty - Math.min(12, urlIndex * 3),
         });
-        if (probeTargets.length < 7) {
+        if (canProbe && probeTargets.length < 7) {
           probeTargets.push({
             url: href,
             sourceName: rowName ? `Rendezvous ${rowName}` : "Rendezvous",
