@@ -6295,11 +6295,24 @@ function filterMovieSourcesForFrench(sources) {
     ["VOSTFR", 2],
     ["VO", 4],
   ]);
+  const formatOrder = new Map([
+    ["hls", 0],
+    ["mp4", 1],
+    ["webm", 2],
+    ["dash", 3],
+    ["embed", 6],
+    ["unknown", 7],
+  ]);
   ranked.sort((left, right) => {
     const leftLang = Number(languageOrder.get(left.language) ?? 3);
     const rightLang = Number(languageOrder.get(right.language) ?? 3);
     if (leftLang !== rightLang) {
       return leftLang - rightLang;
+    }
+    const leftFormat = Number(formatOrder.get(String(left.entry?.format || "").trim().toLowerCase()) ?? 5);
+    const rightFormat = Number(formatOrder.get(String(right.entry?.format || "").trim().toLowerCase()) ?? 5);
+    if (leftFormat !== rightFormat) {
+      return leftFormat - rightFormat;
     }
     const leftPremium = left.entry?.premiumHint ? 1 : 0;
     const rightPremium = right.entry?.premiumHint ? 1 : 0;
@@ -6309,9 +6322,17 @@ function filterMovieSourcesForFrench(sources) {
     return left.index - right.index;
   });
 
+  const directFormats = new Set(["hls", "mp4", "webm", "dash"]);
+  const hasDirectCandidate = ranked.some((row) =>
+    directFormats.has(String(row?.entry?.format || "").trim().toLowerCase())
+  );
   const dedupe = new Set();
   const ordered = [];
   for (const row of ranked) {
+    const format = String(row?.entry?.format || "").trim().toLowerCase();
+    if (hasDirectCandidate && !directFormats.has(format)) {
+      continue;
+    }
     const key = String(row.entry?.url || "").trim();
     if (!key || dedupe.has(key)) {
       continue;
@@ -7941,6 +7962,66 @@ async function playFromSourcePoolWithRescue(resumeTime, token, options = {}) {
   }
 }
 
+function isBlockedPlaybackSourceUrl(rawUrl, formatHint = "") {
+  const input = String(rawUrl || "").trim();
+  if (!input) {
+    return true;
+  }
+
+  let parsed = null;
+  try {
+    parsed = new URL(input, window.location.href);
+  } catch {
+    return true;
+  }
+
+  const host = String(parsed.hostname || "")
+    .trim()
+    .toLowerCase()
+    .replace(/^www\./, "");
+  const path = String(parsed.pathname || "").toLowerCase();
+  const withQuery = `${path}${String(parsed.search || "").toLowerCase()}`;
+  const format = String(formatHint || "").trim().toLowerCase();
+
+  if (/maddenwiped\.com|imens-poort\.com|extravagant-streaming\.life/.test(host)) {
+    return true;
+  }
+  if (/rakuten\.tv|play\.google\.com|primevideo\.com/.test(host)) {
+    return true;
+  }
+  if (/\/universal\.mp4(?:$|\?)/i.test(withQuery)) {
+    return true;
+  }
+
+  if (host === "notarielles.fr") {
+    if (
+      path.includes("/categorie-series/") ||
+      path.includes("/serie-vf.php") ||
+      path.includes("/regarder.php") ||
+      path.includes("/wb.php") ||
+      path.includes("/register.php")
+    ) {
+      return true;
+    }
+  }
+
+  if (host === "rendezvousmusical.fr") {
+    if (/\/vf-\d+-[^/]+\/stream-[^/]+\.html/.test(path) || path.includes("/wb.php") || path.includes("/register.php")) {
+      return true;
+    }
+    if (path === "/go.php" && !String(parsed.search || "").trim()) {
+      return true;
+    }
+  }
+
+  const looksDirectMedia = /\.(m3u8|mp4|webm|m4s|mpd)(?:$|\?)/i.test(withQuery);
+  if (format === "embed" && !looksDirectMedia && (host === "notarielles.fr" || host === "rendezvousmusical.fr")) {
+    return true;
+  }
+
+  return false;
+}
+
 function normalizeSourceEntry(entry, index) {
   const url = String(
     entry?.stream_url ||
@@ -7954,6 +8035,9 @@ function normalizeSourceEntry(entry, index) {
   }
 
   const format = guessSourceFormat(entry, url);
+  if (isBlockedPlaybackSourceUrl(url, format)) {
+    return null;
+  }
   const quality = String(entry?.quality || entry?.resolution || entry?.label || "").trim();
   const language = normalizeSourceLanguage(entry);
   const host = getSourceHost(url);

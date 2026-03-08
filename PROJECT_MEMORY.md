@@ -22,6 +22,8 @@ Last update: 2026-03-08
   - this is intended to avoid instant playback block in iPhone/WebKit edge cases.
   - source ordering for movies is now stricter at runtime: `VF`, then `MULTI`, then `VOSTFR`.
   - when audio tracks are exposed, player attempts to force French track.
+  - hard filter now removes known non-playable embed/gate URLs before playback (Notarielles/Rendezvous page wrappers, ad-gate hosts, store links).
+  - for movies, direct media formats (`hls/mp4/webm/dash`) are prioritized and embeds are dropped when at least one direct source exists.
 - Owned source providers supported in backend:
   - `cloudflare_stream` (`customer_code` + `uid`)
   - `bunny_stream` (`pull_zone_url` + `video_id`)
@@ -45,6 +47,7 @@ Last update: 2026-03-08
     (`/`, `/series-en-streaming/`, `series-VF`, `series-VOSTFR`) plus extra category probes.
   - Static fallback file `notarielles-static-sources.json` is merged to keep results when live crawl is blocked upstream.
   - Frontend injects Notarielles sources for TV non-anime episodes before other fallback providers.
+  - backend page-level embed fallback is disabled to avoid `notarielles.fr refused to connect` playback traps.
   - Caching/env tuning keys:
     - `NOTARIELLES_INDEX_CACHE_MS`
     - `NOTARIELLES_SEARCH_CACHE_MS`

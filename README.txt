@@ -31,6 +31,10 @@ STREAMING/PLAYBACK NOTES
 - Movie source ordering for FR audience is now strict:
   VF first, then MULTI, then VOSTFR (VO removed when FR-friendly sources exist).
 - Player tries to select French audio track automatically when a source exposes multiple audio tracks.
+- Playback hardening:
+  - non-playable embed/gate URLs are filtered before entering the player pool (Notarielles/Rendezvous page wrappers, ad/gate hosts, store links).
+  - movie source ranking now prioritizes direct media formats (`hls/mp4/webm/dash`) over embeds.
+  - if at least one direct movie source exists, embed-only alternatives are dropped for that movie.
 
 MOBILE DEBUG CHECKLIST
 - Confirm startup splash hidden after load.
@@ -91,6 +95,7 @@ NOTARIELLES INTEGRATION (SERIES FALLBACK)
 - Frontend injection:
   - `zenix.js` now appends Notarielles sources for TV (non-anime) episodes.
   - Merge order for episodes: Owned -> Notarielles -> Pidoov -> Anime Sibnet fallback.
+- Page-level Notarielles fallbacks are disabled in backend source resolution to avoid `refused to connect` embeds.
 - Server-side cache controls:
   - `NOTARIELLES_INDEX_CACHE_MS`
   - `NOTARIELLES_SEARCH_CACHE_MS`

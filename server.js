@@ -2403,27 +2403,6 @@ async function loadNotariellesEntrySources(entry) {
     playerPageUrl = "";
   }
 
-  if (playerPageUrl) {
-    sources.push({
-      stream_url: playerPageUrl,
-      source_name: "Notarielles",
-      quality: "Notarielles",
-      language,
-      format: "embed",
-      priority: language === "VF" ? 342 : 328,
-    });
-  }
-
-  // Keep a generic page-level embed fallback when upstream anti-bot blocks page parsing.
-  sources.push({
-    stream_url: pageUrl,
-    source_name: "Notarielles Page",
-    quality: "Notarielles",
-    language,
-    format: "embed",
-    priority: language === "VF" ? 320 : 305,
-  });
-
   try {
     if (playerPageUrl) {
       const playerResponse = await fetchRemoteText(
@@ -3273,19 +3252,6 @@ async function loadRendezvousEntrySources(entry) {
     });
   });
 
-  const parsedPageUrl = parseSafeRemoteUrl(pageUrl);
-  if (parsedPageUrl) {
-    // Keep a final page-level fallback for environments where upstream crawl is blocked.
-    pushSource({
-      stream_url: parsedPageUrl.href,
-      source_name: "Rendezvous Page",
-      quality: "Rendezvous",
-      language,
-      format: "embed",
-      priority: 280,
-    });
-  }
-
   let pageHtml = "";
   try {
     const response = await fetchRemoteText(pageUrl, "text/html,application/xhtml+xml", {
@@ -3312,6 +3278,10 @@ async function loadRendezvousEntrySources(entry) {
       (Array.isArray(row?.urls) ? row.urls : []).forEach((url, urlIndex) => {
         const parsed = parseSafeRemoteUrl(url);
         if (!parsed) {
+          return;
+        }
+        const pathname = String(parsed.pathname || "").toLowerCase();
+        if (normalizeHostName(parsed.hostname || "") === RENDEZVOUS_HOST && pathname === "/go.php" && !parsed.search) {
           return;
         }
         const href = parsed.href;
