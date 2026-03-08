@@ -398,6 +398,7 @@ let lastProgressSave = 0;
 let toastTimer = null;
 let floatingNotificationGuardTimer = 0;
 let mainNavFitTimer = 0;
+let mainNavFitDeferred = false;
 let lastTrustedExternalIntentAt = 0;
 
 function isLikelyFloatingThirdPartyNotification(node) {
@@ -493,16 +494,39 @@ function initFloatingNotificationGuard() {
   });
 }
 
+function isOverlayLayerOpen() {
+  return Boolean((refs.playerOverlay && !refs.playerOverlay.hidden) || (refs.detailModal && !refs.detailModal.hidden));
+}
+
+function flushDeferredDesktopMainNavFit(delayMs = 20) {
+  if (!mainNavFitDeferred) {
+    return;
+  }
+  if (isOverlayLayerOpen()) {
+    return;
+  }
+  mainNavFitDeferred = false;
+  scheduleDesktopMainNavFit(delayMs);
+}
+
 function applyDesktopMainNavFit() {
   if (!(refs.mainNav instanceof HTMLElement)) {
     return;
   }
   const isDesktop = window.matchMedia("(min-width: 1001px)").matches;
-  refs.mainNav.classList.remove("is-tight", "is-ultra-tight");
-  document.body.classList.remove("nav-fit-stack");
   if (!isDesktop) {
+    refs.mainNav.classList.remove("is-tight", "is-ultra-tight");
+    document.body.classList.remove("nav-fit-stack");
+    mainNavFitDeferred = false;
     return;
   }
+  if (isOverlayLayerOpen()) {
+    mainNavFitDeferred = true;
+    return;
+  }
+  mainNavFitDeferred = false;
+  refs.mainNav.classList.remove("is-tight", "is-ultra-tight");
+  document.body.classList.remove("nav-fit-stack");
   if (refs.mainNav.scrollWidth <= refs.mainNav.clientWidth + 1) {
     return;
   }
@@ -521,6 +545,11 @@ function scheduleDesktopMainNavFit(delayMs = 60) {
     clearTimeout(mainNavFitTimer);
     mainNavFitTimer = 0;
   }
+  if (isOverlayLayerOpen()) {
+    mainNavFitDeferred = true;
+    return;
+  }
+  mainNavFitDeferred = false;
   mainNavFitTimer = window.setTimeout(() => {
     mainNavFitTimer = 0;
     applyDesktopMainNavFit();
@@ -6612,6 +6641,7 @@ function closeDetails(options = {}) {
   if (refs.playerOverlay.hidden && refs.detailModal.hidden) {
     restoreModalScrollPosition();
   }
+  flushDeferredDesktopMainNavFit(30);
 }
 
 async function openTrailerFromHero(id) {
@@ -9553,6 +9583,7 @@ function closePlayer(options = {}) {
   if (refs.playerOverlay.hidden && refs.detailModal.hidden) {
     restoreModalScrollPosition();
   }
+  flushDeferredDesktopMainNavFit(30);
 }
 
 function saveNowPlayingProgress(options = {}) {

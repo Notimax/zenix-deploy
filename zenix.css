@@ -32,6 +32,7 @@ body {
 
 html {
   scroll-behavior: smooth;
+  scrollbar-gutter: stable both-edges;
 }
 
 [hidden] {
@@ -1920,6 +1921,8 @@ body.nav-fit-stack .search-input {
   background: rgba(0, 0, 0, 0.78);
   backdrop-filter: blur(8px);
   overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-gutter: stable both-edges;
   overscroll-behavior: contain;
 }
 
@@ -1931,14 +1934,15 @@ body.nav-fit-stack .search-input {
   box-shadow: var(--shadow-lg);
   padding: 16px;
   position: relative;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
   margin: auto 0;
 }
 
 .detail-panel {
   --detail-backdrop-image: none;
   max-height: min(92vh, 980px);
-  overflow: auto;
+  overflow-y: auto;
   background: linear-gradient(165deg, #121320 0%, #0d0f18 100%);
 }
 
