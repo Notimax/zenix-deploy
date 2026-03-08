@@ -4221,7 +4221,7 @@ function renderAll() {
   setHidden(refs.listSection, !(isListView && refs.listGrid.children.length > 0));
   setHidden(refs.latestSection, true);
   setHidden(refs.popularSection, true);
-  const showContinue = showBrowseView && !hasQuery && refs.continueGrid.children.length > 0;
+  const showContinue = showBrowseView && state.view === "all" && !hasQuery && refs.continueGrid.children.length > 0;
   setHidden(refs.continueSection, !showContinue);
   const hasHomeInterestCards = Boolean(refs.homeInterestGrid && refs.homeInterestGrid.children.length > 0);
   const showHomeInterest = showBrowseView && state.view === "all" && !hasQuery && hasHomeInterestCards;
@@ -5212,7 +5212,7 @@ function renderContinue() {
   }
   const entries = getContinueEntries(getContinueDisplayLimit());
   refs.continueGrid.innerHTML = "";
-  refs.continueSection.hidden = entries.length === 0;
+  refs.continueSection.hidden = state.view !== "all" || entries.length === 0;
   const fragment = document.createDocumentFragment();
 
   entries.forEach((entry, index) => {
