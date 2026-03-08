@@ -63,6 +63,10 @@ Last update: 2026-03-08
   - Frontend injects Rendezvous as additional fallback pool:
     - movies: appended after existing providers
     - TV non-anime episodes: after Notarielles/Pidoov, before anime sibnet fallback
+  - Parser support expanded for Rendezvous player rows:
+    - captures host aliases from tabs: `younetu/netu`, `dood/doodstream`, `fembed`, `uqload`, `uptostream`, `vidoza`, `upvid`
+    - parses text-form host lists (`Lien 1: ...`) when present
+    - parses outbound `a.php?b=...` entries (Rakuten/Google/Primevideo) as low-priority extras so core stream hosts stay preferred
   - Caching/env tuning keys:
     - `RENDEZVOUS_INDEX_CACHE_MS`
     - `RENDEZVOUS_SEARCH_CACHE_MS`

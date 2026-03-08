@@ -113,6 +113,10 @@ RENDEZVOUS INTEGRATION (MOVIES + SERIES FALLBACK)
   - `zenix.js` appends Rendezvous sources as additional fallback for movies and TV non-anime.
   - Merge order for episodes: Owned -> Notarielles -> Pidoov -> Rendezvous -> Anime Sibnet fallback.
   - Merge order for movies: existing sources -> Pidoov -> Rendezvous fallback.
+- Reader parsing now supports extended provider rows from source pages:
+  - server aliases in player tabs (`younetu/netu`, `dood/doodstream`, `fembed`, `uqload`, `uptostream`, `vidoza`, `upvid`)
+  - fallback text patterns like `Lien 1: netu ...`
+  - external `a.php?b=...` links (Rakuten/Google/Primevideo) are parsed but kept lower priority than streaming hosts.
 - Server-side cache controls:
   - `RENDEZVOUS_INDEX_CACHE_MS`
   - `RENDEZVOUS_SEARCH_CACHE_MS`
