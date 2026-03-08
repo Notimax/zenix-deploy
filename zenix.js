@@ -8299,9 +8299,16 @@ async function startHlsPlayback(video, streamUrl, token) {
     video.load();
     try {
       await waitVideoReady(video, Math.min(HLS_READY_TIMEOUT_MS, 5200));
+      return;
     } catch {
-      // On native HLS (iOS/Safari), keep direct/proxied stream URL.
-      // Blob playlist fallback can trigger immediate decode errors on some Apple players.
+      // Retry once with a decoded blob playlist for encoded/quirky upstream manifests.
+      // This is especially useful on iOS Safari when native HLS rejects rewritten proxy URLs.
+      try {
+        await tryDecodedHlsBlobPlayback(video, streamUrl, Math.min(HLS_READY_TIMEOUT_MS + 2600, 7600));
+        return;
+      } catch {
+        // Keep current stream URL and let upper-level playback guards decide fallback source.
+      }
     }
     return;
   }
