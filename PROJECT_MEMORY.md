@@ -272,3 +272,12 @@ Last update: 2026-03-09
 - Apply a fix immediately, then rerun the same test conditions.
 - Keep iterating fix + retest until all mandatory checks are green.
 
+## c164 follow-up (2026-03-09)
+- Calendar merge/render path now prioritizes provider rows (`purstream`, `animeSama`, `supplemental`) with policy filtering before compact dedupe.
+- Anime lane enforcement strengthened in both frontend and backend:
+  - frontend calendar policy keeps anime rows only when Anime-Sama source checks pass.
+  - backend Nakios catalog builder now drops likely anime TV entries before supplemental exposure.
+- Calendar render budget raised to `420` rows for dense months.
+- Phone calendar cards now render in 2-column layout inside `#calendarSection`.
+- Catalog scroll synchronization now uses visible-gain batching (`+30` target) to reduce perceived incremental refresh.
+- Added loose semantic dedupe and tolerant provider title compatibility checks to reduce duplicate/mis-matched fallback swaps.

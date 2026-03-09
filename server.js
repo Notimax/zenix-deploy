@@ -5016,6 +5016,62 @@ function scoreNakiosCatalogEntry(entry, mediaType) {
   return Math.round(score);
 }
 
+function isLikelyNakiosAnimeEntry(entry, mediaType) {
+  if (!entry || typeof entry !== "object") {
+    return false;
+  }
+
+  const animeFlags = [entry?.isAnime, entry?.is_anime, entry?.isanime, entry?.anime];
+  if (
+    animeFlags.some((value) => {
+      if (value === true || value === 1) {
+        return true;
+      }
+      const normalized = String(value || "").trim().toLowerCase();
+      return normalized === "true" || normalized === "yes";
+    })
+  ) {
+    return true;
+  }
+
+  const hintParts = [
+    entry?.type,
+    entry?.media_type,
+    entry?.mediaType,
+    entry?.kind,
+    entry?.category,
+    entry?.genre,
+    entry?.status,
+    entry?.state,
+    entry?.suggestion,
+    entry?.original_title,
+    entry?.original_name,
+  ];
+  const hints = hintParts
+    .map((value) => String(value || "").trim().toLowerCase())
+    .filter(Boolean)
+    .join(" ");
+  if (/\banime\b/.test(hints)) {
+    return true;
+  }
+
+  if (mediaType !== "tv") {
+    return false;
+  }
+
+  const genreIds = Array.isArray(entry?.genre_ids) ? entry.genre_ids.map((value) => Number(value || 0)) : [];
+  const hasAnimationGenre = genreIds.includes(16);
+  if (!hasAnimationGenre) {
+    return false;
+  }
+
+  const language = String(entry?.original_language || "").trim().toLowerCase();
+  const countries = Array.isArray(entry?.origin_country)
+    ? entry.origin_country.map((value) => String(value || "").trim().toUpperCase())
+    : [];
+  return language === "ja" || countries.includes("JP");
+}
+
 function buildNakiosCatalogRow(entry, mediaType, fallbackIdSet) {
   const tmdbId = toInt(entry?.id, 0, 0, 999999999);
   if (tmdbId <= 0) {
@@ -5025,6 +5081,9 @@ function buildNakiosCatalogRow(entry, mediaType, fallbackIdSet) {
   const title = getNakiosTitle(entry, mediaType);
   const titleKey = normalizeTitleKey(title);
   if (!title || !titleKey) {
+    return null;
+  }
+  if (mediaType === "tv" && isLikelyNakiosAnimeEntry(entry, mediaType)) {
     return null;
   }
 

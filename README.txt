@@ -528,3 +528,13 @@ LATEST TYPE/ANIME-SOURCE HARDENING (2026-03-09, c162)
 LATEST SOURCE LABEL PRIVACY HARDENING (2026-03-09, c163)
 - Source quality display now shows only normalized quality tokens (2160p/1080p/HD/SD) or `Auto`.
 - Any provider-like/raw labels are dropped from source chips and selector labels.
+
+LATEST CALENDAR/CATALOG CONSISTENCY (2026-03-09, c164)
+- Calendar source merge now prefers provider rows (`purstream + animeSama + supplemental`) before fallback to merged rows.
+- Calendar policy filter is applied before render: anime lane accepts Anime-Sama sourced rows only.
+- Calendar render cap increased (`CALENDAR_RENDER_LIMIT=420`) to avoid missing visible items in dense months.
+- Mobile calendar grid in `#calendarSection` now renders 2 cards per row (phone layout aligned with `Nouveautes`).
+- Catalog infinite sync now loads until a visible gain target is reached (`+30` minimum) instead of tiny incremental appends.
+- Added loose semantic dedupe to merge near-duplicate external rows while keeping stronger playable entries.
+- Internal-provider candidate matching now supports tolerant title compatibility (subtitle/locale variants).
+- Backend Nakios supplemental feed now drops likely anime TV rows to preserve Anime-Sama ownership of anime inventory.

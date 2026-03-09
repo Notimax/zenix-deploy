@@ -29,10 +29,15 @@ const INITIAL_IMAGE_WARMUP_LIMIT = 260;
 const CALENDAR_YEAR_RANGE = 3;
 const CALENDAR_CACHE_KEY = "zenix-calendar-cache-v2";
 const CALENDAR_CACHE_MAX_ENTRIES = 8;
+const CALENDAR_RENDER_LIMIT = 420;
 const CALENDAR_TYPE_KEYS = ["film", "serie", "anime"];
 const INITIAL_CATALOG_WARMUP_PAGES = 2;
 const BACKGROUND_CATALOG_DELAY_MS = 8;
 const BACKGROUND_CATALOG_RENDER_EVERY = 8;
+const CATALOG_MIN_VISIBLE_APPEND = 30;
+const CATALOG_VISIBLE_APPEND_BATCH_PAGES = 1;
+const CATALOG_VISIBLE_APPEND_MAX_STEPS_SCROLL = 6;
+const CATALOG_VISIBLE_APPEND_MAX_STEPS_MANUAL = 6;
 const CATALOG_RENDER_CHUNK_MIN = 40;
 const CATALOG_RENDER_CHUNK_MAX = 104;
 const MOBILE_VIEWPORT_MAX_WIDTH = 740;
@@ -3009,13 +3014,16 @@ async function syncCatalogBatch(reason = "active", options = {}) {
 
   const profile = getCatalogSyncProfile(activeView);
   const preferredBatch = Number(options.batchPages || 0);
+  const strictBatch = options.strictBatch === true;
   let batchPages = preferredBatch > 0 ? preferredBatch : Number(profile.activeBatch || 4);
-  if (reason === "manual") {
-    batchPages = Math.max(batchPages, Number(profile.manualBatch || batchPages));
-  } else if (reason === "scroll") {
-    batchPages = Math.max(batchPages, Number(profile.scrollBatch || batchPages));
-  } else if (reason === "search-assist") {
-    batchPages = Math.max(batchPages, SEARCH_ASSIST_STEP_PAGES);
+  if (!strictBatch) {
+    if (reason === "manual") {
+      batchPages = Math.max(batchPages, Number(profile.manualBatch || batchPages));
+    } else if (reason === "scroll") {
+      batchPages = Math.max(batchPages, Number(profile.scrollBatch || batchPages));
+    } else if (reason === "search-assist") {
+      batchPages = Math.max(batchPages, SEARCH_ASSIST_STEP_PAGES);
+    }
   }
   batchPages = Math.max(1, Math.round(batchPages));
 
@@ -3026,6 +3034,34 @@ async function syncCatalogBatch(reason = "active", options = {}) {
   }
   await startBackgroundCatalogSync(startPage, endPage);
   return true;
+}
+
+function getVisibleCatalogCountSnapshot() {
+  try {
+    const visible = getVisibleCatalog();
+    return Array.isArray(visible) ? visible.length : Number(state.catalog?.length || 0);
+  } catch {
+    return Number(state.catalog?.length || 0);
+  }
+}
+
+async function syncCatalogUntilVisibleGain(reason, minVisibleGain, options = {}) {
+  const targetGain = Math.max(1, Number(minVisibleGain || 1));
+  const maxSteps = Math.max(1, Number(options.maxSteps || 1));
+  const batchPages = Math.max(1, Number(options.batchPages || 1));
+  const beforeVisible = getVisibleCatalogCountSnapshot();
+  let currentVisible = beforeVisible;
+  let didSync = false;
+
+  for (let step = 0; step < maxSteps && state.hasMore && currentVisible - beforeVisible < targetGain; step += 1) {
+    const synced = await syncCatalogBatch(reason, { batchPages, strictBatch: true });
+    if (!synced) {
+      break;
+    }
+    didSync = true;
+    currentVisible = getVisibleCatalogCountSnapshot();
+  }
+  return didSync;
 }
 
 function scheduleScrollDrivenCatalogSync(options = {}) {
@@ -3083,7 +3119,10 @@ async function syncCatalogForScroll(options = {}) {
     }
     return;
   }
-  const didSync = await syncCatalogBatch("scroll");
+  const didSync = await syncCatalogUntilVisibleGain("scroll", CATALOG_MIN_VISIBLE_APPEND, {
+    maxSteps: CATALOG_VISIBLE_APPEND_MAX_STEPS_SCROLL,
+    batchPages: CATALOG_VISIBLE_APPEND_BATCH_PAGES,
+  });
   if (didSync && refs.playerOverlay.hidden && refs.detailModal.hidden) {
     renderAll();
   }
@@ -3218,12 +3257,20 @@ function isCalendarAnimeSamaSource(entry) {
     return false;
   }
   const sourceHint = normalizeTitleKey(
-    entry?.source ||
-      entry?.provider ||
-      entry?.supplemental ||
-      entry?.externalProvider ||
-      entry?.external_provider ||
-      ""
+    [
+      entry?.source,
+      entry?.provider,
+      entry?.supplemental,
+      entry?.externalProvider,
+      entry?.external_provider,
+      entry?.externalLabel,
+      entry?.external_label,
+      entry?.label,
+      entry?.kind,
+      entry?.category,
+    ]
+      .map((value) => String(value || "").trim())
+      .join(" ")
   );
   if (sourceHint.includes("anime sama") || sourceHint.includes("animesama")) {
     return true;
@@ -3232,6 +3279,8 @@ function isCalendarAnimeSamaSource(entry) {
     entry?.url,
     entry?.externalDetailUrl,
     entry?.external_detail_url,
+    entry?.sourceUrl,
+    entry?.source_url,
   ]
     .map((value) => String(value || "").toLowerCase())
     .join(" ");
@@ -3263,6 +3312,16 @@ function isCalendarLikelyAnime(entry) {
     .map((value) => String(value || "").toLowerCase())
     .join(" ");
   return /anime|japanim|animesama|\/anime\//i.test(textHints);
+}
+
+function isCalendarSourceAllowedByPolicy(entry) {
+  if (!entry || typeof entry !== "object") {
+    return false;
+  }
+  if (!isCalendarLikelyAnime(entry)) {
+    return true;
+  }
+  return isCalendarAnimeSamaSource(entry);
 }
 
 function hasCalendarSeriesSignals(entry) {
@@ -3860,12 +3919,13 @@ function renderCalendarSection() {
   }
 
   const mergedPrimary = Array.isArray(state.calendarData?.merged) ? state.calendarData.merged : [];
-  const mergedFallback = [
+  const providerRows = [
     ...(Array.isArray(state.calendarData?.purstream?.items) ? state.calendarData.purstream.items : []),
     ...(Array.isArray(state.calendarData?.animeSama?.items) ? state.calendarData.animeSama.items : []),
+    ...(Array.isArray(state.calendarData?.supplemental?.items) ? state.calendarData.supplemental.items : []),
   ];
-  const sourceRowsAll = mergedPrimary.length > 0 ? mergedPrimary : mergedFallback;
-  const sourceRows = sourceRowsAll.filter((entry) => !isCalendarLikelyAnime(entry) || isCalendarAnimeSamaSource(entry));
+  const sourceRowsAll = providerRows.length > 0 ? providerRows : mergedPrimary;
+  const sourceRows = sourceRowsAll.filter((entry) => isCalendarSourceAllowedByPolicy(entry));
   const compact = new Map();
   sourceRows.forEach((entry) => {
     const titleKey = normalizeTitleKey(entry?.title || "");
@@ -3913,7 +3973,7 @@ function renderCalendarSection() {
       }
       return normalizeTitleKey(entry?.title || "").includes(query);
     })
-    .slice(0, 180);
+    .slice(0, CALENDAR_RENDER_LIMIT);
 
   if (refs.calendarDayStats) {
     const dayBuckets = new Map();
@@ -4525,15 +4585,15 @@ async function loadMoreCatalog() {
   updateLoadMoreButton();
 
   try {
-    const result = await fetchCatalogPage(state.page + 1);
-    upsertCatalogItems(result.items, { prepend: false });
-    state.page = result.currentPage;
-    state.totalPages = Math.max(state.totalPages, result.lastPage);
-    state.catalogSyncPage = result.currentPage;
-    state.hasMore = state.page < state.totalPages;
-    state.lastSyncAt = new Date();
-    saveCatalogSnapshot();
-    renderAll();
+    const didSync = await syncCatalogUntilVisibleGain("manual", CATALOG_MIN_VISIBLE_APPEND, {
+      maxSteps: CATALOG_VISIBLE_APPEND_MAX_STEPS_MANUAL,
+      batchPages: CATALOG_VISIBLE_APPEND_BATCH_PAGES,
+    });
+    if (didSync) {
+      state.lastSyncAt = new Date();
+      saveCatalogSnapshot();
+      renderAll();
+    }
   } finally {
     state.loadingCatalog = false;
     updateLoadMoreButton();
@@ -4746,6 +4806,15 @@ function upsertCatalogItems(items, { prepend }) {
       }
     }
 
+    const looseTargetId = findCatalogLooseMergeTarget(map, item);
+    if (looseTargetId > 0) {
+      const existing = map.get(looseTargetId);
+      if (existing) {
+        map.set(looseTargetId, mergeCatalogSemanticItem(existing, item));
+        continue;
+      }
+    }
+
     incoming.push(item);
     map.set(item.id, item);
     if (semantic && !semanticToId.has(semantic)) {
@@ -4778,6 +4847,70 @@ function getCatalogSemanticKey(item) {
   const season = mediaType === "tv" ? Math.max(0, Number(item.externalSeason || 0)) : 0;
   const episode = mediaType === "tv" ? Math.max(0, Number(item.externalEpisode || 0)) : 0;
   return `${titleKey}::${mediaType}::${year}::${season}::${episode}`;
+}
+
+function getCatalogSemanticLooseKey(item) {
+  if (!item) {
+    return "";
+  }
+  const titleKey = normalizeTitleKey(item.title || item.titleKey || "");
+  if (!titleKey) {
+    return "";
+  }
+  const mediaType = item.type === "tv" ? "tv" : "movie";
+  const season = mediaType === "tv" ? Math.max(0, Number(item.externalSeason || 0)) : 0;
+  const episode = mediaType === "tv" ? Math.max(0, Number(item.externalEpisode || 0)) : 0;
+  return `${titleKey}::${mediaType}::${season}::${episode}`;
+}
+
+function getCatalogReleaseYear(item) {
+  if (!item) {
+    return 0;
+  }
+  const externalYear = Number(item.externalYear || 0);
+  if (Number.isFinite(externalYear) && externalYear > 0) {
+    return externalYear;
+  }
+  const releaseYear = Number.parseInt(getYear(item.releaseDate || ""), 10);
+  return Number.isFinite(releaseYear) && releaseYear > 0 ? releaseYear : 0;
+}
+
+function areCatalogYearsCompatible(left, right, maxDelta = 1) {
+  const leftYear = getCatalogReleaseYear(left);
+  const rightYear = getCatalogReleaseYear(right);
+  if (leftYear <= 0 || rightYear <= 0) {
+    return true;
+  }
+  return Math.abs(leftYear - rightYear) <= Math.max(0, Number(maxDelta || 1));
+}
+
+function canMergeCatalogSemanticLoose(existing, incoming) {
+  if (!existing || !incoming) {
+    return false;
+  }
+  const existingLoose = getCatalogSemanticLooseKey(existing);
+  const incomingLoose = getCatalogSemanticLooseKey(incoming);
+  if (!existingLoose || !incomingLoose || existingLoose !== incomingLoose) {
+    return false;
+  }
+  const existingExternal = Boolean(existing?.isExternal || existing?.externalProvider || existing?.external_provider);
+  const incomingExternal = Boolean(incoming?.isExternal || incoming?.externalProvider || incoming?.external_provider);
+  if (!existingExternal && !incomingExternal) {
+    return false;
+  }
+  return areCatalogYearsCompatible(existing, incoming, 1);
+}
+
+function findCatalogLooseMergeTarget(map, incoming) {
+  if (!(map instanceof Map) || !incoming) {
+    return 0;
+  }
+  for (const [candidateId, candidate] of map.entries()) {
+    if (canMergeCatalogSemanticLoose(candidate, incoming)) {
+      return Number(candidateId || 0);
+    }
+  }
+  return 0;
 }
 
 function getCatalogItemQualityScore(item) {
@@ -4905,13 +5038,62 @@ function resolveCatalogMediaType(rawType, isAnimeFlag = false) {
   return isAnimeFlag ? "tv" : "movie";
 }
 
+function isLikelyAnimeCatalogRow(raw) {
+  if (!raw || typeof raw !== "object") {
+    return false;
+  }
+  if (isTruthyDataFlag(raw?.isAnime ?? raw?.is_anime ?? raw?.isanime ?? raw?.anime)) {
+    return true;
+  }
+
+  const hintParts = [
+    raw?.type,
+    raw?.media_type,
+    raw?.mediaType,
+    raw?.kind,
+    raw?.category,
+    raw?.genre,
+    raw?.source,
+    raw?.provider,
+    raw?.origin,
+    raw?.external_provider,
+    raw?.externalProvider,
+    raw?.external_label,
+    raw?.externalLabel,
+    raw?.external_source,
+    raw?.externalSource,
+  ];
+  const hints = hintParts
+    .map((value) => String(value || "").trim().toLowerCase())
+    .filter(Boolean)
+    .join(" ");
+  if (/\banime\b/.test(hints)) {
+    return true;
+  }
+
+  const sourceUrl = String(
+    raw?.external_detail_url ??
+      raw?.externalDetailUrl ??
+      raw?.source_url ??
+      raw?.sourceUrl ??
+      raw?.url ??
+      ""
+  )
+    .trim()
+    .toLowerCase();
+  if (sourceUrl.includes("anime-sama") || sourceUrl.includes("animesama")) {
+    return true;
+  }
+
+  return false;
+}
+
 function normalizeCatalogItem(raw) {
   if (!raw || typeof raw !== "object") {
     return null;
   }
   const rawType = raw?.type ?? raw?.media_type ?? raw?.mediaType ?? raw?.kind ?? "";
-  const normalizedInputType = normalizeCalendarMediaType(rawType);
-  const isAnime = isTruthyDataFlag(raw?.isAnime ?? raw?.is_anime ?? raw?.isanime) || normalizedInputType === "anime";
+  const isAnime = isLikelyAnimeCatalogRow(raw);
   const type = resolveCatalogMediaType(rawType, isAnime);
 
   const id = Number(raw?.id || 0);
@@ -7897,6 +8079,52 @@ function getExternalPlaybackContext(item) {
   return { season, episode, year };
 }
 
+function areProviderTitlesCompatible(leftTitle, rightTitle) {
+  const leftKey = normalizeTitleKey(leftTitle || "");
+  const rightKey = normalizeTitleKey(rightTitle || "");
+  if (!leftKey || !rightKey) {
+    return false;
+  }
+  if (leftKey === rightKey) {
+    return true;
+  }
+
+  const leftCompact = leftKey.replace(/[^a-z0-9]+/g, " ").trim();
+  const rightCompact = rightKey.replace(/[^a-z0-9]+/g, " ").trim();
+  if (leftCompact && rightCompact) {
+    if (leftCompact.length >= 6 && rightCompact.includes(leftCompact)) {
+      return true;
+    }
+    if (rightCompact.length >= 6 && leftCompact.includes(rightCompact)) {
+      return true;
+    }
+  }
+
+  const stopWords = new Set(["le", "la", "les", "de", "du", "des", "the", "and", "of", "a", "an"]);
+  const tokenize = (value) =>
+    String(value || "")
+      .split(/\s+/)
+      .map((token) => token.trim())
+      .filter((token) => token.length >= 3 && !stopWords.has(token));
+
+  const leftTokens = tokenize(leftCompact);
+  const rightTokens = tokenize(rightCompact);
+  if (leftTokens.length === 0 || rightTokens.length === 0) {
+    return false;
+  }
+
+  const leftSet = new Set(leftTokens);
+  let shared = 0;
+  rightTokens.forEach((token) => {
+    if (leftSet.has(token)) {
+      shared += 1;
+    }
+  });
+
+  const threshold = Math.max(2, Math.ceil(Math.min(leftSet.size, rightTokens.length) * 0.7));
+  return shared >= threshold;
+}
+
 function findInternalProviderCandidate(item, options = {}) {
   if (!item) {
     return null;
@@ -7922,8 +8150,8 @@ function findInternalProviderCandidate(item, options = {}) {
     if ((candidate.type === "tv" ? "tv" : "movie") !== mediaType) {
       continue;
     }
-    const candidateTitleKey = normalizeTitleKey(candidate.title || candidate.titleKey || "");
-    if (!candidateTitleKey || candidateTitleKey !== titleKey) {
+    const candidateTitle = String(candidate.title || candidate.titleKey || "").trim();
+    if (!areProviderTitlesCompatible(candidateTitle, item.title || item.titleKey || "")) {
       continue;
     }
     if (targetYear > 0) {
