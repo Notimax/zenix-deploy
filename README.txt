@@ -421,3 +421,33 @@ LATEST SCROLLBAR VISUAL HIDE (2026-03-09, c149)
 - Main page scrollbar is now visually hidden while scroll remains active.
 - Kept mouse wheel, trackpad, keyboard and touch scrolling behavior unchanged.
 - Applied cross-browser rules (`scrollbar-width`, `-ms-overflow-style`, `::-webkit-scrollbar`).
+
+LATEST PROVIDER STRATEGY HARDENING (2026-03-09, c150)
+- Semantic catalog merge now preserves internal ownership when an internal row and an external row
+  collide on the same title key (prevents internal IDs from being wrongly flagged as external).
+- Episode loading now uses a dual-provider strategy:
+  - starts Purstream episode fetch and Nakios fallback fetch in parallel.
+  - uses soft time windows to avoid long blocking states before first playable source appears.
+  - if Purstream has playable sources quickly, it is kept as primary.
+  - if Purstream is empty/slow, Nakios preloaded sources are injected immediately.
+- External TV rows can now auto-switch to internal Purstream twin only when the internal stream is truly playable.
+- Playback route/state now tracks the actually selected provider item (`state.nowPlaying` + `?watch=` sync).
+
+TARGETED TEST - THE ROOKIE (LOCAL, 2026-03-09)
+- Probe file: `__tmp_rookie_search_play_probe.js`
+- Results:
+  - `__tmp_rookie_search_play_probe_result_local_after_fix.json`
+  - `__tmp_rookie_search_play_probe_run1_local.json`
+  - `__tmp_rookie_search_play_probe_run2_local.json`
+  - `__tmp_rookie_search_play_probe_run3_local.json`
+- Summary:
+  - desktop: sources detected and playback reaches `Lecture S1E1 (VF)` consistently.
+  - iPhone 13 WebKit: sources detected and playback reaches `Lecture S1E1 (VF)` across all 3 reruns.
+
+LOCAL BRUTE MATRIX AFTER c150 (2026-03-09)
+- Source: `__tmp_brut_f1_mercredi_matrix_result_after_rookie_strategy.json`
+- Summary:
+  - total runs: 8
+  - passed: 8
+  - failed: 0
+  - `/api/media/*/sheet` 404 count during matrix: 0

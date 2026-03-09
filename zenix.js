@@ -925,7 +925,7 @@ async function init() {
   pruneProgressEntries();
   applyUiPrefs({ syncControls: true });
   if (refs.footerVersion) {
-    refs.footerVersion.textContent = "c149";
+    refs.footerVersion.textContent = "c150";
   }
   updateNetworkBadge();
   cleanupLegacyServiceWorker().catch(() => {
@@ -4527,6 +4527,7 @@ function getCatalogItemQualityScore(item) {
 
 function mergeCatalogSemanticItem(existing, incoming) {
   const keepExisting = getCatalogItemQualityScore(existing) >= getCatalogItemQualityScore(incoming);
+  const winner = keepExisting ? existing : incoming;
   const base = keepExisting ? { ...incoming, ...existing } : { ...existing, ...incoming };
   base.id = Number(existing?.id || incoming?.id || 0);
   base.poster = String(base.poster || existing?.poster || incoming?.poster || "").trim();
@@ -4540,8 +4541,33 @@ function mergeCatalogSemanticItem(existing, incoming) {
   base.availabilityStatus = mergedAvailability;
   base.externalStatus = mergedAvailability;
   base.isPendingUpload = mergedAvailability === "pending";
-  if (!base.externalProvider) {
+  const existingProvider = String(existing?.externalProvider || existing?.external_provider || "")
+    .trim()
+    .toLowerCase();
+  const incomingProvider = String(incoming?.externalProvider || incoming?.external_provider || "")
+    .trim()
+    .toLowerCase();
+  const existingIsExternal = Boolean(existingProvider || existing?.isExternal);
+  const incomingIsExternal = Boolean(incomingProvider || incoming?.isExternal);
+  let winnerProvider = String(
+    winner?.externalProvider || winner?.external_provider || ""
+  )
+    .trim()
+    .toLowerCase();
+  if (existingIsExternal !== incomingIsExternal) {
+    // If one side is internal and the other external, keep internal ownership after semantic merge.
+    winnerProvider = "";
+  }
+  if (winnerProvider) {
+    base.externalProvider = winnerProvider;
+    base.external_provider = winnerProvider;
+    base.isExternal = true;
+  } else {
+    base.externalProvider = "";
+    base.external_provider = "";
     base.isExternal = false;
+    base.externalKey = "";
+    base.externalDetailUrl = "";
   }
   return base;
 }
@@ -7548,6 +7574,197 @@ function getExternalPlaybackContext(item) {
   return { season, episode, year };
 }
 
+function findInternalProviderCandidate(item, options = {}) {
+  if (!item) {
+    return null;
+  }
+  const mediaType = item.type === "tv" ? "tv" : "movie";
+  const titleKey = normalizeTitleKey(item.title || item.titleKey || "");
+  if (!titleKey) {
+    return null;
+  }
+  const targetYear = getItemReleaseYear(item);
+  const maxYearDelta = Math.max(0, Number(options.maxYearDelta || 1));
+  for (const candidate of state.catalog) {
+    if (!candidate) {
+      continue;
+    }
+    const candidateId = Number(candidate.id || 0);
+    if (candidateId <= 0 || candidateId >= SUPPLEMENTAL_MEDIA_ID_MIN) {
+      continue;
+    }
+    if (Boolean(candidate.isExternal)) {
+      continue;
+    }
+    if ((candidate.type === "tv" ? "tv" : "movie") !== mediaType) {
+      continue;
+    }
+    const candidateTitleKey = normalizeTitleKey(candidate.title || candidate.titleKey || "");
+    if (!candidateTitleKey || candidateTitleKey !== titleKey) {
+      continue;
+    }
+    if (targetYear > 0) {
+      const candidateYear = getItemReleaseYear(candidate);
+      if (candidateYear > 0 && Math.abs(candidateYear - targetYear) > maxYearDelta) {
+        continue;
+      }
+    }
+    return candidate;
+  }
+  return null;
+}
+
+async function hasPlayablePurstreamSources(item, season = 1, episode = 1) {
+  const mediaId = Number(item?.id || 0);
+  if (mediaId <= 0 || mediaId >= SUPPLEMENTAL_MEDIA_ID_MIN) {
+    return false;
+  }
+
+  if (item?.type === "tv") {
+    try {
+      const episodePayload = await fetchStreamJson(`/stream/${mediaId}/episode?season=${season}&episode=${episode}`, {
+        force: true,
+        timeoutMs: Math.max(4200, STREAM_DIRECT_PREFETCH_TIMEOUT_MS),
+        retryDelays: [260],
+      });
+      if (extractSources(episodePayload).length > 0) {
+        return true;
+      }
+    } catch {
+      // continue below
+    }
+  }
+
+  try {
+    const payload = await fetchStreamJson(`/stream/${mediaId}`, {
+      force: true,
+      timeoutMs: Math.max(4200, STREAM_DIRECT_PREFETCH_TIMEOUT_MS),
+      retryDelays: [260],
+    });
+    return extractSources(payload).length > 0;
+  } catch {
+    return false;
+  }
+}
+
+async function resolvePlayableProviderItem(item, season = 1, episode = 1) {
+  if (!item || !item.isExternal) {
+    return item;
+  }
+  const internalCandidate = findInternalProviderCandidate(item);
+  if (!internalCandidate) {
+    return item;
+  }
+  const playable = await hasPlayablePurstreamSources(internalCandidate, season, episode);
+  return playable ? internalCandidate : item;
+}
+
+function buildSourcePayloadFromList(sources) {
+  const rows = Array.isArray(sources) ? sources : [];
+  return {
+    data: {
+      items: {
+        sources: rows,
+      },
+    },
+  };
+}
+
+function mergeSourceLists(baseSources, additionalSources) {
+  const merged = Array.isArray(baseSources) ? baseSources.slice() : [];
+  const existing = new Set(merged.map((entry) => getSourceDedupKey(entry)).filter(Boolean));
+  const rows = Array.isArray(additionalSources) ? additionalSources : [];
+  rows.forEach((entry, index) => {
+    const normalized = normalizeSourceEntry(entry, merged.length + index);
+    if (!normalized) {
+      return;
+    }
+    const key = getSourceDedupKey(normalized);
+    if (key && existing.has(key)) {
+      return;
+    }
+    if (key) {
+      existing.add(key);
+    }
+    merged.push(normalized);
+  });
+  return merged;
+}
+
+async function resolveEpisodePayloadWithStrategy(item, season = 1, episode = 1) {
+  let selectedItem = item;
+  const safeSeason = Math.max(1, Number(season || 1));
+  const safeEpisode = Math.max(1, Number(episode || 1));
+  if (item?.isExternal) {
+    selectedItem = await resolvePlayableProviderItem(item, safeSeason, safeEpisode);
+  }
+
+  const streamPath = `/stream/${selectedItem.id}/episode?season=${safeSeason}&episode=${safeEpisode}`;
+  const streamPromise = fetchStreamJson(streamPath, { force: true })
+    .then((payload) => ({
+      payload,
+      sources: extractSources(payload),
+    }))
+    .catch(() => ({
+      payload: null,
+      sources: [],
+    }));
+  const nakiosPromise = appendNakiosSources(selectedItem, safeSeason, safeEpisode, [])
+    .then((sources) => (Array.isArray(sources) ? sources : []))
+    .catch(() => []);
+
+  const streamSoft = await Promise.race([streamPromise, wait(4600).then(() => null)]);
+  if (streamSoft?.sources?.length > 0) {
+    return {
+      selectedItem,
+      payload: streamSoft.payload,
+      preloadedNakios: null,
+      nakiosPromise,
+    };
+  }
+
+  const nakiosSoft = await Promise.race([nakiosPromise, wait(3400).then(() => null)]);
+  if (Array.isArray(nakiosSoft) && nakiosSoft.length > 0) {
+    return {
+      selectedItem,
+      payload: buildSourcePayloadFromList(nakiosSoft),
+      preloadedNakios: nakiosSoft,
+      nakiosPromise: Promise.resolve(nakiosSoft),
+    };
+  }
+
+  const streamFinal = streamSoft || (await streamPromise);
+  if (streamFinal?.sources?.length > 0) {
+    return {
+      selectedItem,
+      payload: streamFinal.payload,
+      preloadedNakios: null,
+      nakiosPromise,
+    };
+  }
+
+  const nakiosFinal = Array.isArray(nakiosSoft) ? nakiosSoft : await nakiosPromise;
+  if (nakiosFinal.length > 0) {
+    return {
+      selectedItem,
+      payload: buildSourcePayloadFromList(nakiosFinal),
+      preloadedNakios: nakiosFinal,
+      nakiosPromise: Promise.resolve(nakiosFinal),
+    };
+  }
+
+  if (streamFinal?.payload) {
+    return {
+      selectedItem,
+      payload: streamFinal.payload,
+      preloadedNakios: [],
+      nakiosPromise: Promise.resolve([]),
+    };
+  }
+
+  throw new Error("No episode source");
+}
+
 async function resolveExternalItemSources(item) {
   const { season, episode } = getExternalPlaybackContext(item);
   const merged = await appendNakiosSources(item, season, episode, []);
@@ -7559,21 +7776,43 @@ async function resolveExternalItemSources(item) {
 }
 
 async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
-  const isExternalItem = Boolean(item?.isExternal && item?.externalProvider);
-  const { season: externalSeason, episode: externalEpisode } = getExternalPlaybackContext(item);
-  const streamPath = `/stream/${item.id}`;
+  const externalContext = getExternalPlaybackContext(item);
+  let selectedItem = item;
+  let isExternalItem = Boolean(item?.isExternal && item?.externalProvider);
+  if (isExternalItem) {
+    selectedItem = await resolvePlayableProviderItem(item, externalContext.season, externalContext.episode);
+    isExternalItem = Boolean(selectedItem?.isExternal && selectedItem?.externalProvider);
+  }
+
+  const { season: externalSeason, episode: externalEpisode } = getExternalPlaybackContext(selectedItem || item);
+  const streamPath = `/stream/${selectedItem?.id || item.id}`;
 
   if (isExternalItem) {
     setPlayerStatus("Connexion aux sources externes...");
-    const resolved = await resolveExternalItemSources(item);
+    const resolved = await resolveExternalItemSources(selectedItem);
     if (token !== state.playToken) {
       return;
     }
     clearManualSourceLock();
     state.sourcePool = resolved.sources;
   } else {
-    setPlayerStatus("Connexion au flux film...");
-    const payload = await fetchStreamJson(streamPath, { force: true });
+    const isSeriesFallbackMode = selectedItem.type === "tv";
+    setPlayerStatus(isSeriesFallbackMode ? "Connexion au flux serie..." : "Connexion au flux film...");
+    let payload = null;
+    if (isSeriesFallbackMode) {
+      const episodePath = `/stream/${selectedItem.id}/episode?season=${externalSeason}&episode=${externalEpisode}`;
+      try {
+        payload = await fetchStreamJson(episodePath, { force: true });
+        if (extractSources(payload).length === 0) {
+          payload = null;
+        }
+      } catch {
+        payload = null;
+      }
+    }
+    if (!payload) {
+      payload = await fetchStreamJson(streamPath, { force: true });
+    }
     if (token !== state.playToken) {
       return;
     }
@@ -7581,8 +7820,8 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
     clearManualSourceLock();
     const baseMovieSources = extractSources(payload);
     const autoMovieSources = appendAutoZenixRelaySources(baseMovieSources);
-    const ownedMovieSources = await appendZenixOwnedSources(item, 1, 1, autoMovieSources);
-    const nakiosMovieSources = await appendNakiosSources(item, 1, 1, ownedMovieSources);
+    const ownedMovieSources = await appendZenixOwnedSources(selectedItem, 1, 1, autoMovieSources);
+    const nakiosMovieSources = await appendNakiosSources(selectedItem, 1, 1, ownedMovieSources);
     state.sourcePool = filterMovieSourcesForFrench(nakiosMovieSources);
   }
   state.allEpisodeSources = state.sourcePool.slice();
@@ -7605,23 +7844,38 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
     }
     if (isExternalItem) {
       setPlayerStatus("Actualisation des sources externes...");
-      const refreshedExternal = await resolveExternalItemSources(item);
+      const refreshedExternal = await resolveExternalItemSources(selectedItem);
       if (token !== state.playToken) {
         return;
       }
       clearManualSourceLock();
       state.sourcePool = refreshedExternal.sources;
     } else {
-      setPlayerStatus("Actualisation des sources film...");
-      const refreshedPayload = await fetchStreamJson(streamPath, { force: true });
+      const isSeriesFallbackMode = selectedItem.type === "tv";
+      setPlayerStatus(isSeriesFallbackMode ? "Actualisation des sources serie..." : "Actualisation des sources film...");
+      let refreshedPayload = null;
+      if (isSeriesFallbackMode) {
+        const episodePath = `/stream/${selectedItem.id}/episode?season=${externalSeason}&episode=${externalEpisode}`;
+        try {
+          refreshedPayload = await fetchStreamJson(episodePath, { force: true });
+          if (extractSources(refreshedPayload).length === 0) {
+            refreshedPayload = null;
+          }
+        } catch {
+          refreshedPayload = null;
+        }
+      }
+      if (!refreshedPayload) {
+        refreshedPayload = await fetchStreamJson(streamPath, { force: true });
+      }
       if (token !== state.playToken) {
         return;
       }
       clearManualSourceLock();
       const refreshedMovieSources = extractSources(refreshedPayload);
       const refreshedAutoMovieSources = appendAutoZenixRelaySources(refreshedMovieSources);
-      const refreshedOwnedMovieSources = await appendZenixOwnedSources(item, 1, 1, refreshedAutoMovieSources);
-      const refreshedNakiosMovieSources = await appendNakiosSources(item, 1, 1, refreshedOwnedMovieSources);
+      const refreshedOwnedMovieSources = await appendZenixOwnedSources(selectedItem, 1, 1, refreshedAutoMovieSources);
+      const refreshedNakiosMovieSources = await appendNakiosSources(selectedItem, 1, 1, refreshedOwnedMovieSources);
       state.sourcePool = filterMovieSourcesForFrench(refreshedNakiosMovieSources);
     }
     state.allEpisodeSources = state.sourcePool.slice();
@@ -7639,17 +7893,17 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
     showToast("Source film actualisee automatiquement.");
   }
   state.nowPlaying = {
-    id: item.id,
+    id: selectedItem.id,
     type: "movie",
-    title: item.title,
-    poster: item.poster,
+    title: selectedItem.title,
+    poster: selectedItem.poster,
     isAnime: false,
     season: isExternalItem ? externalSeason : 1,
     episode: isExternalItem ? externalEpisode : 1,
   };
-  setPlayerSubTitle(isExternalItem && item.type === "tv" ? `Episode S${externalSeason}E${externalEpisode}` : "Film");
+  setPlayerSubTitle(isExternalItem && selectedItem.type === "tv" ? `Episode S${externalSeason}E${externalEpisode}` : "Film");
   if (syncRoute) {
-    setAppRoute({ watch: item.id }, { replace: true });
+    setAppRoute({ watch: selectedItem.id }, { replace: true });
   }
 }
 
@@ -7662,29 +7916,51 @@ async function loadEpisodeStream(
   preferredLanguage = "",
   syncRoute = true
 ) {
-  const streamPath = `/stream/${item.id}/episode?season=${season}&episode=${episode}`;
-  setPlayerStatus(`Chargement S${season}E${episode}...`);
+  const safeSeason = Math.max(1, Number(season || 1));
+  const safeEpisode = Math.max(1, Number(episode || 1));
+  setPlayerStatus(`Chargement S${safeSeason}E${safeEpisode}...`);
 
-  const payload = await fetchStreamJson(streamPath, { force: true });
+  let resolved = await resolveEpisodePayloadWithStrategy(item, safeSeason, safeEpisode);
   if (token !== state.playToken) {
     return;
   }
+  let selectedItem = resolved.selectedItem || item;
 
-  const applyEpisodeSourcePayload = async (nextPayload, preferredLanguageInput = "") => {
+  const applyEpisodeSourcePayload = async (
+    nextPayload,
+    preferredLanguageInput = "",
+    preloadedNakiosSources = null,
+    nakiosWarmPromise = null
+  ) => {
     clearManualSourceLock();
     const baseSources = extractSources(nextPayload);
     const autoMergedSources = appendAutoZenixRelaySources(baseSources);
-    const ownedMergedSources = await appendZenixOwnedSources(item, season, episode, autoMergedSources);
-    const nakiosMergedSources = await appendNakiosSources(item, season, episode, ownedMergedSources);
+    const ownedMergedSources = await appendZenixOwnedSources(selectedItem, safeSeason, safeEpisode, autoMergedSources);
+
+    let nakiosMergedSources = ownedMergedSources;
+    let warmNakiosSources = Array.isArray(preloadedNakiosSources) ? preloadedNakiosSources : [];
+    if (warmNakiosSources.length === 0 && nakiosWarmPromise && typeof nakiosWarmPromise.then === "function") {
+      warmNakiosSources = await Promise.race([
+        nakiosWarmPromise.then((sources) => (Array.isArray(sources) ? sources : [])).catch(() => []),
+        wait(2200).then(() => []),
+      ]);
+    }
+    if (warmNakiosSources.length === 0 && ownedMergedSources.length === 0 && nakiosWarmPromise && typeof nakiosWarmPromise.then === "function") {
+      warmNakiosSources = await nakiosWarmPromise.then((sources) => (Array.isArray(sources) ? sources : [])).catch(() => []);
+    }
+    if (warmNakiosSources.length > 0) {
+      nakiosMergedSources = mergeSourceLists(ownedMergedSources, warmNakiosSources);
+    }
+
     state.allEpisodeSources = await appendAnimeSibnetSource(
-      item,
-      season,
-      episode,
+      selectedItem,
+      safeSeason,
+      safeEpisode,
       nakiosMergedSources,
       preferredLanguageInput
     );
     state.availableLanguages = getAvailableLanguages(state.allEpisodeSources);
-    let nextLanguage = resolvePreferredLanguage(item.id, preferredLanguageInput, state.availableLanguages);
+    let nextLanguage = resolvePreferredLanguage(selectedItem.id, preferredLanguageInput, state.availableLanguages);
     state.sourcePool = filterSourcesByLanguage(state.allEpisodeSources, nextLanguage);
     if (state.sourcePool.length === 0 && state.allEpisodeSources.length > 0) {
       nextLanguage = "";
@@ -7692,9 +7968,9 @@ async function loadEpisodeStream(
     }
     state.sourceRetryAttempts.clear();
     if (nextLanguage) {
-      state.selectedLanguageByMedia.set(item.id, nextLanguage);
+      state.selectedLanguageByMedia.set(selectedItem.id, nextLanguage);
     } else {
-      state.selectedLanguageByMedia.delete(item.id);
+      state.selectedLanguageByMedia.delete(selectedItem.id);
     }
     saveLanguagePrefsMap(state.selectedLanguageByMedia);
 
@@ -7734,38 +8010,49 @@ async function loadEpisodeStream(
     }
   };
 
-  let language = await applyEpisodeSourcePayload(payload, preferredLanguage);
+  let language = await applyEpisodeSourcePayload(
+    resolved.payload,
+    preferredLanguage,
+    resolved.preloadedNakios,
+    resolved.nakiosPromise
+  );
   try {
     await playEpisodeSources();
   } catch (firstError) {
     if (token !== state.playToken) {
       throw firstError;
     }
-    setPlayerStatus(`Actualisation des sources S${season}E${episode}...`);
-    const refreshedPayload = await fetchStreamJson(streamPath, { force: true });
+    setPlayerStatus(`Actualisation des sources S${safeSeason}E${safeEpisode}...`);
+    resolved = await resolveEpisodePayloadWithStrategy(selectedItem, safeSeason, safeEpisode);
     if (token !== state.playToken) {
       return;
     }
-    language = await applyEpisodeSourcePayload(refreshedPayload, preferredLanguage || language);
+    selectedItem = resolved.selectedItem || selectedItem;
+    language = await applyEpisodeSourcePayload(
+      resolved.payload,
+      preferredLanguage || language,
+      resolved.preloadedNakios,
+      resolved.nakiosPromise
+    );
     await playEpisodeSources();
     showToast("Sources episode actualisees automatiquement.");
   }
 
   state.nowPlaying = {
-    id: item.id,
+    id: selectedItem.id,
     type: "tv",
-    title: item.title,
-    poster: item.poster,
-    isAnime: Boolean(item.isAnime),
+    title: selectedItem.title,
+    poster: selectedItem.poster,
+    isAnime: Boolean(selectedItem.isAnime),
     language,
-    season,
-    episode,
+    season: safeSeason,
+    episode: safeEpisode,
   };
-  setPlayerSubTitle(`S${season}E${episode}${language ? ` - ${language}` : ""}`);
+  setPlayerSubTitle(`S${safeSeason}E${safeEpisode}${language ? ` - ${language}` : ""}`);
   if (syncRoute) {
-    setAppRoute({ watch: item.id, season, episode }, { replace: true });
+    setAppRoute({ watch: selectedItem.id, season: safeSeason, episode: safeEpisode }, { replace: true });
   }
-  setPlayerStatus(`Lecture S${season}E${episode}${language ? ` (${language})` : ""}`);
+  setPlayerStatus(`Lecture S${safeSeason}E${safeEpisode}${language ? ` (${language})` : ""}`);
 }
 
 async function switchPlayerEpisode(season, episode, options = {}) {

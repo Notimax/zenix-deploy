@@ -146,6 +146,12 @@ Last update: 2026-03-09
     - fallback-stall guard forces source switch when `Fallback iOS actif...` remains blocked.
     - mobile auto-switch can now use premium fallback candidates when free-path chain is exhausted.
     - `IOS_SEGMENT_CHAIN_MAX` raised to avoid premature forced hops between sources.
+  - c150 provider strategy hardening:
+    - semantic dedupe keeps internal provider ownership when internal and external rows collide.
+    - episode loader now runs Purstream and Nakios fetch in parallel with soft fallback windows.
+    - if Purstream is slow/empty, Nakios preloaded sources are injected immediately.
+    - external TV rows can switch to internal Purstream twin only when Purstream episode stream is verifiably playable.
+    - player route/state now follows the effective selected provider item.
 
 ## Mobile robustness
 - Startup splash must never block app forever.
