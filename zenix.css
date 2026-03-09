@@ -5465,3 +5465,129 @@ img[data-image-ready="1"] {
     display: none !important;
   }
 }
+
+/* ===== Player source chips cleanup (c143) ===== */
+.player-source-control {
+  gap: 10px;
+}
+
+.player-source-label {
+  align-items: flex-start;
+}
+
+.player-source-alert {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 187, 104, 0.46);
+  background: rgba(255, 188, 104, 0.13);
+  padding: 4px 8px;
+}
+
+.player-source-chips {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  max-height: min(44vh, 360px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 4px;
+}
+
+.player-source-chip {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+  padding: 10px 11px;
+}
+
+.player-source-chip-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.player-source-chip-head {
+  min-width: 0;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.045em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.player-source-chip-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+  color: #c5d1e8;
+}
+
+.player-source-chip-meta-pill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.08);
+  color: #d8e2f2;
+  font-size: 0.67rem;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  padding: 5px 8px;
+  min-width: 0;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.player-source-chip-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.player-source-chip-tag,
+.player-source-chip-compat {
+  min-width: 0;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.player-source-chip-compat {
+  flex: 0 0 auto;
+}
+
+@media (max-width: 1000px) {
+  .player-source-chips {
+    max-height: none;
+    overflow: visible;
+    padding-right: 0;
+  }
+}
+
+@media (max-width: 740px) {
+  .player-source-alert {
+    width: 100%;
+    justify-content: flex-start;
+    border-radius: 10px;
+  }
+
+  .player-source-chip {
+    gap: 7px;
+    padding: 9px 10px;
+  }
+
+  .player-source-chip-meta-pill,
+  .player-source-chip-tag,
+  .player-source-chip-compat {
+    font-size: 0.64rem;
+    padding: 4px 7px;
+  }
+}

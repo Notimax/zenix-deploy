@@ -363,3 +363,13 @@ LATEST COVER + MOBILE NAV TUNING (2026-03-09, c142)
   - stronger detail-cover warmup budget after category render
 - Mobile navbar moved back to top layout (desktop-style horizontal nav), bottom mobile tabbar hidden.
 - `Haut` button disabled on phone (hidden by viewport + scroll logic).
+
+LATEST SOURCE CHIP UI CLEANUP (2026-03-09, c143)
+- Player source selector redesigned to prevent overlap on all viewports:
+  - top row: `Source n` + compatibility badge
+  - middle row: language/quality/format as compact pills
+  - bottom row: source host pill with safe truncation
+- Responsive polish:
+  - mobile-safe wrapping/ellipsis and spacing
+  - source alert restyled for readability without crowding
+  - source chip container scrolling behavior tuned for desktop and phone.

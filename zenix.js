@@ -919,7 +919,7 @@ async function init() {
   pruneProgressEntries();
   applyUiPrefs({ syncControls: true });
   if (refs.footerVersion) {
-    refs.footerVersion.textContent = "c142";
+    refs.footerVersion.textContent = "c143";
   }
   updateNetworkBadge();
   cleanupLegacyServiceWorker().catch(() => {
@@ -9026,11 +9026,17 @@ function renderPlayerSourceOptions() {
       const format = String(entry?.format || "").trim().toUpperCase() || "STREAM";
       chip.title = `Compatibilite ${score}% (${compatibilityLabel})`;
       chip.innerHTML = `
-        <span class="player-source-chip-head">Source ${index + 1}</span>
-        <span class="player-source-chip-meta">${escapeHtml(language)} - ${escapeHtml(quality)} - ${escapeHtml(format)}</span>
-        <span class="player-source-chip-tags">
-          <span class="player-source-chip-tag">${escapeHtml(sourceLabel)}</span>
+        <span class="player-source-chip-top">
+          <span class="player-source-chip-head">Source ${index + 1}</span>
           <span class="player-source-chip-compat" data-score="${score}">${escapeHtml(compatibilityLabel)} ${score}%</span>
+        </span>
+        <span class="player-source-chip-meta">
+          <span class="player-source-chip-meta-pill">${escapeHtml(language)}</span>
+          <span class="player-source-chip-meta-pill">${escapeHtml(quality)}</span>
+          <span class="player-source-chip-meta-pill">${escapeHtml(format)}</span>
+        </span>
+        <span class="player-source-chip-tags">
+          <span class="player-source-chip-tag" title="${escapeHtml(sourceLabel)}">${escapeHtml(sourceLabel)}</span>
         </span>
       `;
       bindFastPress(chip, () => {

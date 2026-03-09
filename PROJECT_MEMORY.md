@@ -58,6 +58,10 @@ Last update: 2026-03-09
     - mobile navbar moved back to top horizontal nav; bottom tabbar hidden again on phone.
     - `Haut` button hidden on compact/mobile viewport.
     - category cover loading tuned for faster/fuller first paint (higher eager budgets + render batching + warmer detail hydration).
+  - c143 follow-up:
+    - player source chip UI cleaned up for desktop + phone to avoid overlapping labels.
+    - source metadata now uses pill layout (language/quality/format) with truncation safety.
+    - source chip header now separates source number and compatibility badge for better readability.
 
 ## Streaming/source policy
 - External embed fallback sources (e.g. generic `vidsrc`) are removed.
