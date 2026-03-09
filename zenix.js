@@ -24,7 +24,7 @@ const IMAGE_WARMUP_BATCH = 28;
 const IMAGE_WARMUP_DELAY_MS = 12;
 const INITIAL_IMAGE_WARMUP_LIMIT = 260;
 const CALENDAR_YEAR_RANGE = 3;
-const CALENDAR_CACHE_KEY = "zenix-calendar-cache-v1";
+const CALENDAR_CACHE_KEY = "zenix-calendar-cache-v2";
 const CALENDAR_CACHE_MAX_ENTRIES = 8;
 const CALENDAR_TYPE_KEYS = ["film", "serie", "anime"];
 const INITIAL_CATALOG_WARMUP_PAGES = 2;
@@ -2686,6 +2686,35 @@ function getCalendarEntryMediaType(entry) {
   return "film";
 }
 
+function getCalendarEntryAvailabilityStatus(entry) {
+  if (!entry || typeof entry !== "object") {
+    return "";
+  }
+  const direct = normalizeAvailabilityStatus(
+    entry?.availabilityStatus ||
+      entry?.externalStatus ||
+      entry?.availability_status ||
+      entry?.external_status ||
+      entry?.status ||
+      ""
+  );
+  if (direct) {
+    return direct;
+  }
+  if (isTruthyDataFlag(entry?.isPendingUpload ?? entry?.is_pending_upload)) {
+    return "pending";
+  }
+  const dateTs = parseReleaseDate(entry?.dateIso || entry?.releaseDate || entry?.release_date || "");
+  if (dateTs > Date.now() + 2 * 60 * 60 * 1000) {
+    return "pending";
+  }
+  return "";
+}
+
+function isCalendarEntryPending(entry) {
+  return getCalendarEntryAvailabilityStatus(entry) === "pending";
+}
+
 function formatCalendarDateLabel(entry) {
   if (!entry || typeof entry !== "object") {
     return "Date inconnue";
@@ -3165,6 +3194,15 @@ function renderCalendarSection() {
       compact.set(key, entry);
       return;
     }
+    const currentPending = isCalendarEntryPending(current);
+    const nextPending = isCalendarEntryPending(entry);
+    if (currentPending && !nextPending) {
+      compact.set(key, entry);
+      return;
+    }
+    if (!currentPending && nextPending) {
+      return;
+    }
     const currentPoster = String(current?.poster || "").trim();
     const nextPoster = String(entry?.poster || "").trim();
     if (!currentPoster && nextPoster) {
@@ -3207,12 +3245,14 @@ function renderCalendarSection() {
     const card = document.createElement("article");
     card.className = "calendar-merged-card media-card calendar-media-card";
     const detailId = resolveCalendarDetailId(entry);
-    const hasDetails = detailId > 0;
+    const isPendingRelease = isCalendarEntryPending(entry);
+    const hasDetails = detailId > 0 && !isPendingRelease;
     if (hasDetails) {
       card.dataset.calendarMediaId = String(detailId);
       pendingHydrateIds.add(detailId);
     }
-    const linkLabel = hasDetails ? "Voir details" : "Bientot";
+    const linkLabel = isPendingRelease ? "En attente" : hasDetails ? "Voir details" : "Bientot";
+    const availabilityLabel = isPendingRelease ? "En attente" : hasDetails ? "Disponible" : "Bientot";
     const mediaType = getCalendarEntryMediaType(entry);
     const typeLabel = typeMap[mediaType] || "Titre";
     const poster = resolveCalendarEntryCover(entry, detailId);
@@ -3220,6 +3260,7 @@ function renderCalendarSection() {
     card.innerHTML = `
       <div class="media-shell">
         <div class="media-thumb calendar-media-thumb">
+          ${isPendingRelease ? '<span class="calendar-waiting-pill">En attente</span>' : ""}
           <img
             src="${escapeHtml(poster)}"
             alt="${escapeHtml(entry.title || "Affiche")}"
@@ -3242,7 +3283,7 @@ function renderCalendarSection() {
             <span class="meta-dot" aria-hidden="true"></span>
             <span>${escapeHtml(entry.language || "Auto")}</span>
             <span class="meta-dot" aria-hidden="true"></span>
-            <span>${escapeHtml(hasDetails ? "Disponible" : "Soon")}</span>
+            <span>${escapeHtml(availabilityLabel)}</span>
           </p>
           <div class="calendar-merged-actions">
             ${
@@ -4048,6 +4089,12 @@ function getCatalogItemQualityScore(item) {
   } else if (lang === "VOSTFR") {
     score += 6;
   }
+  const availabilityStatus = getItemAvailabilityStatus(item);
+  if (availabilityStatus === "available") {
+    score += 8;
+  } else if (availabilityStatus === "pending") {
+    score -= 52;
+  }
   return score;
 }
 
@@ -4059,6 +4106,13 @@ function mergeCatalogSemanticItem(existing, incoming) {
   base.backdrop = String(base.backdrop || existing?.backdrop || incoming?.backdrop || "").trim();
   base.releaseDate = base.releaseDate || existing?.releaseDate || incoming?.releaseDate || null;
   base.languageHint = normalizeLanguageLabel(base.languageHint || existing?.languageHint || incoming?.languageHint || "");
+  const mergedAvailability = pickPreferredAvailabilityStatus(
+    getItemAvailabilityStatus(existing),
+    getItemAvailabilityStatus(incoming)
+  );
+  base.availabilityStatus = mergedAvailability;
+  base.externalStatus = mergedAvailability;
+  base.isPendingUpload = mergedAvailability === "pending";
   if (!base.externalProvider) {
     base.isExternal = false;
   }
@@ -4118,6 +4172,16 @@ function normalizeCatalogItem(raw) {
   const externalEpisode = Math.max(0, Number(raw?.external_episode ?? raw?.externalEpisode ?? 0));
   const externalYearRaw = Number(raw?.external_year ?? raw?.externalYear ?? 0);
   const externalTmdbIdRaw = Number(raw?.external_tmdb_id ?? raw?.externalTmdbId ?? 0);
+  const availabilityStatusRaw =
+    raw?.availability_status ??
+    raw?.availabilityStatus ??
+    raw?.external_status ??
+    raw?.externalStatus ??
+    raw?.status ??
+    "";
+  const availabilityStatus = normalizeAvailabilityStatus(availabilityStatusRaw);
+  const pendingUploadFlag = isTruthyDataFlag(raw?.is_pending_upload ?? raw?.isPendingUpload);
+  const resolvedAvailabilityStatus = availabilityStatus || (pendingUploadFlag ? "pending" : "");
   const fallbackYear = Number.parseInt(getYear(releaseDate || ""), 10);
   const externalYear = Number.isFinite(externalYearRaw) && externalYearRaw > 0 ? externalYearRaw : fallbackYear > 0 ? fallbackYear : 0;
   const externalTmdbId = Number.isFinite(externalTmdbIdRaw) && externalTmdbIdRaw > 0 ? externalTmdbIdRaw : 0;
@@ -4143,6 +4207,9 @@ function normalizeCatalogItem(raw) {
     externalYear,
     externalSeason,
     externalEpisode,
+    availabilityStatus: resolvedAvailabilityStatus,
+    externalStatus: resolvedAvailabilityStatus,
+    isPendingUpload: resolvedAvailabilityStatus === "pending",
     supplementalRank: Number(raw?.supplemental_rank || raw?.supplementalRank || 0),
     supplementalDate: String(raw?.supplemental_date || raw?.supplementalDate || "").trim(),
   };
@@ -4997,6 +5064,74 @@ function normalizeLanguageLabel(value) {
   return raw;
 }
 
+function normalizeAvailabilityStatus(value) {
+  if (value === null || value === undefined) {
+    return "";
+  }
+  const raw = normalizeTitleKey(String(value || "").trim());
+  if (!raw) {
+    return "";
+  }
+  if (
+    raw === "available" ||
+    raw === "disponible" ||
+    raw === "ready" ||
+    raw === "ok" ||
+    raw === "online" ||
+    raw === "publie"
+  ) {
+    return "available";
+  }
+  if (
+    raw === "pending" ||
+    raw === "waiting" ||
+    raw === "en attente" ||
+    raw === "attente" ||
+    raw === "coming" ||
+    raw === "upcoming"
+  ) {
+    return "pending";
+  }
+  return "";
+}
+
+function getAvailabilityStatusPriority(value) {
+  const normalized = normalizeAvailabilityStatus(value);
+  if (normalized === "available") {
+    return 3;
+  }
+  if (normalized) {
+    return 1;
+  }
+  return 2;
+}
+
+function pickPreferredAvailabilityStatus(left, right) {
+  const leftPriority = getAvailabilityStatusPriority(left);
+  const rightPriority = getAvailabilityStatusPriority(right);
+  if (leftPriority === rightPriority) {
+    return normalizeAvailabilityStatus(right) || normalizeAvailabilityStatus(left) || "";
+  }
+  return rightPriority > leftPriority ? normalizeAvailabilityStatus(right) : normalizeAvailabilityStatus(left);
+}
+
+function getItemAvailabilityStatus(item) {
+  if (!item || typeof item !== "object") {
+    return "";
+  }
+  const direct = normalizeAvailabilityStatus(
+    item?.availabilityStatus || item?.externalStatus || item?.availability_status || item?.external_status || item?.status || ""
+  );
+  if (direct) {
+    return direct;
+  }
+  return isTruthyDataFlag(item?.isPendingUpload ?? item?.is_pending_upload) ? "pending" : "";
+}
+
+function isPendingUploadItem(item) {
+  return getItemAvailabilityStatus(item) === "pending";
+}
+
 function resolveDetailLanguageLabel(details, mediaId = 0) {
   const fromDetails = normalizeLanguageLabel(details?.lang);
   if (fromDetails) {
@@ -5205,8 +5340,9 @@ function renderTopDaily() {
     const runtime = item.runtime ? toHumanRuntime(item.runtime) : item.type === "tv" ? "Episodes" : "Film";
     const year = getYear(item.releaseDate) || "-";
     const languageLabel = resolveDetailLanguageLabel(details, item.id);
-    const isComingSoonRelease = isComingSoon(item);
-    const isNewRelease = isRecentlyReleased(item, NEW_RELEASE_DAYS);
+    const isPendingUpload = isPendingUploadItem(item);
+    const isComingSoonRelease = !isPendingUpload && isComingSoon(item);
+    const isNewRelease = !isPendingUpload && isRecentlyReleased(item, NEW_RELEASE_DAYS);
     const hasResume = Number(state.progress?.[item.id]?.time || 0) > 45;
 
     card.innerHTML = `
@@ -5235,8 +5371,9 @@ function renderTopDaily() {
         <button type="button" class="title-link top-title-link" data-top-open="${item.id}">${escapeHtml(item.title)}</button>
         <p class="top-meta">
           <span class="meta-pill">${escapeHtml(getItemTypeLabel(item))}</span>
-          ${isComingSoonRelease ? '<span class="meta-pill meta-pill-soon">Bientot dispo</span>' : ""}
-          ${!isComingSoonRelease && isNewRelease ? '<span class="meta-pill meta-pill-new">Nouveau</span>' : ""}
+          ${isPendingUpload ? '<span class="meta-pill meta-pill-waiting">En attente</span>' : ""}
+          ${!isPendingUpload && isComingSoonRelease ? '<span class="meta-pill meta-pill-soon">Bientot dispo</span>' : ""}
+          ${!isPendingUpload && !isComingSoonRelease && isNewRelease ? '<span class="meta-pill meta-pill-new">Nouveau</span>' : ""}
           ${hasResume ? '<span class="meta-pill meta-pill-resume">Reprise</span>' : ""}
           <span class="meta-dot" aria-hidden="true"></span>
           <span>${escapeHtml(runtime)}</span>
@@ -5528,8 +5665,9 @@ function buildMediaCard(item, resume = false, progressEntry = null, position = 0
   const languageLabel = resolveDetailLanguageLabel(details, item.id);
   const favorite = isFavorite(item.id);
   const progress = progressEntry || state.progress[item.id] || null;
-  const isComingSoonRelease = isComingSoon(item);
-  const isNewRelease = isRecentlyReleased(item, NEW_RELEASE_DAYS);
+  const isPendingUpload = isPendingUploadItem(item);
+  const isComingSoonRelease = !isPendingUpload && isComingSoon(item);
+  const isNewRelease = !isPendingUpload && isRecentlyReleased(item, NEW_RELEASE_DAYS);
   const hasResume = Number(progress?.time || 0) > 45;
   const ratioRaw = progress && Number(progress.duration || 0) > 0
     ? (Number(progress.time || 0) / Number(progress.duration || 1)) * 100
@@ -5544,6 +5682,7 @@ function buildMediaCard(item, resume = false, progressEntry = null, position = 0
   card.innerHTML = `
     <div class="media-shell">
     <div class="media-thumb">
+      ${isPendingUpload ? '<span class="media-thumb-badge media-thumb-badge-waiting">En attente</span>' : ""}
       <img
         src="${escapeHtml(cover)}"
         alt="${escapeHtml(item.title)}"
@@ -5571,8 +5710,9 @@ function buildMediaCard(item, resume = false, progressEntry = null, position = 0
       <button type="button" class="title-link media-title-link" data-card-open="${item.id}">${escapeHtml(item.title)}</button>
         <p class="media-meta">
         <span class="meta-pill">${escapeHtml(typeLabel)}</span>
-        ${isComingSoonRelease ? '<span class="meta-pill meta-pill-soon">Bientot dispo</span>' : ""}
-        ${!isComingSoonRelease && isNewRelease ? '<span class="meta-pill meta-pill-new">Nouveau</span>' : ""}
+        ${isPendingUpload ? '<span class="meta-pill meta-pill-waiting">En attente</span>' : ""}
+        ${!isPendingUpload && isComingSoonRelease ? '<span class="meta-pill meta-pill-soon">Bientot dispo</span>' : ""}
+        ${!isPendingUpload && !isComingSoonRelease && isNewRelease ? '<span class="meta-pill meta-pill-new">Nouveau</span>' : ""}
         ${hasResume ? '<span class="meta-pill meta-pill-resume">Reprise</span>' : ""}
         <span class="meta-dot" aria-hidden="true"></span>
         <span>${escapeHtml(runtime)}</span>
@@ -9887,6 +10027,9 @@ function parseReleaseDate(value) {
 }
 
 function isRecentlyReleased(item, days = NEW_RELEASE_DAYS) {
+  if (getItemAvailabilityStatus(item) === "pending") {
+    return false;
+  }
   const ts = parseReleaseDate(item?.releaseDate || "");
   if (!ts) {
     return false;
@@ -9900,6 +10043,9 @@ function isRecentlyReleased(item, days = NEW_RELEASE_DAYS) {
 }
 
 function isComingSoon(item) {
+  if (getItemAvailabilityStatus(item) === "pending") {
+    return false;
+  }
   const ts = parseReleaseDate(item?.releaseDate || "");
   if (!ts) {
     return false;

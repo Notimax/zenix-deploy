@@ -156,6 +156,22 @@ const SUPPLEMENTAL_COVER_MAX_PER_RESPONSE = Math.max(
   6,
   toInt(process.env.SUPPLEMENTAL_COVER_MAX_PER_RESPONSE, 36, 6, 120)
 );
+const NAKIOS_AVAILABILITY_CACHE_MS = Math.max(
+  5 * 60 * 1000,
+  Number(process.env.NAKIOS_AVAILABILITY_CACHE_MS || 20 * 60 * 1000)
+);
+const NAKIOS_AVAILABILITY_PROBE_CONCURRENCY = Math.max(
+  1,
+  toInt(process.env.NAKIOS_AVAILABILITY_PROBE_CONCURRENCY, 6, 1, 12)
+);
+const NAKIOS_AVAILABILITY_MAX_PROBES_PER_RESPONSE = Math.max(
+  12,
+  toInt(process.env.NAKIOS_AVAILABILITY_MAX_PROBES_PER_RESPONSE, 72, 12, 180)
+);
+const NAKIOS_PENDING_SOON_GRACE_MS = Math.max(
+  60 * 60 * 1000,
+  Number(process.env.NAKIOS_PENDING_SOON_GRACE_MS || 6 * 60 * 60 * 1000)
+);
 const ANIME_PLANNING_URL = "https://anime-sama.tv/planning/";
 const ANIME_SAMA_BASE = "https://anime-sama.to";
 const ANIME_SAMA_SEARCH_ENDPOINT = `${ANIME_SAMA_BASE}/template-php/defaut/fetch.php`;
@@ -276,6 +292,8 @@ const nakiosCatalogCache = {
   entries: [],
   inFlight: null,
 };
+const nakiosAvailabilityCache = new Map();
+const nakiosAvailabilityInFlight = new Map();
 const supplementalCoverCache = new Map();
 const supplementalCoverInFlight = new Map();
 const analyticsClients = new Map();
@@ -1161,6 +1179,235 @@ function toIsoDate(value) {
   const month = String(date.getUTCMonth() + 1).padStart(2, "0");
   const day = String(date.getUTCDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function normalizeNakiosAvailabilityStatus(value) {
+  const raw = normalizeTitleKey(String(value || "").trim());
+  if (!raw) {
+    return "unknown";
+  }
+  if (
+    raw === "available" ||
+    raw === "disponible" ||
+    raw === "ready" ||
+    raw === "ok" ||
+    raw === "online" ||
+    raw === "publie"
+  ) {
+    return "available";
+  }
+  if (
+    raw === "pending" ||
+    raw === "waiting" ||
+    raw === "en attente" ||
+    raw === "attente" ||
+    raw === "coming" ||
+    raw === "upcoming"
+  ) {
+    return "pending";
+  }
+  return "unknown";
+}
+
+function getNakiosAvailabilityPriority(value) {
+  const normalized = normalizeNakiosAvailabilityStatus(value);
+  if (normalized === "available") {
+    return 3;
+  }
+  if (normalized === "unknown") {
+    return 2;
+  }
+  return 1;
+}
+
+function isNakiosLikelyPendingByDate(value) {
+  const iso = toIsoDate(value);
+  if (!iso) {
+    return false;
+  }
+  const ts = Date.parse(`${iso}T00:00:00Z`);
+  if (!Number.isFinite(ts)) {
+    return false;
+  }
+  return ts >= Date.now() - NAKIOS_PENDING_SOON_GRACE_MS;
+}
+
+function buildNakiosAvailabilityCacheKey(mediaType, tmdbId, season = 0, episode = 0) {
+  const safeType = String(mediaType || "").toLowerCase() === "tv" ? "tv" : "movie";
+  const safeTmdbId = toInt(tmdbId, 0, 0, 999999999);
+  if (safeTmdbId <= 0) {
+    return "";
+  }
+  const safeSeason = safeType === "tv" ? toInt(season, 1, 1, 999) : 0;
+  const safeEpisode = safeType === "tv" ? toInt(episode, 1, 1, 99999) : 0;
+  return `${safeType}:${safeTmdbId}:${safeSeason}:${safeEpisode}`;
+}
+
+function toNakiosAvailabilityProbeInput(entry) {
+  if (!entry || typeof entry !== "object") {
+    return null;
+  }
+  const provider = String(entry?.external_provider || entry?.provider || "").trim().toLowerCase();
+  if (provider !== "nakios") {
+    return null;
+  }
+  const mediaType = String(entry?.type || "").toLowerCase() === "tv" ? "tv" : "movie";
+  const tmdbId = toInt(entry?.external_tmdb_id ?? entry?.tmdb_id, 0, 0, 999999999);
+  if (tmdbId <= 0) {
+    return null;
+  }
+  const season = mediaType === "tv" ? toInt(entry?.external_season || 1, 1, 1, 999) : 0;
+  const episode = mediaType === "tv" ? toInt(entry?.external_episode || 1, 1, 1, 99999) : 0;
+  const cacheKey = buildNakiosAvailabilityCacheKey(mediaType, tmdbId, season, episode);
+  if (!cacheKey) {
+    return null;
+  }
+  return {
+    cacheKey,
+    mediaType,
+    tmdbId,
+    season,
+    episode,
+    releaseDate:
+      String(entry?.supplemental_date || entry?.release_date || entry?.releaseDate || "").trim() ||
+      String(entry?.dateIso || "").trim(),
+  };
+}
+
+async function resolveNakiosAvailabilityStatus(input) {
+  if (!input || typeof input !== "object") {
+    return "unknown";
+  }
+  const cacheKey = String(input.cacheKey || "").trim();
+  if (!cacheKey) {
+    return "unknown";
+  }
+
+  const cached = nakiosAvailabilityCache.get(cacheKey);
+  if (cached && Date.now() < Number(cached.expiresAt || 0)) {
+    return normalizeNakiosAvailabilityStatus(cached.status);
+  }
+  if (nakiosAvailabilityInFlight.has(cacheKey)) {
+    return nakiosAvailabilityInFlight.get(cacheKey);
+  }
+
+  const task = (async () => {
+    let status = "unknown";
+    try {
+      const sources = await resolveNakiosSourcesByTmdbId(
+        input.mediaType,
+        input.tmdbId,
+        input.season,
+        input.episode
+      );
+      status = Array.isArray(sources) && sources.length > 0 ? "available" : "pending";
+    } catch {
+      status = isNakiosLikelyPendingByDate(input.releaseDate) ? "pending" : "unknown";
+    }
+    const ttlMs =
+      status === "available"
+        ? NAKIOS_AVAILABILITY_CACHE_MS
+        : Math.max(5 * 60 * 1000, Math.min(NAKIOS_AVAILABILITY_CACHE_MS, 15 * 60 * 1000));
+    nakiosAvailabilityCache.set(cacheKey, {
+      status,
+      expiresAt: Date.now() + ttlMs,
+    });
+    prunePidoovTimedCache(nakiosAvailabilityCache, 12000);
+    return status;
+  })();
+
+  nakiosAvailabilityInFlight.set(cacheKey, task);
+  try {
+    return await task;
+  } finally {
+    nakiosAvailabilityInFlight.delete(cacheKey);
+  }
+}
+
+async function annotateNakiosAvailability(entries, options = {}) {
+  const rows = Array.isArray(entries) ? entries : [];
+  if (rows.length === 0) {
+    return rows;
+  }
+
+  const maxProbes = Math.max(
+    0,
+    toInt(
+      options?.maxProbes,
+      NAKIOS_AVAILABILITY_MAX_PROBES_PER_RESPONSE,
+      0,
+      Math.max(0, rows.length)
+    )
+  );
+  const candidates = [];
+
+  rows.forEach((entry) => {
+    if (!entry || typeof entry !== "object") {
+      return;
+    }
+    const provider = String(entry?.external_provider || entry?.provider || "").trim().toLowerCase();
+    if (provider !== "nakios") {
+      return;
+    }
+    const existing = normalizeNakiosAvailabilityStatus(
+      entry?.availability_status || entry?.external_status || entry?.status
+    );
+    if (existing === "available" || existing === "pending") {
+      entry.availability_status = existing;
+      entry.external_status = existing;
+      entry.is_pending_upload = existing === "pending";
+      return;
+    }
+    const probe = toNakiosAvailabilityProbeInput(entry);
+    if (!probe) {
+      const pendingByDate = isNakiosLikelyPendingByDate(entry?.supplemental_date || entry?.release_date || "");
+      if (pendingByDate) {
+        entry.availability_status = "pending";
+        entry.external_status = "pending";
+        entry.is_pending_upload = true;
+      }
+      return;
+    }
+    candidates.push({
+      entry,
+      probe,
+    });
+  });
+
+  const probes = candidates.slice(0, maxProbes);
+  if (probes.length > 0) {
+    await mapWithConcurrency(
+      probes,
+      Math.max(1, Math.min(NAKIOS_AVAILABILITY_PROBE_CONCURRENCY, probes.length)),
+      async (row) => {
+        const status = normalizeNakiosAvailabilityStatus(await resolveNakiosAvailabilityStatus(row.probe));
+        row.entry.availability_status = status;
+        row.entry.external_status = status;
+        row.entry.is_pending_upload = status === "pending";
+      }
+    );
+  }
+
+  rows.forEach((entry) => {
+    if (!entry || typeof entry !== "object") {
+      return;
+    }
+    const provider = String(entry?.external_provider || entry?.provider || "").trim().toLowerCase();
+    if (provider !== "nakios") {
+      return;
+    }
+    let status = normalizeNakiosAvailabilityStatus(entry?.availability_status || entry?.external_status || entry?.status);
+    if (status === "unknown" && isNakiosLikelyPendingByDate(entry?.supplemental_date || entry?.release_date || "")) {
+      status = "pending";
+    }
+    if (status !== "unknown") {
+      entry.availability_status = status;
+      entry.external_status = status;
+      entry.is_pending_upload = status === "pending";
+    }
+  });
+
+  return rows;
 }
 
 function buildSupplementalMediaId(prefix, rawKey) {
@@ -4113,6 +4360,21 @@ function buildNakiosCatalogRow(entry, mediaType, fallbackIdSet) {
   const poster = toNakiosTmdbPosterUrl(entry?.poster_path || "");
   const backdrop = toNakiosTmdbBackdropUrl(entry?.backdrop_path || "", entry?.poster_path || "");
   const rawKey = `${mediaType}:${tmdbId}`;
+  const rawStatus =
+    entry?.availability_status ||
+    entry?.external_status ||
+    entry?.status ||
+    entry?.state ||
+    entry?.suggestion ||
+    entry?.upload_state ||
+    "";
+  const normalizedStatus = normalizeNakiosAvailabilityStatus(rawStatus);
+  const availabilityStatus =
+    normalizedStatus !== "unknown"
+      ? normalizedStatus
+      : isNakiosLikelyPendingByDate(releaseDate)
+        ? "pending"
+        : "unknown";
 
   let id = buildSupplementalMediaId("nakios", rawKey);
   if (id <= 0) {
@@ -4146,6 +4408,9 @@ function buildNakiosCatalogRow(entry, mediaType, fallbackIdSet) {
     external_language: "VF",
     external_detail_url: `${NAKIOS_BASE}/catalogue?q=${encodeURIComponent(title)}`,
     external_label: "NAKIOS",
+    external_status: availabilityStatus,
+    availability_status: availabilityStatus,
+    is_pending_upload: availabilityStatus === "pending",
     supplemental_rank: scoreNakiosCatalogEntry(entry, mediaType),
     supplemental_date: releaseDate || "",
     title_key: titleKey,
@@ -4164,6 +4429,14 @@ function pickBestNakiosCatalogRow(current, next) {
     return next;
   }
   if (!next) {
+    return current;
+  }
+  const currentAvailability = getNakiosAvailabilityPriority(current?.availability_status || current?.external_status);
+  const nextAvailability = getNakiosAvailabilityPriority(next?.availability_status || next?.external_status);
+  if (nextAvailability > currentAvailability) {
+    return next;
+  }
+  if (nextAvailability < currentAvailability) {
     return current;
   }
   const currentScore = Number(current?.supplemental_rank || 0);
@@ -4499,6 +4772,12 @@ function buildSupplementalCalendarItems(entries, month, year, limit = SUPPLEMENT
 
     const provider = String(entry?.external_provider || "").trim().toLowerCase();
     const type = String(entry?.type || "").toLowerCase() === "tv" ? "serie" : "film";
+    let availabilityStatus = normalizeNakiosAvailabilityStatus(
+      entry?.availability_status || entry?.external_status || entry?.status
+    );
+    if (availabilityStatus === "unknown" && provider === "nakios" && isNakiosLikelyPendingByDate(dateIso)) {
+      availabilityStatus = "pending";
+    }
     mapped.push({
       source: provider || "provider",
       key: `supp-${provider}-${entry.id}-${dateIso}`,
@@ -4517,6 +4796,9 @@ function buildSupplementalCalendarItems(entries, month, year, limit = SUPPLEMENT
       languageHint: String(entry?.external_language || entry?.language || "").trim(),
       hasDetails: false,
       provider: provider || "provider",
+      availabilityStatus,
+      externalStatus: availabilityStatus,
+      isPendingUpload: availabilityStatus === "pending",
     });
   });
 
@@ -4758,6 +5040,20 @@ function buildMergedCalendar(purstreamItems, animeItems, supplementalItems = [])
     const current = dedupe.get(key);
     if (!current) {
       dedupe.set(key, entry);
+      return;
+    }
+
+    const currentAvailability = getNakiosAvailabilityPriority(
+      current?.availabilityStatus || current?.externalStatus || current?.availability_status || current?.external_status
+    );
+    const nextAvailability = getNakiosAvailabilityPriority(
+      entry?.availabilityStatus || entry?.externalStatus || entry?.availability_status || entry?.external_status
+    );
+    if (nextAvailability > currentAvailability) {
+      dedupe.set(key, entry);
+      return;
+    }
+    if (nextAvailability < currentAvailability) {
       return;
     }
 
@@ -6217,9 +6513,18 @@ async function handleCalendarOverview(req, res, requestUrl) {
         });
         if (monthlyRows.length > 0) {
           await hydrateSupplementalRowCovers(monthlyRows, SUPPLEMENTAL_COVER_MAX_PER_RESPONSE);
+          await annotateNakiosAvailability(monthlyRows, {
+            maxProbes: Math.max(
+              24,
+              Math.min(
+                NAKIOS_AVAILABILITY_MAX_PROBES_PER_RESPONSE * 2,
+                monthlyRows.length
+              )
+            ),
+          });
         }
         supplemental = {
-          items: buildSupplementalCalendarItems(supplementalRows, month, year),
+          items: buildSupplementalCalendarItems(monthlyRows, month, year),
         };
       } catch {
         supplemental = {
@@ -6316,6 +6621,12 @@ async function handleCatalogSupplemental(req, res, requestUrl) {
         pageData.data,
         Math.max(12, Math.min(SUPPLEMENTAL_COVER_MAX_PER_RESPONSE, pageData.data.length))
       );
+      await annotateNakiosAvailability(pageData.data, {
+        maxProbes: Math.max(
+          18,
+          Math.min(NAKIOS_AVAILABILITY_MAX_PROBES_PER_RESPONSE, pageData.data.length)
+        ),
+      });
     }
     sendJson(res, 200, {
       apiVersion: "zenix-supplemental-catalog-v1",

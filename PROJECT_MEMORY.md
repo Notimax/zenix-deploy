@@ -1,6 +1,6 @@
 # Zenix Project Memory
 
-Last update: 2026-03-08
+Last update: 2026-03-09
 
 ## Core product constraints
 - Domain: `https://zenix.best`
@@ -71,6 +71,11 @@ Last update: 2026-03-08
     - `SUPPLEMENTAL_CATALOG_CACHE_MS`
     - `SUPPLEMENTAL_CATALOG_PAGE_SIZE`
     - `SUPPLEMENTAL_CALENDAR_LIMIT`
+  - Availability automation:
+    - backend annotates supplemental rows with availability status (`available` / `pending`) by probing Nakios sources with cache.
+    - calendar cards show `En attente` badge for pending titles and suppress direct detail opening while pending.
+    - frontend suppresses `Nouveau` badge for pending titles.
+    - semantic dedupe now prefers available entries over pending entries.
 
 ## Mobile robustness
 - Startup splash must never block app forever.

@@ -1,5 +1,5 @@
 ZENIX STREAM - OPERATIONS MEMORY
-Last updated: 2026-03-08
+Last updated: 2026-03-09
 
 LIVE DOMAIN
 - https://zenix.best
@@ -225,3 +225,13 @@ IPHONE STRESS RESULT (LIVE, 2026-03-09)
 - Notes:
   - one non-playable candidate was auto-skipped and replaced (`SKIPPED=1`).
   - iOS segment fallback chain is now minimized with faster handoff to alternate source when available.
+
+LATEST CALENDAR/STATUS FIX (2026-03-09)
+- Nakios availability is now auto-evaluated for supplemental entries:
+  - backend probes Nakios source availability (`available`/`pending`) with cache and concurrency limits.
+  - statuses are injected into `/api/calendar/overview` and `/api/catalog/supplemental`.
+- Calendar cards now show `En attente` badge (top-left) when title is not uploaded yet.
+  - pending entries are no longer opened as playable details from calendar.
+  - date pill is moved to top-right to avoid overlap.
+- `Nouveau` is now suppressed when a title is `En attente`.
+- Merge/dedupe now prefers available entries over pending ones when semantic duplicates exist.
