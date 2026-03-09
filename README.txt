@@ -342,3 +342,9 @@ LATEST UI ADJUSTMENT (2026-03-09, c139)
 - Kept the current modern look for:
   - player start/watch menu
   - movie/series detail modal
+
+LATEST VISUAL ROLLBACK TUNING (2026-03-09, c140)
+- Restored legacy background/look for home + calendar + all category sections.
+- Disabled category skeleton opacity gating to force instant cover visibility.
+- Disabled category grid content-visibility containment to prioritize immediate rendering/fluidity.
+- Player and detail modal visual style remains the modern one.

@@ -44,6 +44,10 @@ Last update: 2026-03-09
   - user-directed rollback (c139):
     - navbar + category section visuals reverted to legacy look.
     - keep modern look in player/start menu and detail modal.
+  - c140 tuning:
+    - legacy background restored for browse/category surfaces.
+    - category cover rendering forced to immediate visibility (no skeleton opacity gating).
+    - category grids use immediate rendering mode to reduce delayed appearance artifacts.
 
 ## Streaming/source policy
 - External embed fallback sources (e.g. generic `vidsrc`) are removed.

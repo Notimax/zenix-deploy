@@ -4986,6 +4986,37 @@ body.reduce-motion .reveal-on-scroll {
 }
 
 /* ===== Legacy Navbar + Category Look Restore (c139) ===== */
+body {
+  color: var(--text);
+  font-family: "Space Grotesk", "Segoe UI", sans-serif;
+  background: var(--bg);
+  overflow-x: hidden;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+.app-canvas {
+  position: fixed;
+  inset: -20vh -10vw;
+  z-index: -2;
+  background:
+    radial-gradient(circle at 0% 0%, rgba(241, 20, 36, 0.3), transparent 38%),
+    radial-gradient(circle at 100% 18%, rgba(255, 90, 58, 0.2), transparent 46%),
+    radial-gradient(circle at 50% 100%, rgba(255, 200, 97, 0.12), transparent 50%),
+    linear-gradient(162deg, #08080b 0%, #0d0f18 54%, #111625 100%);
+}
+
+.app-grain {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0.11;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.1) 1px, transparent 1px);
+  background-size: 3px 3px;
+  mix-blend-mode: normal;
+}
+
 .topbar {
   position: sticky;
   top: 0;
@@ -5164,6 +5195,16 @@ body.reduce-motion .reveal-on-scroll {
   contain-intrinsic-size: 1px 900px;
 }
 
+.top-grid,
+.continue-grid,
+.catalog-grid,
+.calendar-grid,
+.trending-track {
+  contain: none;
+  content-visibility: visible;
+  contain-intrinsic-size: auto;
+}
+
 .media-card {
   background: transparent;
   border: 0;
@@ -5256,6 +5297,23 @@ body.reduce-motion .reveal-on-scroll {
 .calendar-media-thumb::before,
 .trending-card::before {
   display: none !important;
+}
+
+.top-thumb.is-loading::before,
+.media-thumb.is-loading::before,
+.calendar-media-thumb.is-loading::before,
+.trending-card.is-loading::before,
+.detail-poster.is-loading::before {
+  display: none !important;
+}
+
+.top-thumb.is-loading img,
+.media-thumb.is-loading img,
+.calendar-media-thumb.is-loading img,
+.trending-card.is-loading img,
+img[data-image-ready="0"],
+img[data-image-ready="1"] {
+  opacity: 1 !important;
 }
 
 .meta-pill {
