@@ -87,6 +87,11 @@ Last update: 2026-03-09
 - Startup splash must never block app forever.
 - Keep a hard timeout fallback to force-hide splash and unlock body scroll.
 
+## Sponsor ad policy
+- Sponsor placements stay in UI (`Sponsorise` sections), but third-party ad scripts must not auto-load on first paint.
+- Native sponsor script is loaded only on explicit user action inside sponsor block (`Afficher le sponsorise`).
+- Objective: avoid forced popups/redirections during normal browsing or playback.
+
 ## Deployment workflow
 - Main code repo remote: `origin` (`Notimax/zenix`)
 - Public deploy mirror remote: `deploypublic` (`Notimax/zenix-deploy`)

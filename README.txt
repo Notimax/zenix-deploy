@@ -246,3 +246,9 @@ LATEST IOS AUTO-SWITCH FIX (2026-03-09)
   - file: `__tmp_brut_f1_mercredi_matrix_result_local_after_fallbackstall_patch4_2026-03-09.json`
   - summary: passed 8 / failed 0
   - iPhone 13 runs show source progression up to source 4 on Mercredi when fallback blocks.
+
+LATEST SPONSOR UX SAFETY FIX (2026-03-09)
+- Native sponsor script is no longer injected in initial HTML.
+- Sponsor block stays visible, but ad script loads only after explicit user click on:
+  - `Afficher le sponsorise`
+- Goal: no forced ad/open redirect on page load or passive browsing.

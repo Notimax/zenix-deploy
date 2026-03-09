@@ -121,6 +121,8 @@ const SEARCH_SIGNAL_MAX_AGE_MS = 180 * 24 * 60 * 60 * 1000;
 const LOCK_VISIBLE_ROOT_URL = true;
 const EXTERNAL_GUARD_ALLOW_HOSTS = new Set(["zenix.best", "www.zenix.best", "discord.com", "www.discord.com", "discord.gg", "www.discord.gg"]);
 const EXTERNAL_GUARD_TRUST_WINDOW_MS = 1300;
+const NATIVE_AD_SCRIPT_SRC = "https://maddenwiped.com/6724b59b8680ca68d3195556ffa48409/invoke.js";
+const NATIVE_AD_CONTAINER_ID = "container-6724b59b8680ca68d3195556ffa48409";
 
 const FALLBACK_ITEMS = [
   {
@@ -254,6 +256,9 @@ const state = {
   networkOnline: navigator.onLine !== false,
   cardViewportObserver: null,
   suggestionSubmitting: false,
+  nativeAdActivated: false,
+  nativeAdLoading: false,
+  nativeAdLoadPromise: null,
 };
 
 const refs = {
@@ -337,6 +342,8 @@ const refs = {
   nativeAdDetailSection: document.getElementById("nativeAdDetailSection"),
   nativeAdDetailMount: document.getElementById("nativeAdDetailMount"),
   nativeAdUnit: document.getElementById("nativeAdUnit"),
+  nativeAdGate: document.getElementById("nativeAdGate"),
+  nativeAdLoadBtn: document.getElementById("nativeAdLoadBtn"),
 
   catalogSection: document.getElementById("catalogSection"),
   catalogTitle: document.getElementById("catalogTitle"),
@@ -732,6 +739,7 @@ async function init() {
   });
   bindEvents();
   initExternalNavigationGuard();
+  syncNativeAdGateUi();
   refreshSuggestionClientTimestamp();
   hydrateLanguagePrefsMap();
   initCalendarControls();
@@ -997,6 +1005,12 @@ function bindEvents() {
                 ? "listSection"
                 : "catalogSection";
       document.getElementById(targetId)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  });
+
+  bindFastPress(refs.nativeAdLoadBtn, () => {
+    activateNativeAdFromUserIntent().catch(() => {
+      // handled in function
     });
   });
 
@@ -2267,6 +2281,75 @@ function setHidden(node, hidden) {
   }
 }
 
+function syncNativeAdGateUi() {
+  if (!refs.nativeAdGate || !refs.nativeAdLoadBtn) {
+    return;
+  }
+  if (state.nativeAdActivated) {
+    refs.nativeAdGate.hidden = true;
+    refs.nativeAdLoadBtn.disabled = false;
+    refs.nativeAdLoadBtn.textContent = "Afficher le sponsorise";
+    return;
+  }
+  refs.nativeAdGate.hidden = false;
+  refs.nativeAdLoadBtn.disabled = Boolean(state.nativeAdLoading);
+  refs.nativeAdLoadBtn.textContent = state.nativeAdLoading ? "Chargement..." : "Afficher le sponsorise";
+}
+
+function ensureNativeAdContainer() {
+  if (!refs.nativeAdUnit) {
+    return null;
+  }
+  let container = document.getElementById(NATIVE_AD_CONTAINER_ID);
+  if (!container) {
+    container = document.createElement("div");
+    container.id = NATIVE_AD_CONTAINER_ID;
+    refs.nativeAdUnit.appendChild(container);
+  }
+  return container;
+}
+
+async function activateNativeAdFromUserIntent() {
+  if (state.nativeAdActivated) {
+    showToast("Sponsor deja actif.");
+    return;
+  }
+  if (state.nativeAdLoadPromise) {
+    await state.nativeAdLoadPromise.catch(() => {});
+    return;
+  }
+  state.nativeAdLoading = true;
+  syncNativeAdGateUi();
+  state.nativeAdLoadPromise = new Promise((resolve, reject) => {
+    ensureNativeAdContainer();
+    const script = document.createElement("script");
+    script.async = true;
+    script.setAttribute("data-cfasync", "false");
+    script.src = NATIVE_AD_SCRIPT_SRC;
+    script.onload = () => {
+      state.nativeAdActivated = true;
+      state.nativeAdLoading = false;
+      state.nativeAdLoadPromise = null;
+      syncNativeAdGateUi();
+      resolve(true);
+    };
+    script.onerror = () => {
+      state.nativeAdLoading = false;
+      state.nativeAdLoadPromise = null;
+      syncNativeAdGateUi();
+      reject(new Error("Native ad load failed"));
+    };
+    document.body.appendChild(script);
+  });
+
+  try {
+    await state.nativeAdLoadPromise;
+    showToast("Sponsor actif.");
+  } catch {
+    showToast("Impossible de charger le sponsor pour le moment.", true);
+  }
+}
+
 function mountNativeAd(targetMount) {
   if (!targetMount || !refs.nativeAdUnit) {
     return;
@@ -2296,17 +2379,21 @@ function applyNativeAdPlacement() {
 
   if (showNativeDetail) {
     mountNativeAd(refs.nativeAdDetailMount);
+    syncNativeAdGateUi();
     return;
   }
   if (showNativeHome) {
     mountNativeAd(refs.nativeAdHomeMount);
+    syncNativeAdGateUi();
     return;
   }
   if (showNativeCatalog) {
     mountNativeAd(refs.nativeAdCatalogMount);
+    syncNativeAdGateUi();
     return;
   }
   mountNativeAd(refs.nativeAdHomeMount);
+  syncNativeAdGateUi();
 }
 
 function isCompactViewport() {
