@@ -467,3 +467,10 @@ LATEST CALENDAR MOBILE ADAPTATION (2026-03-09, c152)
   - refresh button is full-width on mobile for easier tap.
   - calendar cards switch to a single-column list on phone for better readability.
   - badge/date text sizes tightened on very small screens (`<=520px`).
+
+LATEST MODAL/PLAYER SCROLLBAR HIDE (2026-03-09, c153)
+- Scrollbar is now visually hidden (without disabling scroll) inside:
+  - detail modal container/panel
+  - player overlay/panel
+  - source chips scroller
+- Cross-browser rules applied (`scrollbar-width`, `-ms-overflow-style`, `::-webkit-scrollbar`).

@@ -5835,3 +5835,23 @@ img[data-image-ready="1"] {
     padding: 5px 8px;
   }
 }
+
+/* ===== Modal/player scrollbar visual hide (c153) ===== */
+.detail-modal,
+.player-overlay,
+.detail-panel,
+.player-panel,
+.player-source-chips {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.detail-modal::-webkit-scrollbar,
+.player-overlay::-webkit-scrollbar,
+.detail-panel::-webkit-scrollbar,
+.player-panel::-webkit-scrollbar,
+.player-source-chips::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}

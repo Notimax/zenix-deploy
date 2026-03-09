@@ -87,6 +87,9 @@ Last update: 2026-03-09
     - toolbar now stacks cleanly with full-width search and refresh action.
     - type filters are swipeable horizontally instead of wrapping/compressing.
     - calendar cards use single-column layout on phone for better legibility.
+  - c153 follow-up:
+    - detail modal and player surfaces now visually hide scrollbars while preserving scroll behavior.
+    - applied to overlay/panel containers and player source chips for cleaner modal/player UI.
 
 ## Streaming/source policy
 - External embed fallback sources (e.g. generic `vidsrc`) are removed.
