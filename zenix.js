@@ -69,6 +69,11 @@ const VIDEO_READY_TIMEOUT_MS = 12000;
 const HLS_READY_TIMEOUT_MS = 14000;
 const HLS_MANIFEST_TIMEOUT_MS = 15000;
 const SEGMENT_FALLBACK_MAX_SEGMENTS = 1200;
+const IOS_NATIVE_HLS_BOOT_TIMEOUT_MS = 3600;
+const IOS_DECODED_HLS_BOOT_TIMEOUT_MS = 4200;
+const IOS_SEGMENT_BOOT_TIMEOUT_MS = 3400;
+const IOS_SEGMENT_NEXT_TIMEOUT_MS = 4200;
+const IOS_SEGMENT_CHAIN_MAX = 2;
 const EMBED_READY_TIMEOUT_MS = 12000;
 const HEARTBEAT_INTERVAL_MS = 30 * 1000;
 const HEARTBEAT_REQUEST_TIMEOUT_MS = 9000;
@@ -9172,7 +9177,8 @@ async function loadSegmentFallbackIndex(video, session, index) {
   }
   video.src = nextUrl;
   video.load();
-  await waitVideoReady(video, Math.min(VIDEO_READY_TIMEOUT_MS, 5200));
+  const bootstrapTimeout = index <= 0 ? IOS_SEGMENT_BOOT_TIMEOUT_MS : IOS_SEGMENT_NEXT_TIMEOUT_MS;
+  await waitVideoReady(video, Math.min(VIDEO_READY_TIMEOUT_MS, bootstrapTimeout));
   await video.play();
 }
 
@@ -9211,6 +9217,20 @@ async function startTsSegmentFallbackPlayback(video, streamUrl, token) {
       onPlayerEnded();
       return;
     }
+
+    const hasAlternativeSource =
+      !state.manualSourceLock &&
+      Number(state.sourceIndex || -1) >= 0 &&
+      getFallbackSourceIndex(Number(state.sourceIndex || -1)) >= 0;
+    if (nextIndex >= IOS_SEGMENT_CHAIN_MAX && hasAlternativeSource) {
+      clearSegmentFallbackSession();
+      setPlayerStatus("Bascule source apres fallback iOS...");
+      trySwitchToNextSource().catch(() => {
+        setPlayerStatus("Erreur video detectee. Choisis une autre source.", true);
+      });
+      return;
+    }
+
     session.switching = true;
     setPlayerStatus(`Lecture segment ${nextIndex + 1}/${session.segments.length}...`);
     loadSegmentFallbackIndex(video, session, nextIndex)
@@ -9265,16 +9285,41 @@ async function startTsSegmentFallbackPlayback(video, streamUrl, token) {
 
 async function startHlsPlayback(video, streamUrl, token) {
   if (shouldUseNativeHls(video)) {
+    const isIOSMobile = isLikelyMobileDevice();
     video.src = streamUrl;
     video.load();
     let nativeError = null;
     try {
-      await waitVideoReady(video, Math.min(HLS_READY_TIMEOUT_MS, 5200));
+      const nativeTimeout = isIOSMobile
+        ? Math.min(HLS_READY_TIMEOUT_MS, IOS_NATIVE_HLS_BOOT_TIMEOUT_MS)
+        : Math.min(HLS_READY_TIMEOUT_MS, 5200);
+      await waitVideoReady(video, nativeTimeout);
       return;
     } catch (error) {
       nativeError = error;
+
+      if (isIOSMobile) {
+        try {
+          const segmentFallbackStarted = await startTsSegmentFallbackPlayback(video, streamUrl, token);
+          if (segmentFallbackStarted) {
+            return;
+          }
+        } catch (segmentError) {
+          try {
+            await tryDecodedHlsBlobPlayback(
+              video,
+              streamUrl,
+              Math.min(HLS_READY_TIMEOUT_MS + 2600, IOS_DECODED_HLS_BOOT_TIMEOUT_MS)
+            );
+            return;
+          } catch (decodedError) {
+            throw decodedError || segmentError || nativeError || new Error("Native HLS bootstrap failed");
+          }
+        }
+      }
+
       // Retry once with a decoded blob playlist for encoded/quirky upstream manifests.
-      // This is especially useful on iOS Safari when native HLS rejects rewritten proxy URLs.
+      // This is especially useful on Safari when native HLS rejects rewritten proxy URLs.
       try {
         await tryDecodedHlsBlobPlayback(video, streamUrl, Math.min(HLS_READY_TIMEOUT_MS + 2600, 7600));
         return;

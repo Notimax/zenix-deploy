@@ -193,3 +193,18 @@ LAST EPISODE PROBE (LIVE, 2026-03-09)
   - title: `Solo Leveling`
   - samples: 20
   - max video time: 10.09s
+
+LATEST IPhone TUNING (2026-03-09)
+- iOS HLS bootstrap path optimized for faster recovery:
+  - native iOS HLS bootstrap timeout reduced.
+  - iOS now tries segment fallback before decoded-blob fallback when native bootstrap fails.
+  - iOS segment fallback boot/next timeouts tightened to avoid long startup stalls.
+- Segment fallback chain now avoids excessive micro-resets:
+  - if alternate sources exist, chain is capped and player auto-switches source instead of chaining too many TS segments.
+
+LOCAL BRUTE RESULT (AFTER iOS TUNING, 2026-03-09)
+- Source run1: `__tmp_brut_f1_mercredi_matrix_result_local_iosfix_run1_2026-03-09.json`
+- Source run2: `__tmp_brut_f1_mercredi_matrix_result_local_iosfix_run2_2026-03-09.json`
+- Summary:
+  - run1: passed 8 / failed 0
+  - run2: passed 8 / failed 0

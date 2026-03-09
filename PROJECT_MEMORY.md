@@ -35,6 +35,11 @@ Last update: 2026-03-08
 - Added iOS-specific resilience:
   - if native HLS manifest playback fails, fallback to direct TS segment chain playback.
   - this is intended to avoid instant playback block in iPhone/WebKit edge cases.
+  - iOS bootstrap sequence is optimized:
+    - shorter native HLS bootstrap timeout.
+    - segment fallback is attempted before decoded HLS blob fallback on iOS.
+    - iOS segment fallback timeouts are tighter for faster source recovery.
+  - segment fallback chain is capped when alternate sources exist, to reduce repeated timeline resets.
   - source ordering for movies is now stricter at runtime: `VF`, then `MULTI`, then `VOSTFR`.
   - when audio tracks are exposed, player attempts to force French track.
   - hard filter now removes known non-playable embed/gate URLs before playback (ad-gate hosts, store links).
