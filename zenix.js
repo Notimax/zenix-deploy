@@ -1008,7 +1008,7 @@ async function init() {
   pruneProgressEntries();
   applyUiPrefs({ syncControls: true });
   if (refs.footerVersion) {
-    refs.footerVersion.textContent = "c161";
+    refs.footerVersion.textContent = "c162";
   }
   updateNetworkBadge();
   cleanupLegacyServiceWorker().catch(() => {
@@ -3238,6 +3238,33 @@ function isCalendarAnimeSamaSource(entry) {
   return /anime-sama\.(tv|to)/i.test(urlHints);
 }
 
+function isCalendarLikelyAnime(entry) {
+  if (!entry || typeof entry !== "object") {
+    return false;
+  }
+  const explicit = normalizeCalendarMediaType(
+    entry.type || entry.kind || entry.mediaType || entry.media_type || entry.category || ""
+  );
+  if (explicit === "anime") {
+    return true;
+  }
+  if (isTruthyDataFlag(entry.isAnime) || hasCalendarAnimationCategory(entry)) {
+    return true;
+  }
+  const textHints = [
+    entry?.title,
+    entry?.supplemental,
+    entry?.source,
+    entry?.provider,
+    entry?.url,
+    entry?.externalDetailUrl,
+    entry?.external_detail_url,
+  ]
+    .map((value) => String(value || "").toLowerCase())
+    .join(" ");
+  return /anime|japanim|animesama|\/anime\//i.test(textHints);
+}
+
 function hasCalendarSeriesSignals(entry) {
   if (!entry || typeof entry !== "object") {
     return false;
@@ -3284,19 +3311,16 @@ function getCalendarEntryMediaType(entry) {
     return "film";
   }
   const animeSamaSource = isCalendarAnimeSamaSource(entry);
+  if (isCalendarLikelyAnime(entry)) {
+    return animeSamaSource ? "anime" : "serie";
+  }
   const explicit = normalizeCalendarMediaType(
     entry.type || entry.kind || entry.mediaType || entry.media_type || entry.category || ""
   );
-  if (explicit === "anime" || isTruthyDataFlag(entry.isAnime) || hasCalendarAnimationCategory(entry)) {
-    return animeSamaSource ? "anime" : "serie";
-  }
   if (explicit === "film" || explicit === "serie") {
     return explicit;
   }
   if (hasCalendarSeriesSignals(entry)) {
-    if (isTruthyDataFlag(entry.isAnime) || hasCalendarAnimationCategory(entry)) {
-      return "anime";
-    }
     return "serie";
   }
   const mediaId = Number(entry.mediaId || 0);
@@ -3320,9 +3344,6 @@ function getCalendarEntryMediaType(entry) {
     if (mapped?.type === "movie") {
       return "film";
     }
-  }
-  if (isTruthyDataFlag(entry.isAnime)) {
-    return animeSamaSource ? "anime" : "serie";
   }
   return "film";
 }
@@ -3843,7 +3864,8 @@ function renderCalendarSection() {
     ...(Array.isArray(state.calendarData?.purstream?.items) ? state.calendarData.purstream.items : []),
     ...(Array.isArray(state.calendarData?.animeSama?.items) ? state.calendarData.animeSama.items : []),
   ];
-  const sourceRows = mergedPrimary.length > 0 ? mergedPrimary : mergedFallback;
+  const sourceRowsAll = mergedPrimary.length > 0 ? mergedPrimary : mergedFallback;
+  const sourceRows = sourceRowsAll.filter((entry) => !isCalendarLikelyAnime(entry) || isCalendarAnimeSamaSource(entry));
   const compact = new Map();
   sourceRows.forEach((entry) => {
     const titleKey = normalizeTitleKey(entry?.title || "");
@@ -9529,13 +9551,42 @@ function getSourceScore(format, quality, language, index, host = "") {
   return score;
 }
 
+function sanitizeSourceDisplayQuality(value) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return "Auto";
+  }
+  const tokenMatch = raw.match(/(2160p|1440p|1080p|720p|480p|360p|4k|hd|sd)/i);
+  if (tokenMatch) {
+    return String(tokenMatch[1] || "").toUpperCase();
+  }
+  if (/nakios|xalaflix|fastflux|https?:\/\/|\.|\//i.test(raw)) {
+    return "Auto";
+  }
+  if (raw.length > 14) {
+    return `${raw.slice(0, 14)}...`;
+  }
+  return raw;
+}
+
+function getSourceDisplayLanguage(source) {
+  const normalized = normalizeLanguageLabel(source?.language || source?.lang || "");
+  return normalized || "Auto";
+}
+
+function getSourceDisplayQuality(source) {
+  return sanitizeSourceDisplayQuality(source?.quality || source?.resolution || source?.label || "");
+}
+
 function formatSourceLabel(source, index, total) {
   const chunks = [`Source ${index + 1}/${total}`];
-  if (source?.quality) {
-    chunks.push(String(source.quality));
+  const qualityLabel = getSourceDisplayQuality(source);
+  const languageLabel = getSourceDisplayLanguage(source);
+  if (qualityLabel && qualityLabel !== "Auto") {
+    chunks.push(String(qualityLabel));
   }
-  if (source?.language) {
-    chunks.push(source.language);
+  if (languageLabel && languageLabel !== "Auto") {
+    chunks.push(languageLabel);
   }
   if (source?.format && source.format !== "unknown") {
     chunks.push(source.format.toUpperCase());
@@ -9626,7 +9677,6 @@ function renderPlayerSourceOptions() {
       const score = computeSourceCompatibilityScore(entry);
       const compatibilityLabel = describeCompatibilityLabel(score);
       const compatibilityBand = score >= 86 ? "high" : score >= 72 ? "medium" : score >= 60 ? "low" : "fragile";
-      const sourceLabel = entry?.premiumHint ? "Source premium" : "Source standard";
       const chip = document.createElement("button");
       chip.type = "button";
       chip.className = "player-source-chip";
@@ -9637,8 +9687,8 @@ function renderPlayerSourceOptions() {
       if (index === state.sourceIndex) {
         chip.classList.add("is-active");
       }
-      const quality = String(entry?.quality || "Auto").trim();
-      const language = String(entry?.language || "Auto").trim();
+      const quality = getSourceDisplayQuality(entry);
+      const language = getSourceDisplayLanguage(entry);
       const format = String(entry?.format || "").trim().toUpperCase() || "STREAM";
       chip.title = `Compatibilite ${score}% (${compatibilityLabel})`;
       chip.innerHTML = `
@@ -9650,9 +9700,6 @@ function renderPlayerSourceOptions() {
           <span class="player-source-chip-meta-pill">${escapeHtml(language)}</span>
           <span class="player-source-chip-meta-pill">${escapeHtml(quality)}</span>
           <span class="player-source-chip-meta-pill">${escapeHtml(format)}</span>
-        </span>
-        <span class="player-source-chip-tags">
-          <span class="player-source-chip-tag" title="${escapeHtml(sourceLabel)}">${escapeHtml(sourceLabel)}</span>
         </span>
       `;
       bindFastPress(chip, () => {

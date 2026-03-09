@@ -517,3 +517,9 @@ LATEST CALENDAR COVER ALIGNMENT (2026-03-09, c160)
 LATEST MOBILE CATALOG 2-UP (2026-03-09, c161)
 - On phone widths, `catalog-grid` is now forced to 2 covers per row (duo layout).
 - Rule is applied in a late CSS block to avoid overrides from other responsive sections.
+
+
+LATEST TYPE/ANIME-SOURCE HARDENING (2026-03-09, c162)
+- Calendar type resolver now gates anime classification through Anime-Sama source checks.
+- Calendar feed now drops anime-like rows when source is not Anime-Sama (prevents serie/anime mixing).
+- Player source chips no longer render provider-origin bubble tags; labels are sanitized to avoid host/provider leaks.

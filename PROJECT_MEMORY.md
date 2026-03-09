@@ -115,6 +115,10 @@ Last update: 2026-03-09
   - c161 follow-up:
     - mobile catalog layout is now forced to 2 columns (catalog-grid) at <=740px.
     - applied as a late CSS override to prevent earlier responsive blocks from reverting to 3 columns.
+  - c162 follow-up:
+    - calendar anime/type resolver now treats anime as valid only from Anime-Sama sources in calendar view.
+    - anime-like non-Anime-Sama rows are excluded from calendar merge rendering to avoid serie/anime cross-contamination.
+    - player source chip display now sanitizes labels and removes provider-origin bubble tags from UI.
 
 ## Streaming/source policy
 - External embed fallback sources (e.g. generic `vidsrc`) are removed.
