@@ -2613,7 +2613,30 @@ body.in-app-browser .catalog-grid {
 }
 
 .detail-actions .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   padding: 11px 15px;
+}
+
+.detail-actions .btn-icon {
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 14px;
+}
+
+.detail-actions .btn-icon svg {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
+
+.detail-actions .btn-label {
+  line-height: 1;
 }
 
 .detail-actions .btn-primary {

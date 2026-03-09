@@ -67,8 +67,8 @@
       "logo": "https://zenix.best/android-chrome-512x512.png"
     }
   </script>
-    <link rel="stylesheet" href="/zenix.css?v=20260309-c155" />
-    <script defer src="/zenix.js?v=20260309-c155"></script>
+    <link rel="stylesheet" href="/zenix.css?v=20260309-c156" />
+    <script defer src="/zenix.js?v=20260309-c156"></script>
 </head>
 <body>
   <div class="startup-splash" id="startupSplash" aria-hidden="true">
@@ -386,12 +386,42 @@
           <div class="detail-badges" id="detailBadges"></div>
 
           <div class="detail-actions">
-            <button class="btn btn-primary" id="detailPlayBtn" type="button">Demarrer</button>
-            <button class="btn btn-ghost" id="detailTrailerBtn" type="button">Bande-annonce</button>
-            <button class="btn btn-soft" id="detailFavoriteBtn" type="button">Ajouter a ma liste</button>
-            <button class="btn btn-soft" id="detailLikeBtn" type="button">Like</button>
-            <button class="btn btn-soft" id="detailDislikeBtn" type="button">Dislike</button>
-            <button class="btn btn-soft" id="detailShareBtn" type="button">Partager</button>
+            <button class="btn btn-primary" id="detailPlayBtn" type="button" aria-label="Demarrer">
+              <span class="btn-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.14a1 1 0 0 1 1.53-.85l9.54 6.86a1 1 0 0 1 0 1.7l-9.54 6.86A1 1 0 0 1 8 18.86V5.14z"/></svg>
+              </span>
+              <span class="btn-label">Demarrer</span>
+            </button>
+            <button class="btn btn-ghost" id="detailTrailerBtn" type="button" aria-label="Bande-annonce">
+              <span class="btn-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v11a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 17.5v-11zM10 9.9v4.2a.8.8 0 0 0 1.23.67l3.1-2.1a.8.8 0 0 0 0-1.34l-3.1-2.1A.8.8 0 0 0 10 9.9z"/></svg>
+              </span>
+              <span class="btn-label">Bande-annonce</span>
+            </button>
+            <button class="btn btn-soft" id="detailFavoriteBtn" type="button" aria-label="Ajouter a ma liste">
+              <span class="btn-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+              </span>
+              <span class="btn-label">Ajouter a ma liste</span>
+            </button>
+            <button class="btn btn-soft" id="detailLikeBtn" type="button" aria-label="Like">
+              <span class="btn-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M2 21h4V9H2v12zm20-11a2 2 0 0 0-2-2h-6.3l.95-3.72.03-.32a1 1 0 0 0-.29-.7L13.34 2 7.93 7.41A2 2 0 0 0 7.34 8.82V19a2 2 0 0 0 2 2h7.54a2 2 0 0 0 1.9-1.37l2.01-6.03c.07-.2.11-.41.11-.63V10z"/></svg>
+              </span>
+              <span class="btn-label">Like</span>
+            </button>
+            <button class="btn btn-soft" id="detailDislikeBtn" type="button" aria-label="Dislike">
+              <span class="btn-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M22 3h-4v12h4V3zM2 14a2 2 0 0 0 2 2h6.3l-.95 3.72-.03.32a1 1 0 0 0 .29.7L10.66 22l5.41-5.41a2 2 0 0 0 .59-1.41V5a2 2 0 0 0-2-2H7.12a2 2 0 0 0-1.9 1.37L3.21 10.4c-.07.2-.11.41-.11.63V14z"/></svg>
+              </span>
+              <span class="btn-label">Dislike</span>
+            </button>
+            <button class="btn btn-soft" id="detailShareBtn" type="button" aria-label="Partager">
+              <span class="btn-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 5l7 7-7 7"/><path d="M20 12H8"/><path d="M4 4v16"/></svg>
+              </span>
+              <span class="btn-label">Partager</span>
+            </button>
           </div>
 
           <section class="detail-native-ad" id="nativeAdDetailSection" aria-label="Sponsorise detail" hidden>

@@ -1008,7 +1008,7 @@ async function init() {
   pruneProgressEntries();
   applyUiPrefs({ syncControls: true });
   if (refs.footerVersion) {
-    refs.footerVersion.textContent = "c155";
+    refs.footerVersion.textContent = "c156";
   }
   updateNetworkBadge();
   cleanupLegacyServiceWorker().catch(() => {
@@ -11753,8 +11753,24 @@ function updateDetailRatingButtons(id) {
   refs.detailDislikeBtn.classList.toggle("is-negative", dislikeActive);
   refs.detailDislikeBtn.classList.toggle("is-active", false);
   refs.detailDislikeBtn.classList.toggle("is-positive", false);
-  refs.detailLikeBtn.textContent = "Like";
-  refs.detailDislikeBtn.textContent = "Dislike";
+  setButtonTextPreserveIcon(refs.detailLikeBtn, "Like");
+  setButtonTextPreserveIcon(refs.detailDislikeBtn, "Dislike");
+}
+
+function setButtonTextPreserveIcon(button, label) {
+  if (!(button instanceof HTMLElement)) {
+    return;
+  }
+  const safeLabel = String(label || "").trim();
+  const textNode = button.querySelector(".btn-label");
+  if (textNode instanceof HTMLElement) {
+    textNode.textContent = safeLabel;
+  } else {
+    button.textContent = safeLabel;
+  }
+  if (safeLabel) {
+    button.setAttribute("aria-label", safeLabel);
+  }
 }
 
 function normalizeThemeToken(value) {
@@ -12091,7 +12107,7 @@ function updateDetailFavoriteButton(id) {
   if (!refs.detailFavoriteBtn) {
     return;
   }
-  refs.detailFavoriteBtn.textContent = isFavorite(id) ? "Retirer de ma liste" : "Ajouter a ma liste";
+  setButtonTextPreserveIcon(refs.detailFavoriteBtn, isFavorite(id) ? "Retirer de ma liste" : "Ajouter a ma liste");
 }
 
 async function copyCurrentLink() {

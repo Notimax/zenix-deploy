@@ -493,3 +493,8 @@ LATEST ANIME PROVIDER POLICY FIX (2026-03-09, c155)
   - non-Anime-Sama entries cannot be classified as `anime` in calendar resolver.
   - direct Purstream fallback path no longer injects anime rows in calendar fallback mode.
   - backend merged calendar also drops anime entries not coming from Anime-Sama.
+
+LATEST DETAIL BUTTON ICONS (2026-03-09, c156)
+- Added icons in detail action buttons (including `Demarrer`, `Like`, `Dislike`).
+- Detail buttons now use icon + label layout.
+- JS detail button label updates now preserve icon markup (`.btn-label`) for dynamic states.

@@ -97,6 +97,9 @@ Last update: 2026-03-09
   - c155 follow-up:
     - anime provider policy tightened: Nakios is excluded from anime catalog/source paths.
     - calendar anime classification is now restricted to Anime-Sama sourced entries.
+  - c156 follow-up:
+    - detail modal action buttons now include icons with labels (start/like/dislike and related actions).
+    - dynamic detail button label updates preserve icon markup via `.btn-label` updates.
 
 ## Streaming/source policy
 - External embed fallback sources (e.g. generic `vidsrc`) are removed.
