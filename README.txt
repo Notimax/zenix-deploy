@@ -451,3 +451,11 @@ LOCAL BRUTE MATRIX AFTER c150 (2026-03-09)
   - passed: 8
   - failed: 0
   - `/api/media/*/sheet` 404 count during matrix: 0
+
+LATEST STARTUP SPLASH TUNING (2026-03-09, c151)
+- Startup animation duration reduced by ~1 second:
+  - `STARTUP_SPLASH_MIN_MS`: `2450 -> 1450`
+  - `STARTUP_SPLASH_MAX_MS`: `5200 -> 4200`
+- Added a short startup chime synchronized with the splash ending phase:
+  - generated with WebAudio (small volume, cinematic style).
+  - best effort only (can be blocked by browser autoplay policies on some devices).

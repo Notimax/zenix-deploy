@@ -18,9 +18,11 @@ const STREAM_CACHE_TTL_MS = 2 * 60 * 1000;
 const STREAM_PREFETCH_COOLDOWN_MS = 15 * 1000;
 const PROGRESS_SAVE_INTERVAL_MS = 2400;
 const HERO_ROTATE_MS = 8000;
-const STARTUP_SPLASH_MIN_MS = 2450;
-const STARTUP_SPLASH_MAX_MS = 5200;
+const STARTUP_SPLASH_MIN_MS = 1450;
+const STARTUP_SPLASH_MAX_MS = 4200;
 const STARTUP_SPLASH_END_ANIM_MS = 640;
+const STARTUP_SPLASH_SOUND_VOLUME = 0.06;
+const STARTUP_SPLASH_SOUND_COOLDOWN_MS = 1100;
 const IMAGE_WARMUP_BATCH = 28;
 const IMAGE_WARMUP_DELAY_MS = 12;
 const INITIAL_IMAGE_WARMUP_LIMIT = 260;
@@ -265,6 +267,8 @@ const state = {
   heartbeatTimer: null,
   heartbeatBound: false,
   startupSplashForceTimer: 0,
+  startupAudioContext: null,
+  lastStartupSoundAt: 0,
   activeViewSyncTimer: 0,
   modalScrollY: 0,
   modalScrollCaptured: false,
@@ -832,6 +836,74 @@ function replayStartupSplashAnimations() {
   refs.startupSplash.classList.remove("is-replaying");
 }
 
+async function playStartupSplashSound() {
+  const nowMs = Date.now();
+  if (nowMs - Number(state.lastStartupSoundAt || 0) < STARTUP_SPLASH_SOUND_COOLDOWN_MS) {
+    return;
+  }
+  state.lastStartupSoundAt = nowMs;
+
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (typeof AudioContextClass !== "function") {
+    return;
+  }
+
+  try {
+    if (!state.startupAudioContext) {
+      state.startupAudioContext = new AudioContextClass();
+    }
+    const ctx = state.startupAudioContext;
+    if (!ctx) {
+      return;
+    }
+    if (ctx.state === "suspended") {
+      await ctx.resume().catch(() => {
+        // autoplay policy can block this; no-op
+      });
+    }
+    if (ctx.state !== "running") {
+      return;
+    }
+
+    const baseTime = ctx.currentTime + 0.01;
+    const master = ctx.createGain();
+    master.gain.setValueAtTime(0.0001, baseTime);
+    master.gain.exponentialRampToValueAtTime(STARTUP_SPLASH_SOUND_VOLUME, baseTime + 0.05);
+    master.gain.exponentialRampToValueAtTime(0.0001, baseTime + 0.6);
+    master.connect(ctx.destination);
+
+    const shimmer = ctx.createOscillator();
+    shimmer.type = "triangle";
+    shimmer.frequency.setValueAtTime(650, baseTime);
+    shimmer.frequency.exponentialRampToValueAtTime(1180, baseTime + 0.22);
+    shimmer.frequency.exponentialRampToValueAtTime(900, baseTime + 0.56);
+    const shimmerGain = ctx.createGain();
+    shimmerGain.gain.setValueAtTime(0.0001, baseTime);
+    shimmerGain.gain.exponentialRampToValueAtTime(0.52, baseTime + 0.08);
+    shimmerGain.gain.exponentialRampToValueAtTime(0.0001, baseTime + 0.56);
+    shimmer.connect(shimmerGain);
+    shimmerGain.connect(master);
+    shimmer.start(baseTime);
+    shimmer.stop(baseTime + 0.58);
+
+    const sparkle = ctx.createOscillator();
+    sparkle.type = "sine";
+    sparkle.frequency.setValueAtTime(1320, baseTime + 0.08);
+    sparkle.frequency.exponentialRampToValueAtTime(1700, baseTime + 0.2);
+    sparkle.frequency.exponentialRampToValueAtTime(1450, baseTime + 0.48);
+    const sparkleGain = ctx.createGain();
+    sparkleGain.gain.setValueAtTime(0.0001, baseTime);
+    sparkleGain.gain.exponentialRampToValueAtTime(0.36, baseTime + 0.11);
+    sparkleGain.gain.exponentialRampToValueAtTime(0.0001, baseTime + 0.5);
+    sparkle.connect(sparkleGain);
+    sparkleGain.connect(master);
+    sparkle.start(baseTime + 0.08);
+    sparkle.stop(baseTime + 0.52);
+  } catch {
+    // startup sound is best effort only
+  }
+}
+
 function forceHideStartupSplash() {
   if (!refs.startupSplash) {
     return;
@@ -891,6 +963,9 @@ async function completeStartupSplash(startedAt = 0, options = {}) {
   }
 
   splash.classList.add("is-ending");
+  playStartupSplashSound().catch(() => {
+    // best effort only
+  });
   await new Promise((resolve) => setTimeout(resolve, STARTUP_SPLASH_END_ANIM_MS));
   splash.classList.add("is-leaving");
   await new Promise((resolve) => {
@@ -925,7 +1000,7 @@ async function init() {
   pruneProgressEntries();
   applyUiPrefs({ syncControls: true });
   if (refs.footerVersion) {
-    refs.footerVersion.textContent = "c150";
+    refs.footerVersion.textContent = "c151";
   }
   updateNetworkBadge();
   cleanupLegacyServiceWorker().catch(() => {
