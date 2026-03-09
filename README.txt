@@ -252,3 +252,17 @@ LATEST SPONSOR UX SAFETY FIX (2026-03-09)
 - Sponsor block stays visible, but ad script loads only after explicit user click on:
   - `Afficher le sponsorise`
 - Goal: no forced ad/open redirect on page load or passive browsing.
+
+LATEST LANGUAGE LABEL + IOS AUTOSWITCH TUNING (2026-03-09)
+- Source language labeling is now reconciled from multiple signals:
+  - provider language field
+  - source name hints
+  - source URL hints
+- Conflicting `VF` vs `VOSTFR` metadata now resolves to safer `MULTI` (instead of wrong hard label).
+- Active source label can now auto-correct from real audio tracks after playback bootstrap.
+  - example: source marked `VOSTFR` but exposing French audio is relabeled to `VF`/`MULTI`.
+- iPhone/mobile auto-switch is more reactive on startup stalls:
+  - faster playback guard interval on mobile
+  - shorter startup/status recovery thresholds
+  - extra stall pattern detection on prolonged `connexion/chargement/fallback` states
+  - shorter mobile bootstrap/direct/embed readiness windows to fail over earlier.

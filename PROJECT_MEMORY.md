@@ -92,6 +92,21 @@ Last update: 2026-03-09
 - Native sponsor script is loaded only on explicit user action inside sponsor block (`Afficher le sponsorise`).
 - Objective: avoid forced popups/redirections during normal browsing or playback.
 
+## Source language labeling policy
+- Keep all sources; never remove a source only because language metadata is uncertain.
+- Source language label must be reconciled from:
+  1) upstream language field
+  2) source name hints
+  3) source URL hints
+- If metadata conflicts between `VF` and `VOSTFR`, prefer `MULTI` instead of a wrong hard label.
+- During playback, if audio tracks reveal French or multi-audio, update active source label accordingly.
+
+## iPhone auto-switch behavior
+- On mobile/iPhone, startup stall detection is intentionally more aggressive than desktop:
+  - shorter guard interval
+  - shorter startup/status recovery thresholds
+  - quicker failover on prolonged `connexion/chargement/fallback` states.
+
 ## Deployment workflow
 - Main code repo remote: `origin` (`Notimax/zenix`)
 - Public deploy mirror remote: `deploypublic` (`Notimax/zenix-deploy`)

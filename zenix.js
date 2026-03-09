@@ -111,6 +111,9 @@ const PLAYBACK_STARTUP_STALL_MS = 2600;
 const PLAYBACK_STATUS_RECOVERY_MS = 1800;
 const PLAYBACK_HEALTH_FIRST_DELAY_MS = 1400;
 const PLAYBACK_HEALTH_REPEAT_DELAY_MS = 2100;
+const MOBILE_PLAYBACK_BOOTSTRAP_TIMEOUT_MS = 2600;
+const MOBILE_VIDEO_READY_TIMEOUT_MS = 7000;
+const MOBILE_EMBED_READY_TIMEOUT_MS = 7200;
 const SKIP_INTRO_SECONDS = 85;
 const SKIP_RECAP_SECONDS = 45;
 const INTEREST_QUERY_MAX = 40;
@@ -1551,13 +1554,21 @@ function bindEvents() {
   });
 
   refs.playerVideo.addEventListener("timeupdate", onPlayerProgress);
+  refs.playerVideo.addEventListener("loadedmetadata", () => {
+    updateActiveSourceLanguageFromPlayback(refs.playerVideo);
+  });
+  refs.playerVideo.addEventListener("canplay", () => {
+    updateActiveSourceLanguageFromPlayback(refs.playerVideo);
+  });
   refs.playerVideo.addEventListener("play", () => {
     clearAwaitingUserPlay();
     setPlayerLoading(false);
+    updateActiveSourceLanguageFromPlayback(refs.playerVideo);
   });
   refs.playerVideo.addEventListener("playing", () => {
     clearAwaitingUserPlay();
     setPlayerLoading(false);
+    updateActiveSourceLanguageFromPlayback(refs.playerVideo);
   });
   refs.playerVideo.addEventListener("pause", () => {
     saveNowPlayingProgress({ force: true });
@@ -6521,12 +6532,17 @@ function getAvailableLanguages(sources) {
     }
   });
   const ordered = Array.from(set);
+  const rank = new Map([
+    ["VF", 0],
+    ["MULTI", 1],
+    ["VOSTFR", 2],
+    ["VO", 3],
+  ]);
   ordered.sort((left, right) => {
-    if (left === "VOSTFR") {
-      return -1;
-    }
-    if (right === "VOSTFR") {
-      return 1;
+    const leftRank = Number(rank.get(String(left || "").toUpperCase()) ?? 10);
+    const rightRank = Number(rank.get(String(right || "").toUpperCase()) ?? 10);
+    if (leftRank !== rightRank) {
+      return leftRank - rightRank;
     }
     return left.localeCompare(right, "fr");
   });
@@ -7768,6 +7784,18 @@ function clearPlaybackGuard() {
 
 function startPlaybackGuard() {
   clearPlaybackGuard();
+  const mobileGuard = isLikelyMobileDevice();
+  const guardIntervalMs = mobileGuard ? Math.max(700, PLAYBACK_GUARD_INTERVAL_MS - 500) : PLAYBACK_GUARD_INTERVAL_MS;
+  const startupStallMs = mobileGuard ? Math.max(1300, PLAYBACK_STARTUP_STALL_MS - 1100) : PLAYBACK_STARTUP_STALL_MS;
+  const statusRecoveryMs = mobileGuard
+    ? Math.max(900, PLAYBACK_STATUS_RECOVERY_MS - 800)
+    : PLAYBACK_STATUS_RECOVERY_MS;
+  const hardStallMs = mobileGuard ? Math.max(3200, PLAYBACK_STALL_HARD_MS - 1600) : PLAYBACK_STALL_HARD_MS;
+  const pausedStallMs = mobileGuard ? Math.max(3800, PLAYBACK_STALL_PAUSED_MS - 1800) : PLAYBACK_STALL_PAUSED_MS;
+  const fallbackStallMs = mobileGuard
+    ? Math.max(3000, startupStallMs + 700)
+    : Math.max(4200, PLAYBACK_STARTUP_STALL_MS + 1800);
+  const startupLoadingStatusPattern = /connexion source|chargement du flux|chargement de la source|fallback ios actif/;
   let trackedPlayToken = Number(state.playToken || 0);
   let lastObservedTime = 0;
   let lastAdvanceAt = Date.now();
@@ -7827,8 +7855,8 @@ function startPlaybackGuard() {
     const stalledForMs = Date.now() - lastAdvanceAt;
     const canAutoRecoverWhileAwaiting =
       awaitingUser &&
-      stalledForMs > PLAYBACK_STATUS_RECOVERY_MS + 1200 &&
-      /fallback ios actif|connexion source|lecture bloquee|source indisponible/.test(statusText);
+      stalledForMs > statusRecoveryMs + (mobileGuard ? 800 : 1200) &&
+      /fallback ios actif|connexion source|lecture bloquee|source indisponible|chargement du flux|chargement de la source/.test(statusText);
     const allowAutoRecover = !awaitingUser || canAutoRecoverWhileAwaiting;
     const startedPlayback = Math.max(lastObservedTime, currentTime) > 0.6;
     const blockedAtStart = allowAutoRecover && video.paused && currentTime < 1.2 && readyState >= 2;
@@ -7842,13 +7870,13 @@ function startPlaybackGuard() {
       allowAutoRecover &&
       startedPlayback &&
       !video.paused &&
-      stalledForMs > PLAYBACK_STALL_HARD_MS &&
+      stalledForMs > hardStallMs &&
       (readyState <= 2 || networkState === 2 || networkState === 3);
     const pausedBufferStall =
       allowAutoRecover &&
       startedPlayback &&
       video.paused &&
-      stalledForMs > PLAYBACK_STALL_PAUSED_MS &&
+      stalledForMs > pausedStallMs &&
       (readyState <= 2 || networkState === 3);
     const stalledDuringPlayback = hardFreeze || pausedBufferStall;
     const startupStallWithAlternative =
@@ -7856,18 +7884,25 @@ function startPlaybackGuard() {
       allowAutoRecover &&
       video.paused &&
       currentTime < 0.25 &&
-      stalledForMs > PLAYBACK_STARTUP_STALL_MS &&
+      stalledForMs > startupStallMs &&
       readyState === 0 &&
       (networkState === 0 || networkState === 2 || networkState === 3);
+    const startupLoadingStallWithAlternative =
+      hasNextCandidate &&
+      allowAutoRecover &&
+      currentTime < 0.25 &&
+      stalledForMs > statusRecoveryMs &&
+      readyState <= 1 &&
+      startupLoadingStatusPattern.test(statusText);
     const statusDrivenRecovery =
       hasNextCandidate &&
       allowAutoRecover &&
-      stalledForMs > PLAYBACK_STATUS_RECOVERY_MS &&
-      /lecture impossible|source selectionnee indisponible|source indisponible|fallback ios actif/.test(statusText);
+      stalledForMs > statusRecoveryMs &&
+      /lecture impossible|source selectionnee indisponible|source indisponible|fallback ios actif|connexion source|chargement du flux|chargement de la source/.test(statusText);
     const prolongedFallbackStall =
       hasNextCandidate &&
       fallbackStatusSince > 0 &&
-      Date.now() - fallbackStatusSince > Math.max(4200, PLAYBACK_STARTUP_STALL_MS + 1800) &&
+      Date.now() - fallbackStatusSince > fallbackStallMs &&
       currentTime < 0.25;
     if (
       errorCode <= 0 &&
@@ -7875,13 +7910,20 @@ function startPlaybackGuard() {
       !noSourceAtStart &&
       !stalledDuringPlayback &&
       !startupStallWithAlternative &&
+      !startupLoadingStallWithAlternative &&
       !statusDrivenRecovery &&
       !prolongedFallbackStall
     ) {
       return;
     }
     switchingSource = true;
-    if (stalledDuringPlayback || startupStallWithAlternative || statusDrivenRecovery || prolongedFallbackStall) {
+    if (
+      stalledDuringPlayback ||
+      startupStallWithAlternative ||
+      startupLoadingStallWithAlternative ||
+      statusDrivenRecovery ||
+      prolongedFallbackStall
+    ) {
       setPlayerStatus("Lecture bloquee, bascule automatique...", true);
     }
     trySwitchToNextSource()
@@ -7894,12 +7936,17 @@ function startPlaybackGuard() {
         lastObservedTime = Number(refs.playerVideo?.currentTime || 0);
         lastAdvanceAt = Date.now();
       });
-  }, PLAYBACK_GUARD_INTERVAL_MS);
+  }, guardIntervalMs);
 }
 
 function schedulePlaybackHealthMonitor(token, step = 0) {
   clearPlaybackHealthMonitor();
-  const delay = step === 0 ? PLAYBACK_HEALTH_FIRST_DELAY_MS : PLAYBACK_HEALTH_REPEAT_DELAY_MS;
+  const mobileGuard = isLikelyMobileDevice();
+  const firstDelay = mobileGuard ? Math.max(760, PLAYBACK_HEALTH_FIRST_DELAY_MS - 620) : PLAYBACK_HEALTH_FIRST_DELAY_MS;
+  const repeatDelay = mobileGuard
+    ? Math.max(1050, PLAYBACK_HEALTH_REPEAT_DELAY_MS - 900)
+    : PLAYBACK_HEALTH_REPEAT_DELAY_MS;
+  const delay = step === 0 ? firstDelay : repeatDelay;
   state.playbackHealthTimer = window.setTimeout(() => {
     if (token !== state.playToken) {
       return;
@@ -7925,7 +7972,7 @@ function schedulePlaybackHealthMonitor(token, step = 0) {
     const canAutoRecoverWhileAwaiting =
       awaitingUser &&
       step >= 2 &&
-      /fallback ios actif|connexion source|lecture bloquee|source indisponible/.test(statusText);
+      /fallback ios actif|connexion source|lecture bloquee|source indisponible|chargement du flux|chargement de la source/.test(statusText);
     const allowAutoRecover = !awaitingUser || canAutoRecoverWhileAwaiting;
     const blockedAtStart = allowAutoRecover && step >= 1 && video.paused && currentTime < 1.2 && readyState >= 2;
     const noSourceAtStart =
@@ -7935,7 +7982,13 @@ function schedulePlaybackHealthMonitor(token, step = 0) {
       currentTime < 0.25 &&
       readyState === 0 &&
       (networkState === 0 || networkState === 2 || networkState === 3);
-    if (errorCode > 0 || blockedAtStart || noSourceAtStart) {
+    const startupLoadingStall =
+      allowAutoRecover &&
+      step >= (mobileGuard ? 2 : 3) &&
+      currentTime < 0.25 &&
+      readyState <= 1 &&
+      /connexion source|chargement du flux|chargement de la source|fallback ios actif/.test(statusText);
+    if (errorCode > 0 || blockedAtStart || noSourceAtStart || startupLoadingStall) {
       trySwitchToNextSource().catch(() => {
         setPlayerStatus("Erreur video detectee. Choisis une autre source.", true);
       });
@@ -8565,22 +8618,70 @@ function setPlayerSubTitle(value = "") {
   refs.playerSubTitle.textContent = String(value || "").trim();
 }
 
-function parseLanguageFromSourceName(value) {
+function collectLanguageSignals(value) {
   const raw = String(value || "").trim().toUpperCase();
   if (!raw) {
+    return {
+      raw: "",
+      hasVf: false,
+      hasVost: false,
+      hasMulti: false,
+      hasVo: false,
+    };
+  }
+  const probe = raw
+    .replace(/[%._]+/g, " ")
+    .replace(/[=:+-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return {
+    raw: probe,
+    hasVf:
+      /\bVF\b/.test(probe) ||
+      /\bFRENCH\b/.test(probe) ||
+      /\bFRANCAIS\b/.test(probe) ||
+      /\bFRANÇAIS\b/.test(probe),
+    hasVost:
+      /\bVOST(?:FR)?\b/.test(probe) ||
+      /\bSUB(?:BED|TITLES?|FR|FRENCH)?\b/.test(probe) ||
+      /\bSOUS TITRES?\b/.test(probe),
+    hasMulti:
+      /\bMULTI\b/.test(probe) ||
+      /\bDUAL\b/.test(probe) ||
+      /\bDUO\b/.test(probe) ||
+      /\bMULTILINGUE\b/.test(probe),
+    hasVo: /\bVO\b/.test(probe) || /\bORIGINAL\b/.test(probe) || /\bRAW\b/.test(probe),
+  };
+}
+
+function resolveLanguageFromSignals(signals) {
+  if (!signals || !signals.raw) {
     return "";
   }
-  if (/\bVOST(?:FR)?\b|\bSUB(?:BED)?\b/.test(raw)) {
-    return "VOSTFR";
-  }
-  if (/\bVF\b|\bFRENCH\b/.test(raw)) {
-    return "VF";
-  }
-  if (/\bMULTI\b|\bDUAL\b/.test(raw)) {
+  if (signals.hasMulti || (signals.hasVf && signals.hasVost)) {
     return "MULTI";
   }
-  if (/\bVO\b|\bORIGINAL\b/.test(raw)) {
+  if (signals.hasVf) {
+    return "VF";
+  }
+  if (signals.hasVost) {
+    return "VOSTFR";
+  }
+  if (signals.hasVo) {
     return "VO";
+  }
+  return "";
+}
+
+function parseLanguageFromSourceName(value) {
+  const signals = collectLanguageSignals(value);
+  const resolved = resolveLanguageFromSignals(signals);
+  if (resolved) {
+    return resolved;
+  }
+  const raw = String(signals.raw || "").trim();
+  if (!raw) {
+    return "";
   }
   const chunks = raw.split(/[|/\\\-:,]+/).map((entry) => entry.trim()).filter(Boolean);
   for (const chunk of chunks) {
@@ -8592,14 +8693,76 @@ function parseLanguageFromSourceName(value) {
   return "";
 }
 
-function normalizeSourceLanguage(entry) {
-  const fromField = normalizeLanguageLabel(entry?.language || entry?.lang || "");
-  if (fromField === "VF" || fromField === "VOSTFR" || fromField === "MULTI" || fromField === "VO") {
-    return fromField;
+function parseLanguageFromSourceUrl(value) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return "";
   }
-  const fromName = parseLanguageFromSourceName(entry?.source_name || "");
+  let probe = raw;
+  try {
+    const parsed = new URL(raw, window.location.href);
+    probe = `${String(parsed.pathname || "")} ${String(parsed.search || "")}`;
+  } catch {
+    probe = raw;
+  }
+  const fromSignals = resolveLanguageFromSignals(collectLanguageSignals(probe));
+  if (fromSignals) {
+    return fromSignals;
+  }
+  const upper = String(probe || "").toUpperCase();
+  if (/[?&](?:LANG|LANGUAGE|AUDIO|DUB)=VF(?:$|[&?#/])/i.test(upper)) {
+    return "VF";
+  }
+  if (/[?&](?:LANG|LANGUAGE|AUDIO|DUB)=FR(?:$|[&?#/])/i.test(upper)) {
+    return "VF";
+  }
+  if (/[?&](?:LANG|LANGUAGE|AUDIO|SUB)=VOSTFR(?:$|[&?#/])/i.test(upper)) {
+    return "VOSTFR";
+  }
+  if (/[?&](?:LANG|LANGUAGE)=MULTI(?:$|[&?#/])/i.test(upper)) {
+    return "MULTI";
+  }
+  return "";
+}
+
+function reconcileSourceLanguage(fieldLanguage, nameLanguage, urlLanguage) {
+  const fromField = ["VF", "VOSTFR", "MULTI", "VO"].includes(fieldLanguage) ? fieldLanguage : "";
+  const fromName = ["VF", "VOSTFR", "MULTI", "VO"].includes(nameLanguage) ? nameLanguage : "";
+  const fromUrl = ["VF", "VOSTFR", "MULTI", "VO"].includes(urlLanguage) ? urlLanguage : "";
+  const merged = Array.from(new Set([fromField, fromName, fromUrl].filter(Boolean)));
+  if (merged.length === 0) {
+    return "";
+  }
+  if (merged.length === 1) {
+    return merged[0];
+  }
+  if (merged.includes("MULTI")) {
+    return "MULTI";
+  }
+  if (merged.includes("VF") && merged.includes("VOSTFR")) {
+    // Conflicting metadata: safer than wrong hard label.
+    return "MULTI";
+  }
   if (fromName) {
     return fromName;
+  }
+  if (fromUrl) {
+    return fromUrl;
+  }
+  return fromField || merged[0];
+}
+
+function normalizeSourceLanguage(entry) {
+  const fromFieldRaw = normalizeLanguageLabel(entry?.language || entry?.lang || "");
+  const fromField =
+    fromFieldRaw === "VF" || fromFieldRaw === "VOSTFR" || fromFieldRaw === "MULTI" || fromFieldRaw === "VO"
+      ? fromFieldRaw
+      : "";
+  const fromName = parseLanguageFromSourceName(entry?.source_name || entry?.name || "");
+  const fromUrl = parseLanguageFromSourceUrl(entry?.stream_url || entry?.url || entry?.file || entry?.src || "");
+  const reconciled = reconcileSourceLanguage(fromField, fromName, fromUrl);
+  if (reconciled) {
+    return reconciled;
   }
   if (typeof entry?.language === "string") {
     const trimmed = String(entry.language || "").trim().toUpperCase();
@@ -9145,6 +9308,7 @@ function shouldPreferProxyFirstForHls(video, source) {
 
 async function startPlayerSource(source, resumeTime, token) {
   const video = refs.playerVideo;
+  const mobilePlayback = isLikelyMobileDevice();
   const forceProxyHls = shouldPreferProxyFirstForHls(video, source);
   const preferDirectHls = shouldUseNativeHls(video) && !forceProxyHls;
   const streamCandidates = buildPlayableSourceCandidates(source, {
@@ -9173,6 +9337,9 @@ async function startPlayerSource(source, resumeTime, token) {
   if (source?.language) {
     setPlayerPill(refs.playerLanguagePill, source.language);
   }
+  const embedReadyTimeout = mobilePlayback ? Math.min(EMBED_READY_TIMEOUT_MS, MOBILE_EMBED_READY_TIMEOUT_MS) : EMBED_READY_TIMEOUT_MS;
+  const directReadyTimeout = mobilePlayback ? Math.min(VIDEO_READY_TIMEOUT_MS, MOBILE_VIDEO_READY_TIMEOUT_MS) : VIDEO_READY_TIMEOUT_MS;
+  const bootstrapTimeout = mobilePlayback ? MOBILE_PLAYBACK_BOOTSTRAP_TIMEOUT_MS : 4200;
 
   let lastError = null;
   let sourceStarted = false;
@@ -9190,7 +9357,7 @@ async function startPlayerSource(source, resumeTime, token) {
           setPlayerStatus("Chargement source integree...");
           await showPlayerEmbedFrame(streamUrl, {
             token,
-            timeoutMs: EMBED_READY_TIMEOUT_MS,
+            timeoutMs: embedReadyTimeout,
           });
           setPlayerStatus("Lecture en cours.");
           setPlayerLoading(false);
@@ -9210,7 +9377,7 @@ async function startPlayerSource(source, resumeTime, token) {
           }
           video.src = streamUrl;
           video.load();
-          await waitVideoReady(video, VIDEO_READY_TIMEOUT_MS);
+          await waitVideoReady(video, directReadyTimeout);
         }
 
         if (token !== state.playToken) {
@@ -9230,6 +9397,7 @@ async function startPlayerSource(source, resumeTime, token) {
             await video.play();
             clearAwaitingUserPlay();
             const forcedFrenchAudio = preferFrenchAudioTrack(video);
+            updateActiveSourceLanguageFromPlayback(video);
             setPlayerStatus(forcedFrenchAudio ? "Lecture en cours (audio FR)." : "Lecture en cours.");
           } catch (playError) {
             if (isUnplayablePlayError(playError)) {
@@ -9242,6 +9410,7 @@ async function startPlayerSource(source, resumeTime, token) {
                 await video.play();
                 mutedRecovery = true;
                 preferFrenchAudioTrack(video);
+                updateActiveSourceLanguageFromPlayback(video);
                 clearAwaitingUserPlay();
                 setPlayerStatus("Lecture en cours (mode muet).");
                 showToast("Lecture demarree en mode muet. Active le son si besoin.");
@@ -9257,8 +9426,9 @@ async function startPlayerSource(source, resumeTime, token) {
               setPlayerStatus("Clique sur Play dans le lecteur pour demarrer.");
             }
           }
-          await waitForPlaybackBootstrap(video, token);
+          await waitForPlaybackBootstrap(video, token, bootstrapTimeout);
           preferFrenchAudioTrack(video);
+          updateActiveSourceLanguageFromPlayback(video);
           setPlayerLoading(false);
         }
         sourceStarted = true;
@@ -9289,7 +9459,14 @@ async function startPlayerSource(source, resumeTime, token) {
 }
 
 async function waitForPlaybackBootstrap(video, token, timeoutMs = 4200) {
-  const deadline = Date.now() + Math.max(1200, Number(timeoutMs || 0));
+  const mobileBootstrap = isLikelyMobileDevice();
+  const effectiveTimeout = mobileBootstrap
+    ? Math.min(
+        Math.max(1400, Number(timeoutMs || MOBILE_PLAYBACK_BOOTSTRAP_TIMEOUT_MS)),
+        MOBILE_PLAYBACK_BOOTSTRAP_TIMEOUT_MS
+      )
+    : Math.max(1200, Number(timeoutMs || 0));
+  const deadline = Date.now() + effectiveTimeout;
   while (Date.now() < deadline) {
     if (token !== state.playToken) {
       return;
@@ -9317,7 +9494,7 @@ async function waitForPlaybackBootstrap(video, token, timeoutMs = 4200) {
   const readyState = Number(video?.readyState || 0);
   const networkState = Number(video?.networkState || 0);
   const paused = Boolean(video?.paused);
-  if (currentTime <= 0.18 && paused && readyState === 0 && (networkState === 2 || networkState === 3 || networkState === 0)) {
+  if (currentTime <= 0.18 && paused && readyState <= 1 && (networkState === 2 || networkState === 3 || networkState === 0)) {
     throw new Error("Source stalled at bootstrap");
   }
   if (currentTime <= 0.18 && paused && readyState >= 2) {
@@ -9389,6 +9566,80 @@ function preferFrenchAudioTrack(video) {
     }
   }
   return applied;
+}
+
+function inferLanguageFromAudioTracks(video) {
+  const tracks = video?.audioTracks;
+  if (!tracks || typeof tracks.length !== "number" || tracks.length <= 0) {
+    return "";
+  }
+  let hasFrench = false;
+  let hasNonFrench = false;
+  for (let index = 0; index < tracks.length; index += 1) {
+    const track = tracks[index];
+    if (!track) {
+      continue;
+    }
+    const sample = [track.language, track.label, track.name]
+      .map((entry) => String(entry || "").toLowerCase())
+      .join(" ");
+    if (/\bfr\b|french|fran[cç]ais/.test(sample)) {
+      hasFrench = true;
+    } else if (sample.trim().length > 0) {
+      hasNonFrench = true;
+    }
+  }
+  if (hasFrench && hasNonFrench) {
+    return "MULTI";
+  }
+  if (hasFrench) {
+    return "VF";
+  }
+  if (hasNonFrench) {
+    return "VO";
+  }
+  return "";
+}
+
+function updateActiveSourceLanguageFromPlayback(video = refs.playerVideo) {
+  const activeIndex = Number(state.sourceIndex || -1);
+  if (activeIndex < 0 || activeIndex >= state.sourcePool.length) {
+    return;
+  }
+  const activeSource = state.sourcePool[activeIndex];
+  if (!activeSource || isEmbedSource(activeSource)) {
+    return;
+  }
+  const inferred = inferLanguageFromAudioTracks(video);
+  if (!inferred) {
+    return;
+  }
+  const current = String(activeSource.language || "").trim().toUpperCase();
+  if (current === inferred) {
+    return;
+  }
+  const canUpdate =
+    !current ||
+    (current === "VOSTFR" && (inferred === "VF" || inferred === "MULTI")) ||
+    (current === "VO" && (inferred === "VF" || inferred === "MULTI")) ||
+    (current === "VF" && inferred === "MULTI");
+  if (!canUpdate) {
+    return;
+  }
+
+  activeSource.language = inferred;
+  activeSource.score = getSourceScore(
+    String(activeSource.format || ""),
+    String(activeSource.quality || ""),
+    inferred,
+    activeIndex,
+    String(activeSource.host || "")
+  );
+  renderPlayerSourceOptions();
+  if (refs.playerSourceMeta) {
+    refs.playerSourceMeta.textContent = formatSourceLabel(activeSource, activeIndex, state.sourcePool.length || 1);
+  }
+  setPlayerPill(refs.playerLanguagePill, inferred);
 }
 
 function canAttemptHlsPlayback(video) {
