@@ -416,3 +416,8 @@ LATEST CATALOG WARMUP RESILIENCE (2026-03-09, c148)
   - first catalog page is fetched without blocking on supplemental feed.
   - warmup pages are now synced in background instead of blocking initial render.
   - page 1 refresh with supplemental merge is triggered asynchronously right after initial paint.
+
+LATEST SCROLLBAR VISUAL HIDE (2026-03-09, c149)
+- Main page scrollbar is now visually hidden while scroll remains active.
+- Kept mouse wheel, trackpad, keyboard and touch scrolling behavior unchanged.
+- Applied cross-browser rules (`scrollbar-width`, `-ms-overflow-style`, `::-webkit-scrollbar`).

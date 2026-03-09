@@ -77,6 +77,8 @@ Last update: 2026-03-09
   - c148 follow-up:
     - initial catalog warmup no longer collapses to hard fallback when a later warmup page fetch fails after page 1 already succeeded.
     - initial catalog first paint is now non-blocking: page 1 is loaded first, then warmup pages/supplemental merge continue asynchronously.
+  - c149 follow-up:
+    - root page scrollbar is visually hidden across modern browsers while keeping scrolling enabled.
 
 ## Streaming/source policy
 - External embed fallback sources (e.g. generic `vidsrc`) are removed.

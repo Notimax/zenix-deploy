@@ -925,7 +925,7 @@ async function init() {
   pruneProgressEntries();
   applyUiPrefs({ syncControls: true });
   if (refs.footerVersion) {
-    refs.footerVersion.textContent = "c148";
+    refs.footerVersion.textContent = "c149";
   }
   updateNetworkBadge();
   cleanupLegacyServiceWorker().catch(() => {
