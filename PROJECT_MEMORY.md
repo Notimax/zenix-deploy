@@ -119,6 +119,9 @@ Last update: 2026-03-09
     - calendar anime/type resolver now treats anime as valid only from Anime-Sama sources in calendar view.
     - anime-like non-Anime-Sama rows are excluded from calendar merge rendering to avoid serie/anime cross-contamination.
     - player source chip display now sanitizes labels and removes provider-origin bubble tags from UI.
+  - c163 follow-up:
+    - source quality labels are now strict-normalized to quality tokens only (`2160p/1440p/1080p/720p/480p/360p/4K/HD/SD`).
+    - provider/raw quality strings are hidden (`Auto` fallback) to prevent any source-origin disclosure in UI.
 
 ## Streaming/source policy
 - External embed fallback sources (e.g. generic `vidsrc`) are removed.

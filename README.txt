@@ -523,3 +523,8 @@ LATEST TYPE/ANIME-SOURCE HARDENING (2026-03-09, c162)
 - Calendar type resolver now gates anime classification through Anime-Sama source checks.
 - Calendar feed now drops anime-like rows when source is not Anime-Sama (prevents serie/anime mixing).
 - Player source chips no longer render provider-origin bubble tags; labels are sanitized to avoid host/provider leaks.
+
+
+LATEST SOURCE LABEL PRIVACY HARDENING (2026-03-09, c163)
+- Source quality display now shows only normalized quality tokens (2160p/1080p/HD/SD) or `Auto`.
+- Any provider-like/raw labels are dropped from source chips and selector labels.

@@ -1008,7 +1008,7 @@ async function init() {
   pruneProgressEntries();
   applyUiPrefs({ syncControls: true });
   if (refs.footerVersion) {
-    refs.footerVersion.textContent = "c162";
+    refs.footerVersion.textContent = "c163";
   }
   updateNetworkBadge();
   cleanupLegacyServiceWorker().catch(() => {
@@ -9560,13 +9560,7 @@ function sanitizeSourceDisplayQuality(value) {
   if (tokenMatch) {
     return String(tokenMatch[1] || "").toUpperCase();
   }
-  if (/nakios|xalaflix|fastflux|https?:\/\/|\.|\//i.test(raw)) {
-    return "Auto";
-  }
-  if (raw.length > 14) {
-    return `${raw.slice(0, 14)}...`;
-  }
-  return raw;
+  return "Auto";
 }
 
 function getSourceDisplayLanguage(source) {
