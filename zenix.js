@@ -1008,7 +1008,7 @@ async function init() {
   pruneProgressEntries();
   applyUiPrefs({ syncControls: true });
   if (refs.footerVersion) {
-    refs.footerVersion.textContent = "c156";
+    refs.footerVersion.textContent = "c157";
   }
   updateNetworkBadge();
   cleanupLegacyServiceWorker().catch(() => {
@@ -9593,8 +9593,7 @@ function renderPlayerSourceOptions() {
       const score = computeSourceCompatibilityScore(entry);
       const compatibilityLabel = describeCompatibilityLabel(score);
       const compatibilityBand = score >= 86 ? "high" : score >= 72 ? "medium" : score >= 60 ? "low" : "fragile";
-      const sourceHost = String(entry?.source_name || "").trim() || getSourceHost(String(entry?.url || ""));
-      const sourceLabel = sourceHost ? sourceHost.replace(/^www\./i, "") : "stream";
+      const sourceLabel = entry?.premiumHint ? "Source premium" : "Source standard";
       const chip = document.createElement("button");
       chip.type = "button";
       chip.className = "player-source-chip";

@@ -100,6 +100,10 @@ Last update: 2026-03-09
   - c156 follow-up:
     - detail modal action buttons now include icons with labels (start/like/dislike and related actions).
     - dynamic detail button label updates preserve icon markup via `.btn-label` updates.
+  - c157 follow-up:
+    - player source chips no longer render raw host/provider names.
+    - source chip bottom tag now uses neutral text only (`Source standard` / `Source premium`).
+    - this explicitly prevents exposing labels like `zebi.xalaflix.design`, `api.nakios.site`, or `cdn...` in the UI.
 
 ## Streaming/source policy
 - External embed fallback sources (e.g. generic `vidsrc`) are removed.

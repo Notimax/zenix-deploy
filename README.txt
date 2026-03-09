@@ -498,3 +498,8 @@ LATEST DETAIL BUTTON ICONS (2026-03-09, c156)
 - Added icons in detail action buttons (including `Demarrer`, `Like`, `Dislike`).
 - Detail buttons now use icon + label layout.
 - JS detail button label updates now preserve icon markup (`.btn-label`) for dynamic states.
+
+LATEST SOURCE HOST MASKING (2026-03-09, c157)
+- Player source chips no longer expose raw provider/domain labels.
+- Removed runtime display of host-like labels (e.g. `zebi.xalaflix.design`, `api.nakios.site`, `cdn...`) in source chip tags.
+- Source chip footer now uses neutral labels only (`Source standard` / `Source premium`).
