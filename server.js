@@ -194,6 +194,17 @@ const FORWARD_CLIENT_IP_TO_UPSTREAM =
 const ANALYTICS_RETENTION_MS = 24 * 60 * 60 * 1000;
 const ANALYTICS_ACTIVE_WINDOW_MS = 2 * 60 * 1000;
 const ANALYTICS_MIN_EVENT_MS = 10 * 1000;
+const ANALYTICS_GEO_CACHE_MS = Math.max(
+  15 * 60 * 1000,
+  Number(process.env.ANALYTICS_GEO_CACHE_MS || 6 * 60 * 60 * 1000)
+);
+const ANALYTICS_GEO_TIMEOUT_MS = Math.max(800, Number(process.env.ANALYTICS_GEO_TIMEOUT_MS || 2500));
+const ANALYTICS_GEO_ENABLED = String(process.env.ANALYTICS_GEO_ENABLED || "1").trim() !== "0";
+const ANALYTICS_IP_LIST_EMBED_CHARS = Math.max(
+  1200,
+  Math.min(3900, Number(process.env.ANALYTICS_IP_LIST_EMBED_CHARS || 3600))
+);
+const ANALYTICS_IP_LIST_MAX_LINES = Math.max(20, Number(process.env.ANALYTICS_IP_LIST_MAX_LINES || 400));
 const SUGGESTIONS_EMAIL_TO =
   normalizeSuggestionEmail(process.env.SUGGESTIONS_EMAIL_TO || "seekosint@gmail.com") || "seekosint@gmail.com";
 const SUGGESTIONS_RELAY_BASE = String(process.env.SUGGESTIONS_RELAY_BASE || "https://formsubmit.co/ajax")
@@ -298,6 +309,8 @@ const supplementalCoverCache = new Map();
 const supplementalCoverInFlight = new Map();
 const analyticsClients = new Map();
 const analyticsEvents = [];
+const analyticsGeoCache = new Map();
+const analyticsGeoInFlight = new Map();
 const suggestionRateLimitMap = new Map();
 const suggestionFingerprintMap = new Map();
 let analyticsTotalSeen = 0;
@@ -600,6 +613,28 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(ms) || 0)));
 }
 
+function normalizeIpForAnalytics(value) {
+  let raw = String(value || "").trim();
+  if (!raw) {
+    return "0.0.0.0";
+  }
+  if (raw.startsWith("[") && raw.includes("]")) {
+    raw = raw.slice(1, raw.indexOf("]"));
+  }
+  raw = raw.replace(/^::ffff:/i, "");
+  if (/^\d{1,3}(?:\.\d{1,3}){3}:\d+$/.test(raw)) {
+    raw = raw.replace(/:\d+$/, "");
+  }
+  const zoneSep = raw.indexOf("%");
+  if (zoneSep > 0) {
+    raw = raw.slice(0, zoneSep);
+  }
+  if (raw === "::1") {
+    return "127.0.0.1";
+  }
+  return raw || "0.0.0.0";
+}
+
 function getRemoteAddress(req) {
   const forwarded = req.headers["x-forwarded-for"];
   const firstForwarded = Array.isArray(forwarded)
@@ -607,12 +642,11 @@ function getRemoteAddress(req) {
     : String(forwarded || "");
   const forwardedIp = firstForwarded.split(",")[0].trim();
   const raw = forwardedIp || String(req.socket?.remoteAddress || "");
-  const normalized = raw.replace(/^::ffff:/, "");
-  return normalized === "::1" ? "127.0.0.1" : normalized || "0.0.0.0";
+  return normalizeIpForAnalytics(raw);
 }
 
 function isPublicIpAddress(value) {
-  const raw = String(value || "").trim();
+  const raw = normalizeIpForAnalytics(value);
   if (!raw || raw === "0.0.0.0" || raw === "127.0.0.1" || raw === "::1") {
     return false;
   }
@@ -685,6 +719,269 @@ function isUnsafeTargetHost(hostname) {
   return false;
 }
 
+function pickTopCountKey(map) {
+  if (!(map instanceof Map) || map.size === 0) {
+    return "";
+  }
+  return Array.from(map.entries())
+    .sort((left, right) => {
+      const delta = Number(right[1] || 0) - Number(left[1] || 0);
+      if (delta !== 0) {
+        return delta;
+      }
+      return String(left[0] || "").localeCompare(String(right[0] || ""), "fr");
+    })[0]?.[0] || "";
+}
+
+function parseDeviceClassFromUA(userAgent) {
+  const ua = String(userAgent || "").toLowerCase();
+  if (!ua) {
+    return "Autre";
+  }
+  if (/(bot|spider|crawler|crawl|slurp|bingpreview|mediapartners-google|facebookexternalhit|whatsapp)/i.test(ua)) {
+    return "Bot";
+  }
+  if (
+    /(ipad|tablet|kindle|silk|playbook|nexus 7|nexus 9|sm-t\d+|lenovo tab|tab \d|xoom)/i.test(ua) ||
+    (/android/i.test(ua) && !/mobile/i.test(ua))
+  ) {
+    return "Tablette";
+  }
+  if (/(iphone|ipod|android.*mobile|windows phone|blackberry|iemobile|mobile)/i.test(ua)) {
+    return "Telephone";
+  }
+  return "PC";
+}
+
+function parsePlatformFromUA(userAgent) {
+  const ua = String(userAgent || "").toLowerCase();
+  if (!ua) {
+    return "Inconnu";
+  }
+  if (/windows nt/i.test(ua)) {
+    return "Windows";
+  }
+  if (/(ipad|iphone|ipod)/i.test(ua)) {
+    return "iOS";
+  }
+  if (/android/i.test(ua)) {
+    return "Android";
+  }
+  if (/macintosh/i.test(ua) && /mobile/i.test(ua)) {
+    return "iOS";
+  }
+  if (/cros/i.test(ua)) {
+    return "ChromeOS";
+  }
+  if (/macintosh|mac os x/i.test(ua)) {
+    return "macOS";
+  }
+  if (/linux/i.test(ua)) {
+    return "Linux";
+  }
+  return "Autre";
+}
+
+function parseBrowserFromUA(userAgent) {
+  const ua = String(userAgent || "");
+  if (!ua) {
+    return "Inconnu";
+  }
+  if (/Edg\/\d+/i.test(ua)) {
+    return "Edge";
+  }
+  if (/OPR\/\d+|Opera\/\d+/i.test(ua)) {
+    return "Opera";
+  }
+  if (/Firefox\/\d+/i.test(ua)) {
+    return "Firefox";
+  }
+  if (/CriOS\/\d+|Chrome\/\d+/i.test(ua) && !/Edg\/|OPR\/|Opera\//i.test(ua)) {
+    return "Chrome";
+  }
+  if (/Safari\/\d+/i.test(ua) && !/Chrome\/|CriOS\/|Edg\/|OPR\/|Opera\//i.test(ua)) {
+    return "Safari";
+  }
+  return "Autre";
+}
+
+function parseUaProfile(userAgent) {
+  const safeUa = sanitizeToken(String(userAgent || ""), 240);
+  return {
+    userAgent: safeUa,
+    deviceClass: parseDeviceClassFromUA(safeUa),
+    platform: parsePlatformFromUA(safeUa),
+    browser: parseBrowserFromUA(safeUa),
+  };
+}
+
+function readCachedGeoForIp(ip, now = Date.now()) {
+  const safeIp = normalizeIpForAnalytics(ip);
+  if (!safeIp || !isPublicIpAddress(safeIp)) {
+    return {
+      countryCode: "LAN",
+      countryName: "Local",
+    };
+  }
+  const cached = analyticsGeoCache.get(safeIp);
+  if (!cached || Number(cached.expiresAt || 0) < now) {
+    return null;
+  }
+  return {
+    countryCode: sanitizeToken(cached.countryCode || "??", 8) || "??",
+    countryName: sanitizeToken(cached.countryName || "Inconnu", 80) || "Inconnu",
+  };
+}
+
+function writeCachedGeoForIp(ip, geo, now = Date.now()) {
+  const safeIp = normalizeIpForAnalytics(ip);
+  if (!safeIp || !isPublicIpAddress(safeIp)) {
+    return;
+  }
+  const countryCode = sanitizeToken(String(geo?.countryCode || "").toUpperCase(), 8) || "??";
+  const countryName = sanitizeToken(String(geo?.countryName || ""), 80) || "Inconnu";
+  analyticsGeoCache.set(safeIp, {
+    countryCode,
+    countryName,
+    expiresAt: now + ANALYTICS_GEO_CACHE_MS,
+  });
+  if (analyticsGeoCache.size > 3000) {
+    const oldest = Array.from(analyticsGeoCache.entries()).sort(
+      (left, right) => Number(left?.[1]?.expiresAt || 0) - Number(right?.[1]?.expiresAt || 0)
+    );
+    oldest.slice(0, analyticsGeoCache.size - 3000).forEach(([key]) => analyticsGeoCache.delete(key));
+  }
+}
+
+function applyGeoToAnalyticsRows(ip, geo) {
+  const safeIp = normalizeIpForAnalytics(ip);
+  if (!safeIp || !geo) {
+    return;
+  }
+  const countryCode = sanitizeToken(String(geo.countryCode || "").toUpperCase(), 8) || "??";
+  const countryName = sanitizeToken(String(geo.countryName || ""), 80) || "Inconnu";
+  for (const row of analyticsClients.values()) {
+    if (String(row?.ip || "") !== safeIp) {
+      continue;
+    }
+    row.countryCode = countryCode;
+    row.countryName = countryName;
+  }
+}
+
+async function resolveGeoForIp(ip) {
+  const safeIp = normalizeIpForAnalytics(ip);
+  if (!safeIp || !ANALYTICS_GEO_ENABLED || !isPublicIpAddress(safeIp)) {
+    return {
+      countryCode: "LAN",
+      countryName: "Local",
+    };
+  }
+
+  const cached = readCachedGeoForIp(safeIp);
+  if (cached) {
+    return cached;
+  }
+  if (analyticsGeoInFlight.has(safeIp)) {
+    return analyticsGeoInFlight.get(safeIp);
+  }
+
+  const task = (async () => {
+    const targets = [
+      {
+        url: `https://ipwho.is/${encodeURIComponent(safeIp)}?fields=success,country,country_code`,
+        parse: (body) => {
+          if (!body || body.success === false) {
+            return null;
+          }
+          return {
+            countryCode: sanitizeToken(String(body.country_code || "").toUpperCase(), 8) || "",
+            countryName: sanitizeToken(String(body.country || ""), 80) || "",
+          };
+        },
+      },
+      {
+        url: `https://ipapi.co/${encodeURIComponent(safeIp)}/json/`,
+        parse: (body) => {
+          if (!body || String(body.error || "").toLowerCase() === "true") {
+            return null;
+          }
+          return {
+            countryCode: sanitizeToken(String(body.country_code || "").toUpperCase(), 8) || "",
+            countryName: sanitizeToken(String(body.country_name || ""), 80) || "",
+          };
+        },
+      },
+      {
+        url: `https://ipinfo.io/${encodeURIComponent(safeIp)}/json`,
+        parse: (body) => {
+          if (!body) {
+            return null;
+          }
+          return {
+            countryCode: sanitizeToken(String(body.country || "").toUpperCase(), 8) || "",
+            countryName: sanitizeToken(String(body.country_name || ""), 80) || "",
+          };
+        },
+      },
+    ];
+
+    for (const candidate of targets) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), ANALYTICS_GEO_TIMEOUT_MS);
+      try {
+        const response = await fetch(candidate.url, {
+          method: "GET",
+          headers: {
+            Accept: "application/json",
+            "User-Agent": "ZenixStream/1.0 (+analytics-geo)",
+          },
+          signal: controller.signal,
+        });
+        if (!response.ok) {
+          continue;
+        }
+        let body = null;
+        try {
+          body = await response.json();
+        } catch {
+          body = null;
+        }
+        const parsed = candidate.parse(body);
+        if (!parsed) {
+          continue;
+        }
+        const countryCode = sanitizeToken(String(parsed.countryCode || "").toUpperCase(), 8) || "";
+        const countryName = sanitizeToken(String(parsed.countryName || ""), 80) || "";
+        if (!countryCode && !countryName) {
+          continue;
+        }
+        const result = {
+          countryCode: countryCode || "??",
+          countryName: countryName || "Inconnu",
+        };
+        writeCachedGeoForIp(safeIp, result);
+        return result;
+      } catch {
+        // try next provider
+      } finally {
+        clearTimeout(timeoutId);
+      }
+    }
+
+    const fallback = { countryCode: "??", countryName: "Inconnu" };
+    writeCachedGeoForIp(safeIp, fallback);
+    return fallback;
+  })();
+
+  analyticsGeoInFlight.set(safeIp, task);
+  try {
+    return await task;
+  } finally {
+    analyticsGeoInFlight.delete(safeIp);
+  }
+}
+
 function parseSafeRemoteUrl(value) {
   const raw = String(value || "").trim();
   if (!raw) {
@@ -746,6 +1043,11 @@ function pruneAnalytics(now = Date.now()) {
       analyticsClients.delete(key);
     }
   }
+  for (const [ip, geo] of analyticsGeoCache.entries()) {
+    if (Number(geo?.expiresAt || 0) < now) {
+      analyticsGeoCache.delete(ip);
+    }
+  }
 }
 
 function markAnalyticsHeartbeat(req, payload) {
@@ -754,23 +1056,51 @@ function markAnalyticsHeartbeat(req, payload) {
 
   const clientId = sanitizeToken(payload?.clientId, 64) || "guest";
   const page = sanitizeToken(payload?.page, 140);
-  const ip = sanitizeToken(getRemoteAddress(req), 60);
+  const ip = sanitizeToken(normalizeIpForAnalytics(getRemoteAddress(req)), 60);
   const key = `${clientId}@${ip}`;
+  const uaProfile = parseUaProfile(req.headers["user-agent"] || payload?.ua || "");
+  const cachedGeo = readCachedGeoForIp(ip, now);
 
   let row = analyticsClients.get(key);
   if (!row) {
     row = {
+      clientId,
+      ip,
       firstSeen: now,
       lastSeen: now,
       lastEventAt: 0,
       page: "",
+      view: "",
+      userAgent: "",
+      deviceClass: "Autre",
+      platform: "Inconnu",
+      browser: "Inconnu",
+      countryCode: "??",
+      countryName: "Inconnu",
     };
     analyticsTotalSeen += 1;
   }
 
+  row.clientId = clientId;
+  row.ip = ip;
   row.lastSeen = now;
   if (page) {
     row.page = page;
+  }
+  const view = sanitizeToken(payload?.view, 48);
+  if (view) {
+    row.view = view;
+  }
+  row.userAgent = uaProfile.userAgent;
+  row.deviceClass = uaProfile.deviceClass;
+  row.platform = uaProfile.platform;
+  row.browser = uaProfile.browser;
+  if (cachedGeo) {
+    row.countryCode = cachedGeo.countryCode;
+    row.countryName = cachedGeo.countryName;
+  } else if (!isPublicIpAddress(ip)) {
+    row.countryCode = "LAN";
+    row.countryName = "Local";
   }
 
   if (now - Number(row.lastEventAt || 0) >= ANALYTICS_MIN_EVENT_MS) {
@@ -778,6 +1108,39 @@ function markAnalyticsHeartbeat(req, payload) {
     analyticsEvents.push(now);
   }
   analyticsClients.set(key, row);
+
+  if (!cachedGeo && ANALYTICS_GEO_ENABLED && isPublicIpAddress(ip)) {
+    resolveGeoForIp(ip)
+      .then((geo) => {
+        applyGeoToAnalyticsRows(ip, geo);
+      })
+      .catch(() => {
+        // best effort only
+      });
+  }
+}
+
+function sortCountMapDesc(map, limit = 9999) {
+  return Array.from(map.entries())
+    .sort((left, right) => {
+      const delta = Number(right[1] || 0) - Number(left[1] || 0);
+      if (delta !== 0) {
+        return delta;
+      }
+      return String(left[0] || "").localeCompare(String(right[0] || ""), "fr");
+    })
+    .slice(0, Math.max(1, Number(limit || 0)));
+}
+
+function incCount(map, key, amount = 1) {
+  if (!(map instanceof Map)) {
+    return;
+  }
+  const safeKey = sanitizeToken(String(key || ""), 80);
+  if (!safeKey) {
+    return;
+  }
+  map.set(safeKey, Number(map.get(safeKey) || 0) + Number(amount || 0));
 }
 
 function formatDuration(ms) {
@@ -798,18 +1161,161 @@ function buildAnalyticsSnapshot() {
   const now = Date.now();
   pruneAnalytics(now);
   const activeThreshold = now - ANALYTICS_ACTIVE_WINDOW_MS;
-  let activeNow = 0;
-  for (const row of analyticsClients.values()) {
-    if (Number(row?.lastSeen || 0) >= activeThreshold) {
-      activeNow += 1;
+  const rows24h = Array.from(analyticsClients.values());
+  const activeRows = rows24h.filter((row) => Number(row?.lastSeen || 0) >= activeThreshold);
+
+  const devicesActive = new Map();
+  const platformsActive = new Map();
+  const browsersActive = new Map();
+  const pagesActive = new Map();
+
+  const ipActiveMap = new Map();
+  const ip24hMap = new Map();
+
+  const mergeIpRow = (targetMap, row) => {
+    const ip = sanitizeToken(row?.ip || "", 60);
+    if (!ip) {
+      return;
     }
+    const current = targetMap.get(ip) || {
+      ip,
+      firstSeen: Number(row?.firstSeen || now),
+      lastSeen: Number(row?.lastSeen || now),
+      clientCount: 0,
+      countryCode: "??",
+      countryName: "Inconnu",
+      deviceCounts: new Map(),
+      platformCounts: new Map(),
+      browserCounts: new Map(),
+      pageCounts: new Map(),
+    };
+    current.firstSeen = Math.min(current.firstSeen, Number(row?.firstSeen || now));
+    current.lastSeen = Math.max(current.lastSeen, Number(row?.lastSeen || now));
+    current.clientCount += 1;
+
+    const cachedGeo = readCachedGeoForIp(ip, now);
+    const rowCountryCode = sanitizeToken(String(row?.countryCode || "").toUpperCase(), 8);
+    const rowCountryName = sanitizeToken(String(row?.countryName || ""), 80);
+    const geo = cachedGeo || (rowCountryCode ? { countryCode: rowCountryCode, countryName: rowCountryName } : null);
+    if (geo) {
+      current.countryCode = sanitizeToken(String(geo.countryCode || "").toUpperCase(), 8) || current.countryCode;
+      current.countryName = sanitizeToken(String(geo.countryName || ""), 80) || current.countryName;
+    } else if (!isPublicIpAddress(ip)) {
+      current.countryCode = "LAN";
+      current.countryName = "Local";
+    }
+
+    incCount(current.deviceCounts, row?.deviceClass || "Autre", 1);
+    incCount(current.platformCounts, row?.platform || "Inconnu", 1);
+    incCount(current.browserCounts, row?.browser || "Inconnu", 1);
+    if (row?.page) {
+      incCount(current.pageCounts, row.page, 1);
+    }
+    targetMap.set(ip, current);
+  };
+
+  rows24h.forEach((row) => {
+    mergeIpRow(ip24hMap, row);
+  });
+
+  activeRows.forEach((row) => {
+    incCount(devicesActive, row?.deviceClass || "Autre", 1);
+    incCount(platformsActive, row?.platform || "Inconnu", 1);
+    incCount(browsersActive, row?.browser || "Inconnu", 1);
+    if (row?.page) {
+      incCount(pagesActive, row.page, 1);
+    }
+    mergeIpRow(ipActiveMap, row);
+  });
+
+  const countryActive = new Map();
+  const country24h = new Map();
+  for (const entry of ipActiveMap.values()) {
+    const code = sanitizeToken(String(entry?.countryCode || "").toUpperCase(), 8) || "??";
+    const name = sanitizeToken(entry?.countryName || "", 80) || "Inconnu";
+    incCount(countryActive, `${code}|${name}`, 1);
   }
+  for (const entry of ip24hMap.values()) {
+    const code = sanitizeToken(String(entry?.countryCode || "").toUpperCase(), 8) || "??";
+    const name = sanitizeToken(entry?.countryName || "", 80) || "Inconnu";
+    incCount(country24h, `${code}|${name}`, 1);
+  }
+
+  const activeIpRows = Array.from(ipActiveMap.values())
+    .sort((left, right) => Number(right?.lastSeen || 0) - Number(left?.lastSeen || 0))
+    .map((entry) => {
+      const topDevice = pickTopCountKey(entry.deviceCounts) || "Autre";
+      const topPlatform = pickTopCountKey(entry.platformCounts) || "Inconnu";
+      const topBrowser = pickTopCountKey(entry.browserCounts) || "Inconnu";
+      const topPage = pickTopCountKey(entry.pageCounts) || "/";
+      return {
+        ip: entry.ip,
+        firstSeen: Number(entry.firstSeen || now),
+        lastSeen: Number(entry.lastSeen || now),
+        clientCount: Number(entry.clientCount || 0),
+        countryCode: sanitizeToken(String(entry.countryCode || "").toUpperCase(), 8) || "??",
+        countryName: sanitizeToken(entry.countryName || "", 80) || "Inconnu",
+        device: topDevice,
+        platform: topPlatform,
+        browser: topBrowser,
+        page: topPage,
+      };
+    });
+
+  const countryRowsActive = sortCountMapDesc(countryActive, 80).map(([rawKey, count]) => {
+    const [codeRaw, ...nameParts] = String(rawKey || "").split("|");
+    const code = sanitizeToken(codeRaw || "??", 8) || "??";
+    const name = sanitizeToken(nameParts.join("|") || "Inconnu", 80) || "Inconnu";
+    return {
+      code,
+      name,
+      count: Number(count || 0),
+    };
+  });
+
+  const countryRows24h = sortCountMapDesc(country24h, 120).map(([rawKey, count]) => {
+    const [codeRaw, ...nameParts] = String(rawKey || "").split("|");
+    const code = sanitizeToken(codeRaw || "??", 8) || "??";
+    const name = sanitizeToken(nameParts.join("|") || "Inconnu", 80) || "Inconnu";
+    return {
+      code,
+      name,
+      count: Number(count || 0),
+    };
+  });
+
   return {
     generatedAt: new Date(now).toISOString(),
-    activeNow,
+    activeNow: activeRows.length,
     unique24h: analyticsClients.size,
     heartbeats24h: analyticsEvents.length,
     totalSeen: analyticsTotalSeen,
+    activeIps: ipActiveMap.size,
+    uniqueIps24h: ip24hMap.size,
+    countriesActive: countryRowsActive.length,
+    countries24h: countryRows24h.length,
+    devicesActive: {
+      pc: Number(devicesActive.get("PC") || 0),
+      telephone: Number(devicesActive.get("Telephone") || 0),
+      tablette: Number(devicesActive.get("Tablette") || 0),
+      bot: Number(devicesActive.get("Bot") || 0),
+      autre: Number(devicesActive.get("Autre") || 0),
+    },
+    platformsActive: sortCountMapDesc(platformsActive, 16).map(([name, count]) => ({
+      name: sanitizeToken(name, 40) || "Inconnu",
+      count: Number(count || 0),
+    })),
+    browsersActive: sortCountMapDesc(browsersActive, 16).map(([name, count]) => ({
+      name: sanitizeToken(name, 40) || "Inconnu",
+      count: Number(count || 0),
+    })),
+    pagesActive: sortCountMapDesc(pagesActive, 24).map(([name, count]) => ({
+      name: sanitizeToken(name, 140) || "/",
+      count: Number(count || 0),
+    })),
+    countryRowsActive,
+    countryRows24h,
+    activeIpRows,
     uptimeMs: Math.max(0, process.uptime() * 1000),
     uptimeLabel: formatDuration(process.uptime() * 1000),
   };
@@ -839,28 +1345,195 @@ function saveDiscordStatsState() {
   }
 }
 
-function buildDiscordStatsEmbed(stats, reason) {
-  return {
-    title: "Zenix - Statistiques Live",
-    description: "Mise a jour en temps reel (message unique).",
+function countryCodeToFlagEmoji(code) {
+  const safe = sanitizeToken(String(code || "").toUpperCase(), 4);
+  if (!/^[A-Z]{2}$/.test(safe)) {
+    return "🌍";
+  }
+  const points = safe.split("").map((char) => 127397 + char.charCodeAt(0));
+  try {
+    return String.fromCodePoint(...points);
+  } catch {
+    return "🌍";
+  }
+}
+
+function joinRankRows(rows, options = {}) {
+  const limit = Math.max(1, Number(options.limit || 8));
+  const fallback = options.fallback || "Aucune donnee";
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return fallback;
+  }
+  return rows
+    .slice(0, limit)
+    .map((row) => {
+      const name = sanitizeToken(row?.name || row?.code || "Inconnu", 80) || "Inconnu";
+      return `• ${name}: ${Number(row?.count || 0)}`;
+    })
+    .join("\n");
+}
+
+function buildActiveIpLines(stats) {
+  const rows = Array.isArray(stats?.activeIpRows) ? stats.activeIpRows : [];
+  if (rows.length === 0) {
+    return ["Aucune IP active."];
+  }
+  return rows.map((entry) => {
+    const ip = sanitizeToken(entry?.ip || "0.0.0.0", 64) || "0.0.0.0";
+    const code = sanitizeToken(String(entry?.countryCode || "??").toUpperCase(), 8) || "??";
+    const country = sanitizeToken(entry?.countryName || "Inconnu", 80) || "Inconnu";
+    const device = sanitizeToken(entry?.device || "Autre", 24) || "Autre";
+    const platform = sanitizeToken(entry?.platform || "Inconnu", 24) || "Inconnu";
+    const browser = sanitizeToken(entry?.browser || "Inconnu", 24) || "Inconnu";
+    const page = sanitizeToken(entry?.page || "/", 80) || "/";
+    const clients = Number(entry?.clientCount || 0);
+    const age = formatDuration(Math.max(0, Date.now() - Number(entry?.lastSeen || 0)));
+    return `\`${ip}\` • ${countryCodeToFlagEmoji(code)} ${code}/${country} • ${device} • ${platform}/${browser} • ${clients} client(s) • ${page} • vu il y a ${age}`;
+  });
+}
+
+function chunkLinesForDiscord(lines, maxChars = ANALYTICS_IP_LIST_EMBED_CHARS) {
+  const chunks = [];
+  let current = [];
+  let currentLen = 0;
+  const safeMax = Math.max(1200, Number(maxChars || ANALYTICS_IP_LIST_EMBED_CHARS));
+  for (const rawLine of lines) {
+    const line = String(rawLine || "").trim();
+    if (!line) {
+      continue;
+    }
+    const addLen = line.length + (current.length > 0 ? 1 : 0);
+    if (currentLen + addLen > safeMax && current.length > 0) {
+      chunks.push(current.join("\n"));
+      current = [line];
+      currentLen = line.length;
+    } else {
+      current.push(line);
+      currentLen += addLen;
+    }
+  }
+  if (current.length > 0) {
+    chunks.push(current.join("\n"));
+  }
+  return chunks;
+}
+
+function buildDiscordStatsEmbeds(stats, reason) {
+  const devices = stats?.devicesActive || {};
+  const countriesText = (Array.isArray(stats?.countryRowsActive) ? stats.countryRowsActive : [])
+    .slice(0, 8)
+    .map((entry) => {
+      const code = sanitizeToken(String(entry?.code || "??").toUpperCase(), 8) || "??";
+      const name = sanitizeToken(entry?.name || "Inconnu", 80) || "Inconnu";
+      return `• ${countryCodeToFlagEmoji(code)} ${code}/${name}: ${Number(entry?.count || 0)}`;
+    })
+    .join("\n") || "Aucun pays detecte";
+
+  const pagesText =
+    (Array.isArray(stats?.pagesActive) ? stats.pagesActive : [])
+      .slice(0, 6)
+      .map((entry) => `• ${sanitizeToken(entry?.name || "/", 90) || "/"}: ${Number(entry?.count || 0)}`)
+      .join("\n") || "Aucune page active";
+
+  const mainEmbed = {
+    title: "Zenix - Monitor Live",
+    description: "Telemetrie nettoyee, enrichie et orientee ops.",
     color: 0xf11424,
     timestamp: stats.generatedAt,
     fields: [
-      { name: "Connectes maintenant", value: String(stats.activeNow), inline: true },
-      { name: "Total 24h (uniques)", value: String(stats.unique24h), inline: true },
-      { name: "Heartbeats 24h", value: String(stats.heartbeats24h), inline: true },
-      { name: "Total depuis lancement", value: String(stats.totalSeen), inline: true },
-      { name: "Uptime serveur", value: stats.uptimeLabel, inline: true },
       {
-        name: "Rafraichissement",
-        value: `Toutes les ${Math.max(1, Math.round(DISCORD_PUSH_INTERVAL_MS / 1000))} s`,
+        name: "Actifs maintenant (2 min)",
+        value:
+          `Clients: **${Number(stats?.activeNow || 0)}**\n` +
+          `IP actives: **${Number(stats?.activeIps || 0)}**\n` +
+          `Pays actifs: **${Number(stats?.countriesActive || 0)}**`,
         inline: true,
+      },
+      {
+        name: "Fenetre 24h",
+        value:
+          `Clients uniques: **${Number(stats?.unique24h || 0)}**\n` +
+          `IP uniques: **${Number(stats?.uniqueIps24h || 0)}**\n` +
+          `Heartbeats: **${Number(stats?.heartbeats24h || 0)}**`,
+        inline: true,
+      },
+      {
+        name: "Serveur",
+        value:
+          `Uptime: **${sanitizeToken(stats?.uptimeLabel || "0s", 32) || "0s"}**\n` +
+          `Push: **${Math.max(1, Math.round(DISCORD_PUSH_INTERVAL_MS / 1000))}s**\n` +
+          `Raison: **${sanitizeToken(reason || "interval", 20) || "interval"}**`,
+        inline: true,
+      },
+      {
+        name: "Appareils actifs",
+        value:
+          `PC: **${Number(devices.pc || 0)}**\n` +
+          `Telephone: **${Number(devices.telephone || 0)}**\n` +
+          `Tablette: **${Number(devices.tablette || 0)}**\n` +
+          `Bot/Autre: **${Number(devices.bot || 0) + Number(devices.autre || 0)}**`,
+        inline: true,
+      },
+      {
+        name: "Plateformes actives",
+        value: joinRankRows(stats?.platformsActive, { limit: 8 }),
+        inline: true,
+      },
+      {
+        name: "Navigateurs actifs",
+        value: joinRankRows(stats?.browsersActive, { limit: 8 }),
+        inline: true,
+      },
+      {
+        name: "Pays (IP actives)",
+        value: countriesText,
+        inline: false,
+      },
+      {
+        name: "Pages actives",
+        value: pagesText,
+        inline: false,
       },
     ],
     footer: {
       text: reason === "startup" ? "Demarrage service" : "Mise a jour automatique",
     },
   };
+
+  const ipLinesRaw = buildActiveIpLines(stats);
+  const cappedLines = ipLinesRaw.slice(0, ANALYTICS_IP_LIST_MAX_LINES);
+  let hiddenCount = Math.max(0, ipLinesRaw.length - cappedLines.length);
+  const chunks = chunkLinesForDiscord(cappedLines, ANALYTICS_IP_LIST_EMBED_CHARS);
+  const ipEmbeds = [];
+  const maxIpEmbeds = 9; // Discord limit 10 embeds per message (main + 9 IP embeds)
+  chunks.slice(0, maxIpEmbeds).forEach((chunk, index) => {
+    ipEmbeds.push({
+      title:
+        index === 0
+          ? `IPs actives (${Number(stats?.activeIps || 0)})`
+          : `IPs actives (suite ${index + 1}/${Math.min(chunks.length, maxIpEmbeds)})`,
+      description: chunk,
+      color: 0x8b0f19,
+      timestamp: stats.generatedAt,
+    });
+  });
+
+  if (chunks.length > maxIpEmbeds) {
+    const notShownByEmbedCap = chunks
+      .slice(maxIpEmbeds)
+      .join("\n")
+      .split("\n")
+      .filter(Boolean).length;
+    hiddenCount += notShownByEmbedCap;
+  }
+  if (hiddenCount > 0 && ipEmbeds.length > 0) {
+    const last = ipEmbeds[ipEmbeds.length - 1];
+    const suffix = `\n\n... +${hiddenCount} IP non affichee(s) (limites Discord).`;
+    const next = `${String(last.description || "").trim()}${suffix}`;
+    last.description = next.slice(0, 4096);
+  }
+
+  return [mainEmbed, ...ipEmbeds];
 }
 
 function isDiscordWebhookConfigured() {
@@ -1009,7 +1682,7 @@ async function pushDiscordStats(reason = "interval") {
   const payload = {
     username: "Zenix Monitor",
     allowed_mentions: { parse: [] },
-    embeds: [buildDiscordStatsEmbed(stats, reason)],
+    embeds: buildDiscordStatsEmbeds(stats, reason),
   };
 
   if (!discordStatsMessageId) {
@@ -6239,6 +6912,7 @@ async function handleAnalyticsWebhookStatus(req, res, requestUrl) {
     return true;
   }
 
+  const stats = buildAnalyticsSnapshot();
   sendJson(res, 200, {
     type: "success",
     webhookConfigured: isDiscordWebhookConfigured(),
@@ -6257,6 +6931,18 @@ async function handleAnalyticsWebhookStatus(req, res, requestUrl) {
     nextDelayMs: Math.max(0, Number(discordNextAllowedAt || 0) - Date.now()),
     intervalMs: DISCORD_PUSH_INTERVAL_MS,
     lastResult: discordLastResult,
+    snapshot: {
+      generatedAt: stats.generatedAt,
+      activeNow: Number(stats.activeNow || 0),
+      activeIps: Number(stats.activeIps || 0),
+      unique24h: Number(stats.unique24h || 0),
+      uniqueIps24h: Number(stats.uniqueIps24h || 0),
+      heartbeats24h: Number(stats.heartbeats24h || 0),
+      countriesActive: Number(stats.countriesActive || 0),
+      devicesActive: stats.devicesActive || {},
+      topPlatforms: (Array.isArray(stats.platformsActive) ? stats.platformsActive : []).slice(0, 6),
+      topBrowsers: (Array.isArray(stats.browsersActive) ? stats.browsersActive : []).slice(0, 6),
+    },
   });
   return true;
 }

@@ -107,6 +107,16 @@ Last update: 2026-03-09
   - shorter startup/status recovery thresholds
   - quicker failover on prolonged `connexion/chargement/fallback` states.
 
+## Webhook analytics policy
+- Discord webhook stats are designed for ops readability:
+  - active users + active IPs + 24h totals
+  - country counters (IP-based)
+  - device/platform/browser counters
+  - top active pages
+- Webhook includes active IP lines (context-rich) in dedicated embeds.
+- Country enrichment is best-effort with cached GEO lookup and provider fallback.
+- Keep public `/api/analytics/webhook-status` summary rich but avoid exposing full raw IP list there.
+
 ## Deployment workflow
 - Main code repo remote: `origin` (`Notimax/zenix`)
 - Public deploy mirror remote: `deploypublic` (`Notimax/zenix-deploy`)

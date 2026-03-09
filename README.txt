@@ -266,3 +266,18 @@ LATEST LANGUAGE LABEL + IOS AUTOSWITCH TUNING (2026-03-09)
   - shorter startup/status recovery thresholds
   - extra stall pattern detection on prolonged `connexion/chargement/fallback` states
   - shorter mobile bootstrap/direct/embed readiness windows to fail over earlier.
+
+LATEST WEBHOOK ANALYTICS REDESIGN (2026-03-09)
+- Discord webhook message redesigned with richer operations data:
+  - active clients, active IPs, unique 24h, heartbeats 24h
+  - device counters (`PC`, `Telephone`, `Tablette`, `Bot/Autre`)
+  - platform and browser breakdown
+  - top active pages
+  - active countries (IP-based counter)
+- Active IP list is now included in webhook embeds with per-IP context:
+  - country, device, platform/browser, active page, last-seen age, client count
+- Geo enrichment:
+  - IP-to-country lookup with cache + timeout + fallback providers
+  - local/private IPs labeled as `LAN/Local`
+- Public API `/api/analytics/webhook-status` now returns an enriched snapshot summary
+  (without exposing full IP line list).
