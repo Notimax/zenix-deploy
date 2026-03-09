@@ -925,7 +925,7 @@ async function init() {
   pruneProgressEntries();
   applyUiPrefs({ syncControls: true });
   if (refs.footerVersion) {
-    refs.footerVersion.textContent = "c146";
+    refs.footerVersion.textContent = "c147";
   }
   updateNetworkBadge();
   cleanupLegacyServiceWorker().catch(() => {
@@ -4171,12 +4171,16 @@ async function loadInitialCatalog() {
     const warmupTargetPages = Math.max(INITIAL_CATALOG_WARMUP_PAGES, Number(initialProfile.initialPages || 1));
     const warmupLastPage = Math.min(firstResult.lastPage, warmupTargetPages);
     for (let page = 2; page <= warmupLastPage; page += 1) {
-      const result = await fetchCatalogPage(page);
-      upsertCatalogItems(result.items, { prepend: false });
-      state.page = result.currentPage;
-      state.totalPages = result.lastPage;
-      state.catalogSyncPage = result.currentPage;
-      state.hasMore = result.currentPage < result.lastPage;
+      try {
+        const result = await fetchCatalogPage(page);
+        upsertCatalogItems(result.items, { prepend: false });
+        state.page = result.currentPage;
+        state.totalPages = result.lastPage;
+        state.catalogSyncPage = result.currentPage;
+        state.hasMore = result.currentPage < result.lastPage;
+      } catch {
+        break;
+      }
     }
     state.lastSyncAt = new Date();
 
@@ -4189,7 +4193,14 @@ async function loadInitialCatalog() {
     }
     saveCatalogSnapshot();
   } catch {
-    if (hasSnapshot) {
+    if (state.catalog.length > 0) {
+      state.page = Math.max(1, Number(state.page || 1));
+      state.totalPages = Math.max(state.page, Number(state.totalPages || state.page));
+      state.catalogSyncPage = Math.max(1, Number(state.catalogSyncPage || state.page));
+      state.hasMore = state.page < state.totalPages;
+      state.lastSyncAt = state.lastSyncAt || new Date();
+      saveCatalogSnapshot();
+    } else if (hasSnapshot) {
       showToast("Mode cache actif: dernier catalogue local charge.");
     } else {
       state.catalog = FALLBACK_ITEMS.slice();

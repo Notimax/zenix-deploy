@@ -74,6 +74,8 @@ Last update: 2026-03-09
     - category/image loading switched from aggressive mass-eager to staged budgets to reduce pending covers in large views.
     - large category render-all-at-once threshold lowered to avoid saturating desktop/mobile rendering and networking.
     - cover prime + detail-hydration limits rebalanced to prioritize above-the-fold reliability first.
+  - c147 follow-up:
+    - initial catalog warmup no longer collapses to hard fallback when a later warmup page fetch fails after page 1 already succeeded.
 
 ## Streaming/source policy
 - External embed fallback sources (e.g. generic `vidsrc`) are removed.

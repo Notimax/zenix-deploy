@@ -408,3 +408,7 @@ LATEST COVER LOAD BALANCING (2026-03-09, c146)
 - Detail-cover hydration budgets rebalanced:
   - lower per-category hydration caps while keeping bounded concurrency.
   - goal: faster visible covers with fewer pending images in heavy categories.
+
+LATEST CATALOG WARMUP RESILIENCE (2026-03-09, c147)
+- `loadInitialCatalog` no longer drops to hard fallback (2 items) when a secondary warmup page fails.
+- If page 1 loaded successfully, fetched catalog rows are kept and cached even if later warmup fetches fail.
