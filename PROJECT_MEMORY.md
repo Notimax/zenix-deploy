@@ -70,6 +70,10 @@ Last update: 2026-03-09
     - cover assignment no longer waits on a separate image preloader gate before applying new card cover URLs.
     - detail cover hydration now runs with bounded concurrency to reduce request bursts and improve cover fill consistency.
     - browse/category/sponsor sections and grids now force visible rendering path (no deferred content-visibility) for instant category display.
+  - c146 follow-up:
+    - category/image loading switched from aggressive mass-eager to staged budgets to reduce pending covers in large views.
+    - large category render-all-at-once threshold lowered to avoid saturating desktop/mobile rendering and networking.
+    - cover prime + detail-hydration limits rebalanced to prioritize above-the-fold reliability first.
 
 ## Streaming/source policy
 - External embed fallback sources (e.g. generic `vidsrc`) are removed.

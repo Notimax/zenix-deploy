@@ -398,3 +398,13 @@ LATEST CATEGORY VISIBILITY STABILITY (2026-03-09, c145)
 - Immediate section rendering:
   - browse/category/sponsor sections and grids now force visible rendering path globally
     (no deferred `content-visibility` in normal mode), to avoid empty blocks while navigating categories.
+
+LATEST COVER LOAD BALANCING (2026-03-09, c146)
+- Switched category cover loading to staged mode (instead of aggressive mass-eager):
+  - reduced eager/high-priority budgets for mobile and desktop.
+  - reduced critical cover prime window to prioritize above-the-fold readiness.
+- Category render pacing tuned:
+  - render-all-at-once threshold lowered for large categories to avoid network/main-thread saturation.
+- Detail-cover hydration budgets rebalanced:
+  - lower per-category hydration caps while keeping bounded concurrency.
+  - goal: faster visible covers with fewer pending images in heavy categories.

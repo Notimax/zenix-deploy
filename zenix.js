@@ -36,19 +36,19 @@ const CATALOG_RENDER_CHUNK_MAX = 104;
 const MOBILE_VIEWPORT_MAX_WIDTH = 740;
 const MOBILE_CATALOG_FIRST_PAINT = 120;
 const MOBILE_CATALOG_CHUNK_MIN = 88;
-const MOBILE_EAGER_IMAGE_LIMIT = 900;
-const MOBILE_HIGH_PRIORITY_IMAGE_LIMIT = 420;
-const DESKTOP_EAGER_IMAGE_LIMIT = 700;
-const DESKTOP_HIGH_PRIORITY_IMAGE_LIMIT = 280;
-const CRITICAL_COVER_PRIME_MOBILE = 420;
-const CRITICAL_COVER_PRIME_DESKTOP = 280;
-const CRITICAL_COVER_PRIME_WAIT_MS = 960;
+const MOBILE_EAGER_IMAGE_LIMIT = 260;
+const MOBILE_HIGH_PRIORITY_IMAGE_LIMIT = 120;
+const DESKTOP_EAGER_IMAGE_LIMIT = 220;
+const DESKTOP_HIGH_PRIORITY_IMAGE_LIMIT = 96;
+const CRITICAL_COVER_PRIME_MOBILE = 240;
+const CRITICAL_COVER_PRIME_DESKTOP = 180;
+const CRITICAL_COVER_PRIME_WAIT_MS = 900;
 const DETAIL_COVER_HYDRATE_CONCURRENCY_MOBILE = 10;
 const DETAIL_COVER_HYDRATE_CONCURRENCY_DESKTOP = 14;
-const DETAIL_COVER_HYDRATE_LIMIT_CATEGORY_MOBILE = 560;
-const DETAIL_COVER_HYDRATE_LIMIT_CATEGORY_DESKTOP = 420;
-const DETAIL_COVER_HYDRATE_LIMIT_DEFAULT_MOBILE = 180;
-const DETAIL_COVER_HYDRATE_LIMIT_DEFAULT_DESKTOP = 120;
+const DETAIL_COVER_HYDRATE_LIMIT_CATEGORY_MOBILE = 340;
+const DETAIL_COVER_HYDRATE_LIMIT_CATEGORY_DESKTOP = 260;
+const DETAIL_COVER_HYDRATE_LIMIT_DEFAULT_MOBILE = 120;
+const DETAIL_COVER_HYDRATE_LIMIT_DEFAULT_DESKTOP = 84;
 const LIVE_RENDER_INTERACTION_GRACE_MS = 1200;
 const SCROLL_SYNC_THRESHOLD_PX = 1800;
 const SCROLL_SYNC_DEBOUNCE_MS = 80;
@@ -925,7 +925,7 @@ async function init() {
   pruneProgressEntries();
   applyUiPrefs({ syncControls: true });
   if (refs.footerVersion) {
-    refs.footerVersion.textContent = "c144";
+    refs.footerVersion.textContent = "c146";
   }
   updateNetworkBadge();
   cleanupLegacyServiceWorker().catch(() => {
@@ -2712,8 +2712,8 @@ function getCardImageProfile() {
   const inAppBrowser = runtimeEnv.isInAppBrowser;
   if (isCompactViewport()) {
     if (boosted) {
-      const eagerLimit = inAppBrowser ? 2200 : slow ? 900 : 1800;
-      const highPriorityLimit = inAppBrowser ? 1300 : slow ? 520 : 1100;
+      const eagerLimit = inAppBrowser ? 520 : slow ? 160 : 360;
+      const highPriorityLimit = inAppBrowser ? 260 : slow ? 68 : 180;
       return {
         eagerLimit,
         highPriorityLimit,
@@ -2732,8 +2732,8 @@ function getCardImageProfile() {
   const priorityBase = boosted ? Math.max(96, DESKTOP_HIGH_PRIORITY_IMAGE_LIMIT) : DESKTOP_HIGH_PRIORITY_IMAGE_LIMIT;
   if (boosted) {
     return {
-      eagerLimit: inAppBrowser ? 1800 : slow ? 820 : 1400,
-      highPriorityLimit: inAppBrowser ? 1000 : slow ? 420 : 780,
+      eagerLimit: inAppBrowser ? 620 : slow ? 220 : 420,
+      highPriorityLimit: inAppBrowser ? 320 : slow ? 96 : 200,
     };
   }
   const inAppEager = Math.max(eagerBase, 240);
@@ -4848,8 +4848,8 @@ function renderAll() {
     }
     const warmLimit = shouldBoostCoverLoading()
       ? isCompactViewport()
-        ? 2400
-        : 1800
+        ? 900
+        : 700
       : 620;
     warmImageCacheFromPool(visible, warmLimit);
   }
@@ -5909,7 +5909,7 @@ function renderCatalog(items) {
   const compact = isCompactViewport();
   const activeView = resolveCatalogViewForSearch();
   const categoryBoost = state.query.trim().length === 0 && isCatalogCategoryView(activeView);
-  const renderAllAtOnce = categoryBoost && total <= (compact ? 1100 : 1300);
+  const renderAllAtOnce = categoryBoost && total <= (compact ? 420 : 520);
   const baseChunk = Math.max(
     CATALOG_RENDER_CHUNK_MIN,
     Math.min(CATALOG_RENDER_CHUNK_MAX, Math.ceil(total / 9))
