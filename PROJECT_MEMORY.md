@@ -87,6 +87,10 @@ Last update: 2026-03-08
 
 ## Verification checklist (before marking done)
 - iPhone 13 simulation (WebKit) run at least 3 x 20s on target title.
+- For deeper iOS audits, run stress battery:
+  - `node __tmp_ios13_20x20_probe.js`
+  - target: 10 films + 10 series, 20s each
+  - inspect resets/stalls/fatal per run and iterate until stable.
 - Confirm no mobile toast visible.
 - Confirm startup splash disappears on mobile.
 - Confirm source fallback behavior in player status and source selector.

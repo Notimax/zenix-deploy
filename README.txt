@@ -208,3 +208,20 @@ LOCAL BRUTE RESULT (AFTER iOS TUNING, 2026-03-09)
 - Summary:
   - run1: passed 8 / failed 0
   - run2: passed 8 / failed 0
+
+IPHONE STRESS RESULT (LIVE, 2026-03-09)
+- Test battery:
+  - iPhone 13 WebKit
+  - 20s per title
+  - 10 films + 10 series (auto-selected from live catalog)
+- Source: `__tmp_ios13_20x20_probe_live_result_after_ios_fix_v2_2026-03-09.json`
+- Summary:
+  - total runs: 20
+  - passed: 20
+  - failed: 0
+  - movie failed: 0
+  - series failed: 0
+  - `/api/media/*/sheet` 404 count during battery: 0
+- Notes:
+  - one non-playable candidate was auto-skipped and replaced (`SKIPPED=1`).
+  - iOS segment fallback chain is now minimized with faster handoff to alternate source when available.
