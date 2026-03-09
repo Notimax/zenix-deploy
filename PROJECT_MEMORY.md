@@ -112,6 +112,9 @@ Last update: 2026-03-09
     - calendar covers now prefer the same internal cover resolution path as catalog/new-release cards.
     - added calendar catalog/title match helper so calendar rows can inherit local poster quality when available.
     - calendar image loading/fetch priority now follows shared card image profile budgets for consistency.
+  - c161 follow-up:
+    - mobile catalog layout is now forced to 2 columns (catalog-grid) at <=740px.
+    - applied as a late CSS override to prevent earlier responsive blocks from reverting to 3 columns.
 
 ## Streaming/source policy
 - External embed fallback sources (e.g. generic `vidsrc`) are removed.
@@ -261,3 +264,4 @@ Last update: 2026-03-09
 - If a playback test fails (block, freeze, error, micro bug), never stop at diagnostics.
 - Apply a fix immediately, then rerun the same test conditions.
 - Keep iterating fix + retest until all mandatory checks are green.
+

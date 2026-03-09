@@ -513,3 +513,7 @@ LATEST CALENDAR COVER ALIGNMENT (2026-03-09, c160)
 - Calendar cards now reuse the same cover resolution strategy as catalog/new releases when a local match exists.
 - Calendar image loading priority now follows shared card profile logic (`eager/high`) instead of fixed hardcoded thresholds.
 - Calendar warmup now resolves covers with `resolveCalendarDetailId(...)` for better poster consistency with `Nouveautes`.
+
+LATEST MOBILE CATALOG 2-UP (2026-03-09, c161)
+- On phone widths, `catalog-grid` is now forced to 2 covers per row (duo layout).
+- Rule is applied in a late CSS block to avoid overrides from other responsive sections.
