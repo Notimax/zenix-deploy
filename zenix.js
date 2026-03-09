@@ -1008,7 +1008,7 @@ async function init() {
   pruneProgressEntries();
   applyUiPrefs({ syncControls: true });
   if (refs.footerVersion) {
-    refs.footerVersion.textContent = "c158";
+    refs.footerVersion.textContent = "c160";
   }
   updateNetworkBadge();
   cleanupLegacyServiceWorker().catch(() => {
@@ -3699,9 +3699,22 @@ function resolveCalendarDetailId(entry) {
     return directId;
   }
 
+  const match = resolveCalendarCatalogMatch(entry);
+  return Number(match?.id || 0);
+}
+
+function resolveCalendarCatalogMatch(entry) {
+  const directId = Number(entry?.mediaId || 0);
+  if (directId > 0) {
+    const directItem = findItemById(directId);
+    if (directItem) {
+      return directItem;
+    }
+  }
+
   const titleKey = normalizeTitleKey(entry?.title || "");
   if (!titleKey) {
-    return 0;
+    return null;
   }
 
   const rawType = String(entry?.type || entry?.kind || "").toLowerCase();
@@ -3733,22 +3746,25 @@ function resolveCalendarDetailId(entry) {
     match = pool.find((item) => normalizeTitleKey(item.title) === titleKey);
   }
 
-  return Number(match?.id || 0);
+  return match || null;
 }
 
 function resolveCalendarEntryCover(entry, detailId = 0) {
-  const direct = normalizeImageUrl(entry?.poster || "");
+  const direct = normalizeImageUrl(entry?.poster || entry?.backdrop || "");
   const mediaId = Math.max(0, Number(detailId || entry?.mediaId || 0));
-  if (mediaId <= 0) {
-    return direct;
+  let item = null;
+  if (mediaId > 0) {
+    item = findItemById(mediaId);
   }
-  const item = findItemById(mediaId);
   if (!item) {
-    return direct;
+    item = resolveCalendarCatalogMatch(entry);
   }
-  const cachedDetails = state.detailsCache.get(mediaId) || null;
+  if (!item) {
+    return direct || getDefaultCoverDataUrl(entry?.title || "Affiche");
+  }
+  const cachedDetails = state.detailsCache.get(Number(item.id || 0)) || null;
   const cover = resolveCardCover(item, cachedDetails);
-  return cover || direct;
+  return cover || direct || getDefaultCoverDataUrl(item.title || entry?.title || "Affiche");
 }
 
 function hydrateCalendarCardsForMedia(mediaId, details = null) {
@@ -3905,6 +3921,9 @@ function renderCalendarSection() {
   refs.calendarMergedGrid.innerHTML = "";
   const mergedFragment = document.createDocumentFragment();
   const pendingHydrateIds = new Set();
+  const imageProfile = getCardImageProfile();
+  const eagerLimit = Number(imageProfile?.eagerLimit || DESKTOP_EAGER_IMAGE_LIMIT);
+  const highPriorityLimit = Number(imageProfile?.highPriorityLimit || DESKTOP_HIGH_PRIORITY_IMAGE_LIMIT);
   const typeMap = {
     film: "Film",
     serie: "Serie",
@@ -3934,9 +3953,9 @@ function renderCalendarSection() {
           <img
             src="${escapeHtml(poster)}"
             alt="${escapeHtml(entry.title || "Affiche")}"
-            loading="${index < 24 ? "eager" : "lazy"}"
+            loading="${index < eagerLimit ? "eager" : "lazy"}"
             decoding="async"
-            fetchpriority="${index < 10 ? "high" : "auto"}"
+            fetchpriority="${index < highPriorityLimit ? "high" : "auto"}"
             ${hasDetails ? `data-cover-id="${detailId}"` : ""}
           />
           <span class="calendar-date-pill">${escapeHtml(dateLabel)}</span>
@@ -4005,7 +4024,7 @@ function renderCalendarSection() {
     });
     warmImageCacheFromPool(
       mergedRows.map((entry) => ({
-        poster: resolveCalendarEntryCover(entry, Number(entry?.mediaId || 0)),
+        poster: resolveCalendarEntryCover(entry, resolveCalendarDetailId(entry)),
         backdrop: "",
       })),
       80

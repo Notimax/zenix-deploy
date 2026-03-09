@@ -108,6 +108,10 @@ Last update: 2026-03-09
     - catalog scroll sync now uses append-only rendering when new pages extend the current list.
     - full grid rebuild is avoided during infinite scroll if already-rendered cards match incoming prefix order.
     - objective: no visible refresh/flicker while users scroll through films/series.
+  - c160 follow-up:
+    - calendar covers now prefer the same internal cover resolution path as catalog/new-release cards.
+    - added calendar catalog/title match helper so calendar rows can inherit local poster quality when available.
+    - calendar image loading/fetch priority now follows shared card image profile budgets for consistency.
 
 ## Streaming/source policy
 - External embed fallback sources (e.g. generic `vidsrc`) are removed.
