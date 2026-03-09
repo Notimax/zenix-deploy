@@ -301,3 +301,28 @@ LATEST WEBHOOK ANALYTICS REDESIGN (2026-03-09)
   - local/private IPs labeled as `LAN/Local`
 - Public API `/api/analytics/webhook-status` now returns an enriched snapshot summary
   (without exposing full IP line list).
+
+LATEST VISUAL SYSTEM REFRESH (2026-03-09, c137)
+- New visual charter applied globally:
+  - unified spacing/radius/shadow tokens
+  - typography hierarchy tightened (display/body separation)
+  - premium background layers with subtle texture
+- Topbar/nav overhaul:
+  - discrete glassmorphism topbar
+  - animated active-nav indicator
+  - desktop overflow nav menu (`Plus`) for small widths
+  - mobile fixed bottom tabbar
+- Card and catalog polish:
+  - unified cover ratio and hover elevation/glow
+  - visual ribbons on cards (`Nouveau`, `Bientot dispo`, `En attente`)
+  - top medals style improved for ranks #1/#2/#3
+  - skeleton loading states for covers/details while images resolve
+  - continue progress bar styling reinforced directly on cards
+- Player/detail polish:
+  - source selector fully chip-based (quality/language/format/source + compatibility level)
+  - playback stepper styled (`Connexion`, `Fallback`, `Lecture`)
+  - modal/player transitions and spacing improved
+- Calendar/footer/sponsor polish:
+  - day counters styled in calendar overview
+  - sponsor blocks visually framed and separated from content
+  - real footer styling + design updates panel styling

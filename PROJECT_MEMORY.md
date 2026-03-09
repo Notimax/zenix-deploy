@@ -16,6 +16,29 @@ Last update: 2026-03-09
   - "Pour toi" excludes watched and liked titles
   - Focus on unseen content based on searches, likes, and watch history
 
+## Visual system policy (c137)
+- Keep unified visual tokens across the UI:
+  - coherent radii/shadows/spacing
+  - typography hierarchy (display headings + readable body text)
+  - premium layered background (gradient + light grain texture)
+- Navigation:
+  - topbar must stay glassmorphism-like and readable
+  - desktop navbar keeps animated active indicator
+  - if nav overflows on desktop, use overflow menu (`Plus`) instead of clipping
+  - mobile uses fixed bottom tabbar
+- Cards and statuses:
+  - poster ratio remains consistent (`2/3`) across grids
+  - badges/ribbons must be coherent by status (`Nouveau`, `Bientot dispo`, `En attente`)
+  - continue-progress is displayed directly on cards
+  - keep skeleton loading states for covers/details while images resolve
+- Player:
+  - source selection remains chip-based (not raw select)
+  - show readable source metadata (language/quality/format/source name + compatibility)
+  - keep playback step timeline visual (`Connexion`, `Fallback`, `Lecture`)
+- Layout polish:
+  - maintain visual framing for sponsor zones (separated from core content)
+  - keep footer and design-updates section styled and consistent with theme switch.
+
 ## Streaming/source policy
 - External embed fallback sources (e.g. generic `vidsrc`) are removed.
 - Keep FR-first behavior:

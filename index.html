@@ -67,8 +67,8 @@
       "logo": "https://zenix.best/android-chrome-512x512.png"
     }
   </script>
-    <link rel="stylesheet" href="/zenix.css?v=20260309-c133" />
-    <script defer src="/zenix.js?v=20260309-c134"></script>
+    <link rel="stylesheet" href="/zenix.css?v=20260309-c137" />
+    <script defer src="/zenix.js?v=20260309-c137"></script>
 </head>
 <body>
   <div class="startup-splash" id="startupSplash" aria-hidden="true">
@@ -91,24 +91,40 @@
       <span class="brand-text">Zenix</span>
     </a>
 
-    <nav class="main-nav" aria-label="Navigation principale">
-      <button class="nav-pill active" data-view="all" type="button">Accueil</button>
-      <button class="nav-pill" data-view="calendar" type="button">Calendrier</button>
-      <button class="nav-pill" data-view="latest" type="button">Nouveautes</button>
-      <button class="nav-pill" data-view="popular" type="button">Populaires</button>
-      <button class="nav-pill" data-view="top" type="button">Top du jour</button>
-      <button class="nav-pill" data-view="movie" type="button">Films</button>
-      <button class="nav-pill" data-view="tv" type="button">Series</button>
-      <button class="nav-pill" data-view="anime" type="button">Anime</button>
-      <button class="nav-pill" data-view="list" type="button">Ma liste</button>
-      <button class="nav-pill" data-view="info" type="button">Info</button>
-    </nav>
+    <div class="main-nav-shell">
+      <nav class="main-nav" aria-label="Navigation principale">
+        <button class="nav-pill active" data-view="all" type="button">Accueil</button>
+        <button class="nav-pill" data-view="calendar" type="button">Calendrier</button>
+        <button class="nav-pill" data-view="latest" type="button">Nouveautes</button>
+        <button class="nav-pill" data-view="popular" type="button">Populaires</button>
+        <button class="nav-pill" data-view="top" type="button">Top du jour</button>
+        <button class="nav-pill" data-view="movie" type="button">Films</button>
+        <button class="nav-pill" data-view="tv" type="button">Series</button>
+        <button class="nav-pill" data-view="anime" type="button">Anime</button>
+        <button class="nav-pill" data-view="list" type="button">Ma liste</button>
+        <button class="nav-pill" data-view="info" type="button">Info</button>
+        <span class="nav-active-indicator" id="navActiveIndicator" aria-hidden="true"></span>
+      </nav>
+      <div class="nav-overflow" id="navOverflow">
+        <button class="nav-overflow-btn" id="navOverflowBtn" type="button" hidden aria-expanded="false" aria-controls="navOverflowMenu">Plus</button>
+        <div class="nav-overflow-menu" id="navOverflowMenu" hidden>
+          <p class="nav-overflow-title">Navigation</p>
+          <div class="nav-overflow-list" id="navOverflowList"></div>
+        </div>
+      </div>
+    </div>
 
     <div class="header-tools">
       <div class="search-wrap">
         <input id="searchInput" class="search-input" type="search" placeholder="Rechercher un titre..." autocomplete="off" />
         <button id="clearSearchBtn" class="search-clear-btn" type="button" aria-label="Effacer la recherche" hidden>Effacer</button>
         <div class="search-suggest" id="searchSuggestPanel" hidden></div>
+      </div>
+      <button class="btn btn-soft btn-compact ui-chip" id="themeSwitchBtn" type="button">Theme: Cine</button>
+      <button class="btn btn-soft btn-compact ui-chip" id="motionToggleBtn" type="button">Animations: ON</button>
+      <div class="profile-mini" id="profileMini" aria-label="Profil local">
+        <span class="profile-mini-avatar" aria-hidden="true">Z</span>
+        <span class="profile-mini-meta"><strong>Local</strong><small>UI prefs</small></span>
       </div>
       <span class="net-badge" id="networkBadge" aria-live="polite">En ligne</span>
       <span class="free-chip">FREE</span>
@@ -146,6 +162,14 @@
         <p>Classement automatiquement actualise chaque jour.</p>
       </div>
       <div class="top-grid" id="topGrid"></div>
+    </section>
+
+    <section class="trending-section" id="trendingSection" hidden>
+      <div class="section-head">
+        <h2>Tendances</h2>
+        <p>Les titres qui accelerent le plus vite en ce moment.</p>
+      </div>
+      <div class="trending-track" id="trendingTrack"></div>
     </section>
 
     <section class="filters-panel" id="filtersPanel">
@@ -237,7 +261,10 @@
       <div class="catalog-actions">
         <button class="btn btn-soft" id="loadMoreBtn" type="button">Charger plus</button>
       </div>
-      <p class="empty" id="emptyState" hidden>Aucun resultat.</p>
+      <div class="empty-state-wrap" id="emptyStateWrap" hidden>
+        <p class="empty" id="emptyState">Aucun resultat.</p>
+        <button class="btn btn-soft btn-compact" id="emptyResetFiltersBtn" type="button">Revenir a l'accueil</button>
+      </div>
     </section>
 
     <section class="calendar-section" id="calendarSection" hidden>
@@ -281,6 +308,7 @@
           <h3>Sorties a venir</h3>
           <p id="calendarMergedMeta">Chargement du calendrier...</p>
         </div>
+        <div class="calendar-day-stats" id="calendarDayStats"></div>
         <div class="calendar-grid" id="calendarMergedGrid"></div>
       </article>
     </section>
@@ -453,9 +481,10 @@
                     <span>Source</span>
                     <span class="player-source-alert">Attention: si la video ne se lance pas, change de source.</span>
                   </span>
-                  <select id="playerSourceSelect"></select>
                 </label>
-                <button class="btn btn-soft btn-compact" id="playerSourceApplyBtn" type="button">Appliquer</button>
+                <select id="playerSourceSelect" hidden></select>
+                <div class="player-source-chips" id="playerSourceChips" role="listbox" aria-label="Choix des sources"></div>
+                <button class="btn btn-soft btn-compact" id="playerSourceApplyBtn" type="button" hidden>Appliquer</button>
               </div>
             </div>
             <div class="player-side-section">
@@ -491,11 +520,49 @@
 
             <p class="player-status" id="playerStatus">Preparation de la lecture...</p>
             <p class="player-source" id="playerSourceMeta"></p>
+            <ol class="player-stepper" id="playerStepper" aria-label="Etapes de lecture">
+              <li data-step="connect"><span class="player-step-dot" aria-hidden="true"></span><span>Connexion</span></li>
+              <li data-step="fallback"><span class="player-step-dot" aria-hidden="true"></span><span>Fallback</span></li>
+              <li data-step="play"><span class="player-step-dot" aria-hidden="true"></span><span>Lecture</span></li>
+            </ol>
           </aside>
         </div>
       </div>
     </div>
   </section>
+
+  <footer class="site-footer" id="siteFooter">
+    <div class="site-footer-main">
+      <p class="site-footer-brand">Zenix Stream</p>
+      <p class="site-footer-meta">Etat: <span id="footerNetworkState">En ligne</span> - Version <span id="footerVersion">c137</span></p>
+    </div>
+    <div class="site-footer-actions">
+      <button class="btn btn-soft btn-compact" id="openDesignUpdatesBtn" type="button">Nouveautes design</button>
+    </div>
+  </footer>
+
+  <section class="design-updates" id="designUpdatesSection" hidden>
+    <div class="section-head">
+      <h2>Nouveautes design</h2>
+      <p>Toutes les upgrades visuelles deployees en live sur Zenix.</p>
+    </div>
+    <article class="design-updates-card">
+      <ul>
+        <li>Topbar glass + navbar intelligente avec overflow.</li>
+        <li>Nouveau systeme de badges, rubans et cartes premium.</li>
+        <li>Sections animees au scroll + skeleton loaders.</li>
+        <li>Player modernise: chips sources + timeline d'etapes.</li>
+      </ul>
+    </article>
+  </section>
+
+  <nav class="mobile-tabbar" id="mobileTabbar" aria-label="Navigation mobile">
+    <button class="mobile-tab active" type="button" data-mobile-view="all">Accueil</button>
+    <button class="mobile-tab" type="button" data-mobile-view="top">Top</button>
+    <button class="mobile-tab" type="button" data-mobile-view="movie">Films</button>
+    <button class="mobile-tab" type="button" data-mobile-view="tv">Series</button>
+    <button class="mobile-tab" type="button" data-mobile-view="list">Liste</button>
+  </nav>
 
   <div class="toast" id="toast" hidden role="status" aria-live="polite"></div>
   <input id="importListInput" type="file" accept="application/json,.json" hidden />
