@@ -41,6 +41,9 @@ Last update: 2026-03-09
   - startup splash keeps current intro but ends with a cinematic logo-out phase:
     - class flow: `is-ending` then `is-leaving`
     - letter burst + light sweep + backdrop transparency transition before app reveal.
+  - user-directed rollback (c139):
+    - navbar + category section visuals reverted to legacy look.
+    - keep modern look in player/start menu and detail modal.
 
 ## Streaming/source policy
 - External embed fallback sources (e.g. generic `vidsrc`) are removed.

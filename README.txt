@@ -334,3 +334,11 @@ LATEST STARTUP SPLASH END ANIMATION (2026-03-09, c138)
   - chromatic ghost layers on the `Zenix` title for the exit flash.
   - sweep-light pass and bar collapse to finish the logo beat.
   - backdrop fades toward transparency, then transitions cleanly to the site.
+
+LATEST UI ADJUSTMENT (2026-03-09, c139)
+- Restored legacy visual appearance for:
+  - main navbar (classic layout/look)
+  - category sections/cards (home/catalog/calendar/list/continue/trending)
+- Kept the current modern look for:
+  - player start/watch menu
+  - movie/series detail modal
