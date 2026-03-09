@@ -387,3 +387,14 @@ LATEST MOBILE/PERF RELIABILITY TUNING (2026-03-09, c144)
   - sponsor sections forced visible rendering path (no content-visibility deferral)
   - native sponsor iframe switched to eager loading
   - higher ad frame min-heights on phone so sponsor block is actually visible.
+
+LATEST CATEGORY VISIBILITY STABILITY (2026-03-09, c145)
+- Cover update path hardened:
+  - `setImageSourceSafely` now applies cover URLs directly (no blocking preloader gate),
+    preventing cards from staying visually empty when a preload stalls.
+- Detail-cover hydration made more reliable:
+  - `warmVisibleDetailCovers` now uses controlled concurrency instead of firing all requests at once.
+  - category views now hydrate more covers by default (higher limits for mobile/desktop category mode).
+- Immediate section rendering:
+  - browse/category/sponsor sections and grids now force visible rendering path globally
+    (no deferred `content-visibility` in normal mode), to avoid empty blocks while navigating categories.

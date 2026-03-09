@@ -66,6 +66,10 @@ Last update: 2026-03-09
     - mobile top navbar now enforces horizontal swipe behavior with non-shrinking category pills.
     - sponsor sections bypass content-visibility deferral; native iframe is eager-loaded with larger mobile heights.
     - category cover loading aggressively boosted (eager/priority limits + warmup budgets + larger immediate render threshold).
+  - c145 follow-up:
+    - cover assignment no longer waits on a separate image preloader gate before applying new card cover URLs.
+    - detail cover hydration now runs with bounded concurrency to reduce request bursts and improve cover fill consistency.
+    - browse/category/sponsor sections and grids now force visible rendering path (no deferred content-visibility) for instant category display.
 
 ## Streaming/source policy
 - External embed fallback sources (e.g. generic `vidsrc`) are removed.

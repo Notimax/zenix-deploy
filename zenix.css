@@ -5677,3 +5677,33 @@ img[data-image-ready="1"] {
     height: 240px;
   }
 }
+
+/* ===== Catalog immediate visibility hardening (c145) ===== */
+.calendar-section,
+.feature-rail,
+.top-section,
+.spotlight,
+.continue,
+.catalog-section,
+.my-list,
+.sponsor-slot,
+.top-grid,
+.continue-grid,
+.catalog-grid,
+.calendar-grid {
+  contain: none !important;
+  content-visibility: visible !important;
+  contain-intrinsic-size: auto !important;
+}
+
+.calendar-section.reveal-on-scroll,
+.top-section.reveal-on-scroll,
+.continue.reveal-on-scroll,
+.catalog-section.reveal-on-scroll,
+.my-list.reveal-on-scroll,
+.sponsor-slot.reveal-on-scroll {
+  opacity: 1 !important;
+  transform: none !important;
+  filter: none !important;
+  transition: none !important;
+}

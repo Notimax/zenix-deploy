@@ -43,6 +43,12 @@ const DESKTOP_HIGH_PRIORITY_IMAGE_LIMIT = 280;
 const CRITICAL_COVER_PRIME_MOBILE = 420;
 const CRITICAL_COVER_PRIME_DESKTOP = 280;
 const CRITICAL_COVER_PRIME_WAIT_MS = 960;
+const DETAIL_COVER_HYDRATE_CONCURRENCY_MOBILE = 10;
+const DETAIL_COVER_HYDRATE_CONCURRENCY_DESKTOP = 14;
+const DETAIL_COVER_HYDRATE_LIMIT_CATEGORY_MOBILE = 560;
+const DETAIL_COVER_HYDRATE_LIMIT_CATEGORY_DESKTOP = 420;
+const DETAIL_COVER_HYDRATE_LIMIT_DEFAULT_MOBILE = 180;
+const DETAIL_COVER_HYDRATE_LIMIT_DEFAULT_DESKTOP = 120;
 const LIVE_RENDER_INTERACTION_GRACE_MS = 1200;
 const SCROLL_SYNC_THRESHOLD_PX = 1800;
 const SCROLL_SYNC_DEBOUNCE_MS = 80;
@@ -5198,49 +5204,18 @@ function setImageSourceSafely(node, nextSrc, title = "", cover = true) {
     return;
   }
 
-  const currentSrc = String(node.currentSrc || node.src || "").trim();
+  const currentSrc = normalizeImageUrl(String(node.currentSrc || node.src || "").trim());
   if (currentSrc === url || node.dataset.pendingSrc === url) {
     wireImageFallback(node, title || "Zenix", cover);
     return;
   }
 
-  if (runtimeEnv.isInAppBrowser) {
-    node.src = url;
-    delete node.dataset.pendingSrc;
-    wireImageFallback(node, title || "Zenix", cover);
-    return;
-  }
-
   node.dataset.pendingSrc = url;
-  const preloader = new Image();
-  preloader.decoding = "async";
-  preloader.src = url;
-
-  const apply = () => {
-    if (node.dataset.pendingSrc !== url) {
-      return;
-    }
-    node.src = url;
+  node.src = url;
+  if (node.dataset.pendingSrc === url) {
     delete node.dataset.pendingSrc;
-    wireImageFallback(node, title || "Zenix", cover);
-  };
-
-  if (preloader.complete) {
-    apply();
-    return;
   }
-
-  preloader.addEventListener("load", apply, { once: true });
-  preloader.addEventListener(
-    "error",
-    () => {
-      if (node.dataset.pendingSrc === url) {
-        delete node.dataset.pendingSrc;
-      }
-      wireImageFallback(node, title || "Zenix", cover);
-    },
-    { once: true }
-  );
+  wireImageFallback(node, title || "Zenix", cover);
 }
 
 function renderFeatureRail(items) {
@@ -5993,7 +5968,14 @@ function renderCatalog(items) {
   } else {
     state.catalogRenderFrame = 0;
   }
-  warmVisibleDetailCovers(items, categoryBoost ? 320 : shouldBoostCoverLoading() ? 180 : 96);
+  const detailHydrateLimit = categoryBoost
+    ? compact
+      ? DETAIL_COVER_HYDRATE_LIMIT_CATEGORY_MOBILE
+      : DETAIL_COVER_HYDRATE_LIMIT_CATEGORY_DESKTOP
+    : compact
+      ? DETAIL_COVER_HYDRATE_LIMIT_DEFAULT_MOBILE
+      : DETAIL_COVER_HYDRATE_LIMIT_DEFAULT_DESKTOP;
+  warmVisibleDetailCovers(items, detailHydrateLimit);
   observeMediaCards(refs.catalogGrid);
 }
 
@@ -6339,25 +6321,44 @@ function warmVisibleDetailCovers(items, limit = 32) {
     return;
   }
 
-  const hydrate = () => {
-    rows.forEach((entry) => {
-      if (!entry || Number(entry.id || 0) <= 0) {
-        return;
-      }
-      ensureDetails(entry.id)
-        .then((details) => {
+  const hydrate = async () => {
+    let cursor = 0;
+    const concurrency = Math.max(
+      2,
+      Math.min(
+        rows.length,
+        isCompactViewport() ? DETAIL_COVER_HYDRATE_CONCURRENCY_MOBILE : DETAIL_COVER_HYDRATE_CONCURRENCY_DESKTOP
+      )
+    );
+    const worker = async () => {
+      while (cursor < rows.length) {
+        const index = cursor;
+        cursor += 1;
+        const entry = rows[index];
+        if (!entry || Number(entry.id || 0) <= 0) {
+          continue;
+        }
+        try {
+          const details = await ensureDetails(entry.id);
           updateCardCoverFromDetails(entry.id, details);
-        })
-        .catch(() => {
+        } catch {
           // best effort only
-        });
+        }
+      }
+    };
+    await Promise.allSettled(Array.from({ length: concurrency }, () => worker()));
+  };
+
+  const schedule = () => {
+    hydrate().catch(() => {
+      // best effort only
     });
   };
 
   if (typeof window.requestIdleCallback === "function") {
-    window.requestIdleCallback(hydrate, { timeout: 750 });
+    window.requestIdleCallback(schedule, { timeout: 900 });
   } else {
-    window.setTimeout(hydrate, 0);
+    window.setTimeout(schedule, 0);
   }
 }
 
