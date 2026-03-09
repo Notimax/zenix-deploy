@@ -36,13 +36,13 @@ const CATALOG_RENDER_CHUNK_MAX = 104;
 const MOBILE_VIEWPORT_MAX_WIDTH = 740;
 const MOBILE_CATALOG_FIRST_PAINT = 120;
 const MOBILE_CATALOG_CHUNK_MIN = 88;
-const MOBILE_EAGER_IMAGE_LIMIT = 320;
-const MOBILE_HIGH_PRIORITY_IMAGE_LIMIT = 150;
-const DESKTOP_EAGER_IMAGE_LIMIT = 260;
-const DESKTOP_HIGH_PRIORITY_IMAGE_LIMIT = 120;
-const CRITICAL_COVER_PRIME_MOBILE = 220;
-const CRITICAL_COVER_PRIME_DESKTOP = 150;
-const CRITICAL_COVER_PRIME_WAIT_MS = 700;
+const MOBILE_EAGER_IMAGE_LIMIT = 900;
+const MOBILE_HIGH_PRIORITY_IMAGE_LIMIT = 420;
+const DESKTOP_EAGER_IMAGE_LIMIT = 700;
+const DESKTOP_HIGH_PRIORITY_IMAGE_LIMIT = 280;
+const CRITICAL_COVER_PRIME_MOBILE = 420;
+const CRITICAL_COVER_PRIME_DESKTOP = 280;
+const CRITICAL_COVER_PRIME_WAIT_MS = 960;
 const LIVE_RENDER_INTERACTION_GRACE_MS = 1200;
 const SCROLL_SYNC_THRESHOLD_PX = 1800;
 const SCROLL_SYNC_DEBOUNCE_MS = 80;
@@ -919,7 +919,7 @@ async function init() {
   pruneProgressEntries();
   applyUiPrefs({ syncControls: true });
   if (refs.footerVersion) {
-    refs.footerVersion.textContent = "c143";
+    refs.footerVersion.textContent = "c144";
   }
   updateNetworkBadge();
   cleanupLegacyServiceWorker().catch(() => {
@@ -2607,11 +2607,12 @@ function ensureNativeAdContainer() {
     frame = document.createElement("iframe");
     frame.className = NATIVE_AD_FRAME_CLASS;
     frame.title = "Sponsorise";
-    frame.loading = "lazy";
+    frame.loading = "eager";
+    frame.setAttribute("fetchpriority", "high");
     frame.referrerPolicy = "strict-origin-when-cross-origin";
     frame.setAttribute("data-native-sponsor", "1");
     frame.setAttribute("sandbox", NATIVE_AD_FRAME_SANDBOX);
-    const docHtml = `<!doctype html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>html,body{margin:0;padding:0;background:transparent;overflow:hidden;}#${NATIVE_AD_CONTAINER_ID}{width:100%;min-height:120px;}</style></head><body><div id="${NATIVE_AD_CONTAINER_ID}"></div><script async data-cfasync="false" src="${NATIVE_AD_SCRIPT_SRC}"></script></body></html>`;
+    const docHtml = `<!doctype html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>html,body{margin:0;padding:0;background:transparent;overflow:hidden;min-height:180px;}#${NATIVE_AD_CONTAINER_ID}{width:100%;min-height:180px;}</style></head><body><div id="${NATIVE_AD_CONTAINER_ID}"></div><script async data-cfasync="false" src="${NATIVE_AD_SCRIPT_SRC}"></script></body></html>`;
     frame.srcdoc = docHtml;
     refs.nativeAdUnit.innerHTML = "";
     refs.nativeAdUnit.appendChild(frame);
@@ -2704,6 +2705,14 @@ function getCardImageProfile() {
   const boosted = shouldBoostCoverLoading();
   const inAppBrowser = runtimeEnv.isInAppBrowser;
   if (isCompactViewport()) {
+    if (boosted) {
+      const eagerLimit = inAppBrowser ? 2200 : slow ? 900 : 1800;
+      const highPriorityLimit = inAppBrowser ? 1300 : slow ? 520 : 1100;
+      return {
+        eagerLimit,
+        highPriorityLimit,
+      };
+    }
     const eagerBase = boosted ? Math.max(220, MOBILE_EAGER_IMAGE_LIMIT) : MOBILE_EAGER_IMAGE_LIMIT;
     const priorityBase = boosted ? Math.max(120, MOBILE_HIGH_PRIORITY_IMAGE_LIMIT) : MOBILE_HIGH_PRIORITY_IMAGE_LIMIT;
     const inAppEager = Math.max(eagerBase, 320);
@@ -2715,6 +2724,12 @@ function getCardImageProfile() {
   }
   const eagerBase = boosted ? Math.max(220, DESKTOP_EAGER_IMAGE_LIMIT) : DESKTOP_EAGER_IMAGE_LIMIT;
   const priorityBase = boosted ? Math.max(96, DESKTOP_HIGH_PRIORITY_IMAGE_LIMIT) : DESKTOP_HIGH_PRIORITY_IMAGE_LIMIT;
+  if (boosted) {
+    return {
+      eagerLimit: inAppBrowser ? 1800 : slow ? 820 : 1400,
+      highPriorityLimit: inAppBrowser ? 1000 : slow ? 420 : 780,
+    };
+  }
   const inAppEager = Math.max(eagerBase, 240);
   const inAppPriority = Math.max(priorityBase, 120);
   return {
@@ -4827,9 +4842,9 @@ function renderAll() {
     }
     const warmLimit = shouldBoostCoverLoading()
       ? isCompactViewport()
-        ? 680
-        : 520
-      : 320;
+        ? 2400
+        : 1800
+      : 620;
     warmImageCacheFromPool(visible, warmLimit);
   }
 
@@ -5919,7 +5934,7 @@ function renderCatalog(items) {
   const compact = isCompactViewport();
   const activeView = resolveCatalogViewForSearch();
   const categoryBoost = state.query.trim().length === 0 && isCatalogCategoryView(activeView);
-  const renderAllAtOnce = categoryBoost && total <= (compact ? 520 : 620);
+  const renderAllAtOnce = categoryBoost && total <= (compact ? 1100 : 1300);
   const baseChunk = Math.max(
     CATALOG_RENDER_CHUNK_MIN,
     Math.min(CATALOG_RENDER_CHUNK_MAX, Math.ceil(total / 9))
@@ -5978,7 +5993,7 @@ function renderCatalog(items) {
   } else {
     state.catalogRenderFrame = 0;
   }
-  warmVisibleDetailCovers(items, categoryBoost ? 180 : shouldBoostCoverLoading() ? 120 : 64);
+  warmVisibleDetailCovers(items, categoryBoost ? 320 : shouldBoostCoverLoading() ? 180 : 96);
   observeMediaCards(refs.catalogGrid);
 }
 

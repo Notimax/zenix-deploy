@@ -62,6 +62,10 @@ Last update: 2026-03-09
     - player source chip UI cleaned up for desktop + phone to avoid overlapping labels.
     - source metadata now uses pill layout (language/quality/format) with truncation safety.
     - source chip header now separates source number and compatibility badge for better readability.
+  - c144 follow-up:
+    - mobile top navbar now enforces horizontal swipe behavior with non-shrinking category pills.
+    - sponsor sections bypass content-visibility deferral; native iframe is eager-loaded with larger mobile heights.
+    - category cover loading aggressively boosted (eager/priority limits + warmup budgets + larger immediate render threshold).
 
 ## Streaming/source policy
 - External embed fallback sources (e.g. generic `vidsrc`) are removed.

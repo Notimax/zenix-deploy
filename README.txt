@@ -373,3 +373,17 @@ LATEST SOURCE CHIP UI CLEANUP (2026-03-09, c143)
   - mobile-safe wrapping/ellipsis and spacing
   - source alert restyled for readability without crowding
   - source chip container scrolling behavior tuned for desktop and phone.
+
+LATEST MOBILE/PERF RELIABILITY TUNING (2026-03-09, c144)
+- Cover loading hardening for phone + desktop:
+  - much higher eager/high-priority image budgets in category views
+  - larger critical cover priming window
+  - stronger warm-cache and detail-cover hydration after category render
+  - category render all-at-once threshold increased to reduce delayed card/image tails
+- Mobile top navbar usability:
+  - explicit horizontal swipe navigation (pan-x) on categories
+  - nav pills forced non-shrinking (`flex: 0 0 auto`) to avoid label overlap
+- Sponsor visibility on mobile:
+  - sponsor sections forced visible rendering path (no content-visibility deferral)
+  - native sponsor iframe switched to eager loading
+  - higher ad frame min-heights on phone so sponsor block is actually visible.
