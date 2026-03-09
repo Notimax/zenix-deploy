@@ -1008,7 +1008,7 @@ async function init() {
   pruneProgressEntries();
   applyUiPrefs({ syncControls: true });
   if (refs.footerVersion) {
-    refs.footerVersion.textContent = "c154";
+    refs.footerVersion.textContent = "c155";
   }
   updateNetworkBadge();
   cleanupLegacyServiceWorker().catch(() => {
@@ -3213,6 +3213,31 @@ function hasCalendarAnimationCategory(entry) {
   });
 }
 
+function isCalendarAnimeSamaSource(entry) {
+  if (!entry || typeof entry !== "object") {
+    return false;
+  }
+  const sourceHint = normalizeTitleKey(
+    entry?.source ||
+      entry?.provider ||
+      entry?.supplemental ||
+      entry?.externalProvider ||
+      entry?.external_provider ||
+      ""
+  );
+  if (sourceHint.includes("anime sama") || sourceHint.includes("animesama")) {
+    return true;
+  }
+  const urlHints = [
+    entry?.url,
+    entry?.externalDetailUrl,
+    entry?.external_detail_url,
+  ]
+    .map((value) => String(value || "").toLowerCase())
+    .join(" ");
+  return /anime-sama\.(tv|to)/i.test(urlHints);
+}
+
 function hasCalendarSeriesSignals(entry) {
   if (!entry || typeof entry !== "object") {
     return false;
@@ -3258,11 +3283,12 @@ function getCalendarEntryMediaType(entry) {
   if (!entry || typeof entry !== "object") {
     return "film";
   }
+  const animeSamaSource = isCalendarAnimeSamaSource(entry);
   const explicit = normalizeCalendarMediaType(
     entry.type || entry.kind || entry.mediaType || entry.media_type || entry.category || ""
   );
   if (explicit === "anime" || isTruthyDataFlag(entry.isAnime) || hasCalendarAnimationCategory(entry)) {
-    return "anime";
+    return animeSamaSource ? "anime" : "serie";
   }
   if (explicit === "film" || explicit === "serie") {
     return explicit;
@@ -3286,7 +3312,7 @@ function getCalendarEntryMediaType(entry) {
   if (mediaId > 0) {
     const mapped = findItemById(mediaId);
     if (mapped?.isAnime) {
-      return "anime";
+      return animeSamaSource ? "anime" : "serie";
     }
     if (mapped?.type === "tv") {
       return "serie";
@@ -3295,8 +3321,8 @@ function getCalendarEntryMediaType(entry) {
       return "film";
     }
   }
-  if (Boolean(entry.isAnime)) {
-    return "anime";
+  if (isTruthyDataFlag(entry.isAnime)) {
+    return animeSamaSource ? "anime" : "serie";
   }
   return "film";
 }
@@ -3582,6 +3608,10 @@ function buildCalendarFallbackFromDirect(payload, month, year) {
     }
 
     const type = normalizeDirectCalendarType(movie);
+    if (type === "anime") {
+      // Calendar anime view is reserved for Anime-Sama feed only.
+      return;
+    }
     const key = String(movie?.calendarId || `${yearSafe}-${monthSafe}-${dayNumber}-${mediaId}`);
     if (dedupe.has(key)) {
       return;
@@ -4857,6 +4887,10 @@ function normalizeCatalogItem(raw) {
   if (externalProvider && externalProvider !== "nakios") {
     return null;
   }
+  if (externalProvider === "nakios" && isAnime) {
+    // Nakios anime rows are intentionally excluded.
+    return null;
+  }
   const externalSeason = Math.max(0, Number(raw?.external_season ?? raw?.externalSeason ?? 0));
   const externalEpisode = Math.max(0, Number(raw?.external_episode ?? raw?.externalEpisode ?? 0));
   const externalYearRaw = Number(raw?.external_year ?? raw?.externalYear ?? 0);
@@ -5203,7 +5237,7 @@ function getVisibleCatalog() {
   } else if (activeView === "tv") {
     list = list.filter((item) => item.type === "tv" && !item.isAnime);
   } else if (activeView === "anime") {
-    list = list.filter((item) => item.isAnime);
+    list = list.filter((item) => item.isAnime && !item.isExternal);
   }
 
   if (state.chip === "movie") {
@@ -5211,7 +5245,7 @@ function getVisibleCatalog() {
   } else if (state.chip === "tv") {
     list = list.filter((item) => item.type === "tv" && !item.isAnime);
   } else if (state.chip === "anime") {
-    list = list.filter((item) => item.isAnime);
+    list = list.filter((item) => item.isAnime && !item.isExternal);
   }
 
   if (state.chip === "recent") {
@@ -8512,6 +8546,9 @@ async function resolveNakiosTmdbId(item) {
 async function appendNakiosSources(item, season, episode, sources) {
   const base = Array.isArray(sources) ? sources.slice() : [];
   if (!item) {
+    return base;
+  }
+  if (getItemTypeBucket(item) === "anime") {
     return base;
   }
 

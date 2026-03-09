@@ -5701,9 +5701,35 @@ function parseAnimePlanning(html, fallbackYear) {
   };
 }
 
+function isAnimeCalendarType(rawType) {
+  const normalized = normalizeTitleKey(rawType || "");
+  return normalized === "anime" || normalized === "scan" || normalized === "animation" || normalized === "japanimation";
+}
+
+function isAnimeSamaCalendarEntry(entry) {
+  if (!entry || typeof entry !== "object") {
+    return false;
+  }
+  const sourceHint = normalizeTitleKey(entry?.source || entry?.supplemental || entry?.provider || "");
+  if (sourceHint.includes("anime sama") || sourceHint.includes("animesama")) {
+    return true;
+  }
+  const urlHints = [
+    entry?.url,
+    entry?.external_detail_url,
+    entry?.externalDetailUrl,
+  ]
+    .map((value) => String(value || "").toLowerCase())
+    .join(" ");
+  return /anime-sama\.(tv|to)/i.test(urlHints);
+}
+
 function buildMergedCalendar(purstreamItems, animeItems, supplementalItems = []) {
   const dedupe = new Map();
   const pushMerged = (entry) => {
+    if (isAnimeCalendarType(entry?.type || entry?.kind || "") && !isAnimeSamaCalendarEntry(entry)) {
+      return;
+    }
     const normalizedTitle = normalizeTitleKey(entry?.title || "");
     const normalizedType = normalizeTitleKey(entry?.type || entry?.kind || "");
     const dateIso = String(entry?.dateIso || "").trim();

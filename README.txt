@@ -484,3 +484,12 @@ LATEST TYPE + ADBLOCK GATE FIX (2026-03-09, c154)
   - themed blocking modal appears when adblock is detected.
   - message explains free access model (small non-intrusive ads fund infra/domain).
   - retry button checks again and restores access immediately when adblock is disabled.
+
+LATEST ANIME PROVIDER POLICY FIX (2026-03-09, c155)
+- Nakios is now fully blocked for anime use-cases:
+  - no Nakios anime rows kept in catalog normalization.
+  - no Nakios source merge for anime playback.
+- Calendar anime is now Anime-Sama only:
+  - non-Anime-Sama entries cannot be classified as `anime` in calendar resolver.
+  - direct Purstream fallback path no longer injects anime rows in calendar fallback mode.
+  - backend merged calendar also drops anime entries not coming from Anime-Sama.

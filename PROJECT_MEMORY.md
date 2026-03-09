@@ -94,6 +94,9 @@ Last update: 2026-03-09
     - added a themed anti-adblock access gate (desktop + mobile) with live retry/unlock flow.
     - gate blocks interaction while adblock is detected, then restores access immediately after successful recheck.
     - copy explains free model funding (small non-intrusive ads for hosting/domain).
+  - c155 follow-up:
+    - anime provider policy tightened: Nakios is excluded from anime catalog/source paths.
+    - calendar anime classification is now restricted to Anime-Sama sourced entries.
 
 ## Streaming/source policy
 - External embed fallback sources (e.g. generic `vidsrc`) are removed.
@@ -167,6 +170,10 @@ Last update: 2026-03-09
     - if Purstream is slow/empty, Nakios preloaded sources are injected immediately.
     - external TV rows can switch to internal Purstream twin only when Purstream episode stream is verifiably playable.
     - player route/state now follows the effective selected provider item.
+  - c155 anime policy:
+    - Nakios sources are skipped for anime playback merges.
+    - Nakios anime rows are dropped at catalog normalization stage.
+    - calendar anime lane is Anime-Sama only (non Anime-Sama anime rows are rejected).
 
 ## Mobile robustness
 - Startup splash must never block app forever.
