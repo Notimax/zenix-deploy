@@ -409,6 +409,10 @@ LATEST COVER LOAD BALANCING (2026-03-09, c146)
   - lower per-category hydration caps while keeping bounded concurrency.
   - goal: faster visible covers with fewer pending images in heavy categories.
 
-LATEST CATALOG WARMUP RESILIENCE (2026-03-09, c147)
+LATEST CATALOG WARMUP RESILIENCE (2026-03-09, c148)
 - `loadInitialCatalog` no longer drops to hard fallback (2 items) when a secondary warmup page fails.
 - If page 1 loaded successfully, fetched catalog rows are kept and cached even if later warmup fetches fail.
+- Fast first paint strategy:
+  - first catalog page is fetched without blocking on supplemental feed.
+  - warmup pages are now synced in background instead of blocking initial render.
+  - page 1 refresh with supplemental merge is triggered asynchronously right after initial paint.

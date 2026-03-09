@@ -925,7 +925,7 @@ async function init() {
   pruneProgressEntries();
   applyUiPrefs({ syncControls: true });
   if (refs.footerVersion) {
-    refs.footerVersion.textContent = "c147";
+    refs.footerVersion.textContent = "c148";
   }
   updateNetworkBadge();
   cleanupLegacyServiceWorker().catch(() => {
@@ -4154,7 +4154,7 @@ async function loadInitialCatalog() {
   }
 
   try {
-    const firstResult = await fetchCatalogPage(1);
+    const firstResult = await fetchCatalogPage(1, { includeSupplemental: false });
     state.catalog = [];
     state.page = 0;
     state.totalPages = 0;
@@ -4168,29 +4168,26 @@ async function loadInitialCatalog() {
     state.hasMore = firstResult.currentPage < firstResult.lastPage;
 
     const initialProfile = getCatalogSyncProfile(resolveCatalogViewForSearch());
-    const warmupTargetPages = Math.max(INITIAL_CATALOG_WARMUP_PAGES, Number(initialProfile.initialPages || 1));
-    const warmupLastPage = Math.min(firstResult.lastPage, warmupTargetPages);
-    for (let page = 2; page <= warmupLastPage; page += 1) {
-      try {
-        const result = await fetchCatalogPage(page);
-        upsertCatalogItems(result.items, { prepend: false });
-        state.page = result.currentPage;
-        state.totalPages = result.lastPage;
-        state.catalogSyncPage = result.currentPage;
-        state.hasMore = result.currentPage < result.lastPage;
-      } catch {
-        break;
-      }
-    }
     state.lastSyncAt = new Date();
 
     if (state.page < state.totalPages) {
-      const batchPages = Math.max(1, Number(initialProfile.activeBatch || 4));
+      const batchPages = Math.max(
+        1,
+        Math.max(
+          Number(initialProfile.activeBatch || 4),
+          Number(initialProfile.initialPages || INITIAL_CATALOG_WARMUP_PAGES) - 1
+        )
+      );
       const endPage = Math.min(state.totalPages, state.page + batchPages);
       if (state.page + 1 <= endPage) {
         startBackgroundCatalogSync(state.page + 1, endPage);
       }
     }
+    window.setTimeout(() => {
+      refreshCatalogHead().catch(() => {
+        // best effort only
+      });
+    }, 900);
     saveCatalogSnapshot();
   } catch {
     if (state.catalog.length > 0) {
@@ -4549,8 +4546,10 @@ function mergeCatalogSemanticItem(existing, incoming) {
   return base;
 }
 
-async function fetchCatalogPage(page) {
-  const shouldFetchSupplemental = Number(page || 1) <= Number(state.supplementalLastPage || Number.POSITIVE_INFINITY);
+async function fetchCatalogPage(page, options = {}) {
+  const includeSupplemental = options.includeSupplemental !== false;
+  const shouldFetchSupplemental =
+    includeSupplemental && Number(page || 1) <= Number(state.supplementalLastPage || Number.POSITIVE_INFINITY);
   const [payload, supplementalPayload] = await Promise.all([
     fetchJson(`${API_BASE}/catalog/movies?page=${page}`),
     shouldFetchSupplemental
