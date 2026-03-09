@@ -5716,3 +5716,122 @@ img[data-image-ready="1"] {
   filter: none !important;
   transition: none !important;
 }
+
+/* ===== Calendar mobile adaptation (c152) ===== */
+.layout {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.layout > * {
+  min-width: 0;
+}
+
+.calendar-section {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@media (max-width: 740px) {
+  #calendarSection {
+    min-width: 0;
+  }
+
+  #calendarSection .calendar-toolbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: start;
+    gap: 8px;
+    padding: 10px;
+    width: 100%;
+    min-width: 0;
+  }
+
+  #calendarSection .calendar-toolbar > .field-inline {
+    display: grid;
+    grid-template-columns: 1fr;
+    align-items: start;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  #calendarSection .calendar-toolbar > * {
+    min-width: 0;
+  }
+
+  #calendarSection .calendar-toolbar > .field-inline:nth-of-type(3) {
+    grid-column: 1 / -1;
+  }
+
+  #calendarSection .calendar-toolbar > .field-inline select,
+  #calendarSection .calendar-toolbar > .field-inline input {
+    width: 100%;
+    min-width: 0;
+  }
+
+  #calendarSection .calendar-type-filter {
+    grid-column: 1 / -1;
+    margin-left: 0;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding: 6px;
+  }
+
+  #calendarSection .calendar-type-filter::-webkit-scrollbar {
+    display: none;
+  }
+
+  #calendarSection .calendar-type-filter-label,
+  #calendarSection .calendar-type-pill {
+    flex: 0 0 auto;
+  }
+
+  #calendarSection #calendarRefreshBtn {
+    grid-column: 1 / -1;
+    width: 100%;
+    margin-left: 0;
+    justify-content: center;
+  }
+
+  #calendarSection .calendar-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  #calendarSection .calendar-merged-card,
+  #calendarSection .calendar-merged-body {
+    min-width: 0;
+  }
+
+  #calendarSection .calendar-merged-card .media-title-link {
+    word-break: break-word;
+  }
+
+  #calendarSection .calendar-merged-meta {
+    font-size: 0.72rem;
+  }
+}
+
+@media (max-width: 520px) {
+  #calendarSection .calendar-card-head {
+    gap: 6px;
+  }
+
+  #calendarSection .calendar-card-head h3 {
+    font-size: 1.32rem;
+  }
+
+  #calendarSection .calendar-card-head p {
+    font-size: 0.8rem;
+  }
+
+  #calendarSection .calendar-date-pill,
+  #calendarSection .calendar-waiting-pill {
+    font-size: 0.67rem;
+    padding: 5px 8px;
+  }
+}

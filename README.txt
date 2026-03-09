@@ -459,3 +459,11 @@ LATEST STARTUP SPLASH TUNING (2026-03-09, c151)
 - Added a short startup chime synchronized with the splash ending phase:
   - generated with WebAudio (small volume, cinematic style).
   - best effort only (can be blocked by browser autoplay policies on some devices).
+
+LATEST CALENDAR MOBILE ADAPTATION (2026-03-09, c152)
+- Calendar view on phone is now fully responsive:
+  - toolbar switched to a clean 2-column grid (month/year), with search on full-width row.
+  - type filters (`Film`, `Serie`, `Anime`) now stay on one horizontal line with swipe scroll.
+  - refresh button is full-width on mobile for easier tap.
+  - calendar cards switch to a single-column list on phone for better readability.
+  - badge/date text sizes tightened on very small screens (`<=520px`).

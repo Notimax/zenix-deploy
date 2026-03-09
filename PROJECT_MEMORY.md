@@ -82,6 +82,11 @@ Last update: 2026-03-09
   - c151 follow-up:
     - startup splash timing reduced by ~1 second (`STARTUP_SPLASH_MIN_MS` and `STARTUP_SPLASH_MAX_MS` lowered).
     - startup ending now triggers a short low-volume cinematic chime via WebAudio (best effort; autoplay policy may block on some browsers).
+  - c152 follow-up:
+    - calendar mobile layout hardened for phone widths.
+    - toolbar now stacks cleanly with full-width search and refresh action.
+    - type filters are swipeable horizontally instead of wrapping/compressing.
+    - calendar cards use single-column layout on phone for better legibility.
 
 ## Streaming/source policy
 - External embed fallback sources (e.g. generic `vidsrc`) are removed.
