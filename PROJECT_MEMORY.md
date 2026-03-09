@@ -38,6 +38,9 @@ Last update: 2026-03-09
 - Layout polish:
   - maintain visual framing for sponsor zones (separated from core content)
   - keep footer and design-updates section styled and consistent with theme switch.
+  - startup splash keeps current intro but ends with a cinematic logo-out phase:
+    - class flow: `is-ending` then `is-leaving`
+    - letter burst + light sweep + backdrop transparency transition before app reveal.
 
 ## Streaming/source policy
 - External embed fallback sources (e.g. generic `vidsrc`) are removed.

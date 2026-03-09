@@ -90,7 +90,16 @@ body.startup-lock {
 }
 
 .startup-splash::after {
-  content: none;
+  content: "";
+  position: absolute;
+  inset: -35% -25%;
+  pointer-events: none;
+  opacity: 0;
+  background:
+    linear-gradient(90deg, transparent 0%, rgba(255, 70, 70, 0.56) 44%, rgba(255, 202, 120, 0.42) 52%, transparent 64%),
+    radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.15), transparent 55%);
+  mix-blend-mode: screen;
+  transform: translateX(-36%) skewX(-9deg);
 }
 
 .startup-title {
@@ -111,6 +120,27 @@ body.startup-lock {
     0 0 22px rgba(255, 255, 255, 0.2);
   opacity: 0;
   animation: startup-title-in 920ms cubic-bezier(0.17, 0.79, 0.24, 1) 240ms both;
+}
+
+.startup-title::before,
+.startup-title::after {
+  content: attr(data-word);
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+}
+
+.startup-title::before {
+  color: rgba(255, 48, 63, 0.7);
+  transform: translateX(-0.018em);
+  mix-blend-mode: screen;
+}
+
+.startup-title::after {
+  color: rgba(121, 198, 255, 0.52);
+  transform: translateX(0.016em);
+  mix-blend-mode: screen;
 }
 
 .startup-bar {
@@ -147,8 +177,39 @@ body.startup-lock {
   pointer-events: none;
 }
 
+.startup-splash.is-ending::before {
+  animation: startup-backdrop-out 640ms cubic-bezier(0.2, 0.75, 0.2, 1) both;
+}
+
+.startup-splash.is-ending::after {
+  animation: startup-sweep-out 640ms cubic-bezier(0.15, 0.82, 0.23, 1) both;
+}
+
+.startup-splash.is-ending .startup-title {
+  animation: startup-title-netflix-out 640ms cubic-bezier(0.19, 0.85, 0.25, 1) both;
+}
+
+.startup-splash.is-ending .startup-title::before {
+  animation: startup-title-ghost-left 640ms cubic-bezier(0.18, 0.8, 0.24, 1) both;
+}
+
+.startup-splash.is-ending .startup-title::after {
+  animation: startup-title-ghost-right 640ms cubic-bezier(0.18, 0.8, 0.24, 1) both;
+}
+
+.startup-splash.is-ending .startup-bar-top {
+  animation: startup-bar-out-top 640ms cubic-bezier(0.19, 0.82, 0.24, 1) both;
+}
+
+.startup-splash.is-ending .startup-bar-bottom {
+  animation: startup-bar-out-bottom 640ms cubic-bezier(0.19, 0.82, 0.24, 1) both;
+}
+
 .startup-splash.is-replaying::before,
+.startup-splash.is-replaying::after,
 .startup-splash.is-replaying .startup-title,
+.startup-splash.is-replaying .startup-title::before,
+.startup-splash.is-replaying .startup-title::after,
 .startup-splash.is-replaying .startup-bar {
   animation: none !important;
 }
@@ -185,6 +246,110 @@ body.startup-lock {
     opacity: 1;
     transform: translate(-50%, -50%) scale(1);
     letter-spacing: 0.16em;
+  }
+}
+
+@keyframes startup-backdrop-out {
+  0% {
+    opacity: 1;
+    transform: scale(1);
+    filter: saturate(1);
+  }
+  45% {
+    opacity: 0.9;
+    transform: scale(1.02);
+    filter: saturate(1.2);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.06);
+    filter: saturate(1.5);
+  }
+}
+
+@keyframes startup-sweep-out {
+  0% {
+    opacity: 0;
+    transform: translateX(-34%) skewX(-9deg);
+  }
+  28% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(44%) skewX(-7deg);
+  }
+}
+
+@keyframes startup-title-netflix-out {
+  0% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+    letter-spacing: 0.16em;
+    filter: brightness(1);
+  }
+  24% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.02);
+    filter: brightness(1.18);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(1.54);
+    letter-spacing: 0.26em;
+    filter: brightness(1.5);
+  }
+}
+
+@keyframes startup-title-ghost-left {
+  0% {
+    opacity: 0;
+    transform: translateX(-0.018em);
+  }
+  26% {
+    opacity: 0.88;
+    transform: translateX(-0.1em);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(-0.22em);
+  }
+}
+
+@keyframes startup-title-ghost-right {
+  0% {
+    opacity: 0;
+    transform: translateX(0.016em);
+  }
+  26% {
+    opacity: 0.78;
+    transform: translateX(0.09em);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(0.2em);
+  }
+}
+
+@keyframes startup-bar-out-top {
+  0% {
+    opacity: 1;
+    transform: scaleX(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-26px) scaleX(0.08);
+  }
+}
+
+@keyframes startup-bar-out-bottom {
+  0% {
+    opacity: 1;
+    transform: scaleX(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(26px) scaleX(0.08);
   }
 }
 

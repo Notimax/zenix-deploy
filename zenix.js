@@ -20,6 +20,7 @@ const PROGRESS_SAVE_INTERVAL_MS = 2400;
 const HERO_ROTATE_MS = 8000;
 const STARTUP_SPLASH_MIN_MS = 2450;
 const STARTUP_SPLASH_MAX_MS = 5200;
+const STARTUP_SPLASH_END_ANIM_MS = 640;
 const IMAGE_WARMUP_BATCH = 28;
 const IMAGE_WARMUP_DELAY_MS = 12;
 const INITIAL_IMAGE_WARMUP_LIMIT = 260;
@@ -835,6 +836,7 @@ function forceHideStartupSplash() {
   }
   refs.startupSplash.hidden = true;
   refs.startupSplash.classList.remove("is-leaving");
+  refs.startupSplash.classList.remove("is-ending");
   refs.startupSplash.classList.remove("is-replaying");
   document.body.classList.remove("startup-lock");
 }
@@ -845,6 +847,7 @@ function startStartupSplash() {
   }
   refs.startupSplash.hidden = false;
   refs.startupSplash.classList.remove("is-leaving");
+  refs.startupSplash.classList.remove("is-ending");
   replayStartupSplashAnimations();
   document.body.classList.add("startup-lock");
 
@@ -881,6 +884,8 @@ async function completeStartupSplash(startedAt = 0, options = {}) {
     return;
   }
 
+  splash.classList.add("is-ending");
+  await new Promise((resolve) => setTimeout(resolve, STARTUP_SPLASH_END_ANIM_MS));
   splash.classList.add("is-leaving");
   await new Promise((resolve) => {
     let done = false;
@@ -914,7 +919,7 @@ async function init() {
   pruneProgressEntries();
   applyUiPrefs({ syncControls: true });
   if (refs.footerVersion) {
-    refs.footerVersion.textContent = "c137";
+    refs.footerVersion.textContent = "c138";
   }
   updateNetworkBadge();
   cleanupLegacyServiceWorker().catch(() => {

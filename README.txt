@@ -326,3 +326,11 @@ LATEST VISUAL SYSTEM REFRESH (2026-03-09, c137)
   - day counters styled in calendar overview
   - sponsor blocks visually framed and separated from content
   - real footer styling + design updates panel styling
+
+LATEST STARTUP SPLASH END ANIMATION (2026-03-09, c138)
+- Startup intro beginning is kept as-is.
+- Added a dedicated final phase (`is-ending`) before splash hide:
+  - cinematic letter burst inspired by Netflix-style ending timing/rendering.
+  - chromatic ghost layers on the `Zenix` title for the exit flash.
+  - sweep-light pass and bar collapse to finish the logo beat.
+  - backdrop fades toward transparency, then transitions cleanly to the site.
