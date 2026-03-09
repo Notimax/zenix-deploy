@@ -503,3 +503,8 @@ LATEST SOURCE HOST MASKING (2026-03-09, c157)
 - Player source chips no longer expose raw provider/domain labels.
 - Removed runtime display of host-like labels (e.g. `zebi.xalaflix.design`, `api.nakios.site`, `cdn...`) in source chip tags.
 - Source chip footer now uses neutral labels only (`Source standard` / `Source premium`).
+
+LATEST SCROLL REFRESH STABILITY (2026-03-09, c158)
+- Catalog rendering now keeps existing cards and appends only new rows when scroll-sync loads more pages.
+- Full catalog grid rebuild is skipped when incoming rows are a strict prefix extension of what is already rendered.
+- Goal: remove visible "refresh" effect while users scroll to find titles.

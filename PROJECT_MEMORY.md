@@ -104,6 +104,10 @@ Last update: 2026-03-09
     - player source chips no longer render raw host/provider names.
     - source chip bottom tag now uses neutral text only (`Source standard` / `Source premium`).
     - this explicitly prevents exposing labels like `zebi.xalaflix.design`, `api.nakios.site`, or `cdn...` in the UI.
+  - c158 follow-up:
+    - catalog scroll sync now uses append-only rendering when new pages extend the current list.
+    - full grid rebuild is avoided during infinite scroll if already-rendered cards match incoming prefix order.
+    - objective: no visible refresh/flicker while users scroll through films/series.
 
 ## Streaming/source policy
 - External embed fallback sources (e.g. generic `vidsrc`) are removed.

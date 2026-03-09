@@ -1008,7 +1008,7 @@ async function init() {
   pruneProgressEntries();
   applyUiPrefs({ syncControls: true });
   if (refs.footerVersion) {
-    refs.footerVersion.textContent = "c157";
+    refs.footerVersion.textContent = "c158";
   }
   updateNetworkBadge();
   cleanupLegacyServiceWorker().catch(() => {
@@ -6204,9 +6204,20 @@ function renderCatalog(items) {
     cancelAnimationFrame(state.catalogRenderFrame);
     state.catalogRenderFrame = 0;
   }
-  refs.catalogGrid.innerHTML = "";
   if (!Array.isArray(items) || items.length === 0) {
+    refs.catalogGrid.innerHTML = "";
     return;
+  }
+  const renderedIds = Array.from(refs.catalogGrid.querySelectorAll(".media-card[data-card-id]"))
+    .map((node) => Number(node?.dataset?.cardId || 0))
+    .filter((id) => id > 0);
+  const canAppendOnly =
+    renderedIds.length > 0 &&
+    renderedIds.length <= items.length &&
+    renderedIds.every((id, idx) => Number(items[idx]?.id || 0) === id);
+
+  if (!canAppendOnly) {
+    refs.catalogGrid.innerHTML = "";
   }
 
   const total = items.length;
@@ -6232,17 +6243,19 @@ function renderCatalog(items) {
         : chunkSize
   );
   const imageProfile = getCardImageProfile();
-  let index = 0;
+  let index = canAppendOnly ? renderedIds.length : 0;
 
-  const firstPaintFragment = document.createDocumentFragment();
-  for (; index < firstPaintCount; index += 1) {
-    const entry = items[index];
-    if (!entry || Number(entry.id || 0) <= 0) {
-      continue;
+  if (!canAppendOnly) {
+    const firstPaintFragment = document.createDocumentFragment();
+    for (; index < firstPaintCount; index += 1) {
+      const entry = items[index];
+      if (!entry || Number(entry.id || 0) <= 0) {
+        continue;
+      }
+      firstPaintFragment.appendChild(buildMediaCard(entry, false, null, index, imageProfile));
     }
-    firstPaintFragment.appendChild(buildMediaCard(entry, false, null, index, imageProfile));
+    refs.catalogGrid.replaceChildren(firstPaintFragment);
   }
-  refs.catalogGrid.replaceChildren(firstPaintFragment);
 
   const appendChunk = () => {
     if (token !== state.catalogRenderToken) {
@@ -6267,11 +6280,12 @@ function renderCatalog(items) {
     }
   };
 
-  if (index < total && !renderAllAtOnce) {
+  if (index < total && (!renderAllAtOnce || canAppendOnly)) {
     state.catalogRenderFrame = requestAnimationFrame(appendChunk);
   } else {
     state.catalogRenderFrame = 0;
   }
+  const hydratePool = canAppendOnly ? items.slice(renderedIds.length) : items;
   const detailHydrateLimit = categoryBoost
     ? compact
       ? DETAIL_COVER_HYDRATE_LIMIT_CATEGORY_MOBILE
@@ -6279,7 +6293,7 @@ function renderCatalog(items) {
     : compact
       ? DETAIL_COVER_HYDRATE_LIMIT_DEFAULT_MOBILE
       : DETAIL_COVER_HYDRATE_LIMIT_DEFAULT_DESKTOP;
-  warmVisibleDetailCovers(items, detailHydrateLimit);
+  warmVisibleDetailCovers(hydratePool, detailHydrateLimit);
   observeMediaCards(refs.catalogGrid);
 }
 
