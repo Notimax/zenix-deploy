@@ -9218,10 +9218,12 @@ async function startTsSegmentFallbackPlayback(video, streamUrl, token) {
       return;
     }
 
+    const activeSourceIndex = Number(state.sourceIndex);
     const hasAlternativeSource =
       !state.manualSourceLock &&
-      Number(state.sourceIndex || -1) >= 0 &&
-      getFallbackSourceIndex(Number(state.sourceIndex || -1)) >= 0;
+      Number.isInteger(activeSourceIndex) &&
+      activeSourceIndex >= 0 &&
+      getFallbackSourceIndex(activeSourceIndex) >= 0;
     if (nextIndex >= IOS_SEGMENT_CHAIN_MAX && hasAlternativeSource) {
       clearSegmentFallbackSession();
       setPlayerStatus("Bascule source apres fallback iOS...");
