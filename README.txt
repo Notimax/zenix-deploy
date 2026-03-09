@@ -355,3 +355,11 @@ LATEST MOBILE/NAV/CALENDAR FIXES (2026-03-09, c141)
 - Mobile navbar restored on phone widths (bottom tabbar visible, desktop nav hidden on small screens).
 - `bindSafeTap` hardened to prevent accidental open while scrolling/touch-dragging cards on mobile.
 - Calendar media type resolution now prioritizes explicit/anime signals before stale ID mappings to reduce serie/anime mixing.
+
+LATEST COVER + MOBILE NAV TUNING (2026-03-09, c142)
+- Cover loading tuned for category views:
+  - larger eager/high-priority image windows
+  - category catalog render can switch to all-at-once mode (no delayed chunk tails on normal list sizes)
+  - stronger detail-cover warmup budget after category render
+- Mobile navbar moved back to top layout (desktop-style horizontal nav), bottom mobile tabbar hidden.
+- `Haut` button disabled on phone (hidden by viewport + scroll logic).

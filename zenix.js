@@ -34,14 +34,14 @@ const BACKGROUND_CATALOG_RENDER_EVERY = 8;
 const CATALOG_RENDER_CHUNK_MIN = 40;
 const CATALOG_RENDER_CHUNK_MAX = 104;
 const MOBILE_VIEWPORT_MAX_WIDTH = 740;
-const MOBILE_CATALOG_FIRST_PAINT = 88;
-const MOBILE_CATALOG_CHUNK_MIN = 60;
-const MOBILE_EAGER_IMAGE_LIMIT = 180;
-const MOBILE_HIGH_PRIORITY_IMAGE_LIMIT = 86;
-const DESKTOP_EAGER_IMAGE_LIMIT = 150;
-const DESKTOP_HIGH_PRIORITY_IMAGE_LIMIT = 58;
-const CRITICAL_COVER_PRIME_MOBILE = 140;
-const CRITICAL_COVER_PRIME_DESKTOP = 84;
+const MOBILE_CATALOG_FIRST_PAINT = 120;
+const MOBILE_CATALOG_CHUNK_MIN = 88;
+const MOBILE_EAGER_IMAGE_LIMIT = 320;
+const MOBILE_HIGH_PRIORITY_IMAGE_LIMIT = 150;
+const DESKTOP_EAGER_IMAGE_LIMIT = 260;
+const DESKTOP_HIGH_PRIORITY_IMAGE_LIMIT = 120;
+const CRITICAL_COVER_PRIME_MOBILE = 220;
+const CRITICAL_COVER_PRIME_DESKTOP = 150;
 const CRITICAL_COVER_PRIME_WAIT_MS = 700;
 const LIVE_RENDER_INTERACTION_GRACE_MS = 1200;
 const SCROLL_SYNC_THRESHOLD_PX = 1800;
@@ -919,7 +919,7 @@ async function init() {
   pruneProgressEntries();
   applyUiPrefs({ syncControls: true });
   if (refs.footerVersion) {
-    refs.footerVersion.textContent = "c141";
+    refs.footerVersion.textContent = "c142";
   }
   updateNetworkBadge();
   cleanupLegacyServiceWorker().catch(() => {
@@ -2399,7 +2399,7 @@ function updateScrollUI() {
     refs.scrollProgressFill.style.width = `${(progress * 100).toFixed(2)}%`;
   }
   if (refs.backToTopBtn) {
-    refs.backToTopBtn.hidden = y < 420;
+    refs.backToTopBtn.hidden = isCompactViewport() || y < 420;
   }
 }
 
@@ -5917,14 +5917,25 @@ function renderCatalog(items) {
 
   const total = items.length;
   const compact = isCompactViewport();
+  const activeView = resolveCatalogViewForSearch();
+  const categoryBoost = state.query.trim().length === 0 && isCatalogCategoryView(activeView);
+  const renderAllAtOnce = categoryBoost && total <= (compact ? 520 : 620);
   const baseChunk = Math.max(
     CATALOG_RENDER_CHUNK_MIN,
     Math.min(CATALOG_RENDER_CHUNK_MAX, Math.ceil(total / 9))
   );
-  const chunkSize = compact ? Math.max(baseChunk, MOBILE_CATALOG_CHUNK_MIN) : baseChunk;
+  const chunkSize = renderAllAtOnce
+    ? total
+    : compact
+      ? Math.max(baseChunk, MOBILE_CATALOG_CHUNK_MIN)
+      : baseChunk;
   const firstPaintCount = Math.min(
     total,
-    compact ? Math.max(chunkSize, MOBILE_CATALOG_FIRST_PAINT) : chunkSize
+    renderAllAtOnce
+      ? total
+      : compact
+        ? Math.max(chunkSize, MOBILE_CATALOG_FIRST_PAINT)
+        : chunkSize
   );
   const imageProfile = getCardImageProfile();
   let index = 0;
@@ -5962,12 +5973,12 @@ function renderCatalog(items) {
     }
   };
 
-  if (index < total) {
+  if (index < total && !renderAllAtOnce) {
     state.catalogRenderFrame = requestAnimationFrame(appendChunk);
   } else {
     state.catalogRenderFrame = 0;
   }
-  warmVisibleDetailCovers(items, shouldBoostCoverLoading() ? 84 : 52);
+  warmVisibleDetailCovers(items, categoryBoost ? 180 : shouldBoostCoverLoading() ? 120 : 64);
   observeMediaCards(refs.catalogGrid);
 }
 

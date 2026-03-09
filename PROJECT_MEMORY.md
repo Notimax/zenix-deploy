@@ -54,6 +54,10 @@ Last update: 2026-03-09
     - mobile nav restored to tabbar mode on phone widths (desktop nav hidden on small screens).
     - safe tap handling hardened against scroll/touch ghost-open on cards.
     - calendar type resolver now prioritizes explicit/anime entry signals before stale ID map hints.
+  - c142 follow-up:
+    - mobile navbar moved back to top horizontal nav; bottom tabbar hidden again on phone.
+    - `Haut` button hidden on compact/mobile viewport.
+    - category cover loading tuned for faster/fuller first paint (higher eager budgets + render batching + warmer detail hydration).
 
 ## Streaming/source policy
 - External embed fallback sources (e.g. generic `vidsrc`) are removed.
