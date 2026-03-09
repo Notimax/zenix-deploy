@@ -76,6 +76,12 @@ Last update: 2026-03-09
     - calendar cards show `En attente` badge for pending titles and suppress direct detail opening while pending.
     - frontend suppresses `Nouveau` badge for pending titles.
     - semantic dedupe now prefers available entries over pending entries.
+  - iOS auto-switch hardening:
+    - playback guard is active even during segment fallback sessions.
+    - bootstrap stall at `readyState=0` now triggers source failure instead of waiting indefinitely.
+    - fallback-stall guard forces source switch when `Fallback iOS actif...` remains blocked.
+    - mobile auto-switch can now use premium fallback candidates when free-path chain is exhausted.
+    - `IOS_SEGMENT_CHAIN_MAX` raised to avoid premature forced hops between sources.
 
 ## Mobile robustness
 - Startup splash must never block app forever.

@@ -235,3 +235,14 @@ LATEST CALENDAR/STATUS FIX (2026-03-09)
   - date pill is moved to top-right to avoid overlap.
 - `Nouveau` is now suppressed when a title is `En attente`.
 - Merge/dedupe now prefers available entries over pending ones when semantic duplicates exist.
+
+LATEST IOS AUTO-SWITCH FIX (2026-03-09)
+- Playback guard now stays active during iOS segment fallback (no early guard skip).
+- Auto-switch now accepts premium fallback candidates on mobile when needed (instead of stopping on free-only dead-end).
+- Bootstrap stall detection now fails fast on true `readyState=0` source stalls so next source can be attempted.
+- Added explicit guard rule: if `Fallback iOS actif...` stays blocked too long, force switch to the next source.
+- iOS segment fallback chain limit increased (`IOS_SEGMENT_CHAIN_MAX=8`) to reduce premature forced source hops.
+- Local brute matrix after fix:
+  - file: `__tmp_brut_f1_mercredi_matrix_result_local_after_fallbackstall_patch4_2026-03-09.json`
+  - summary: passed 8 / failed 0
+  - iPhone 13 runs show source progression up to source 4 on Mercredi when fallback blocks.

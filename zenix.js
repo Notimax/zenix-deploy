@@ -73,7 +73,7 @@ const IOS_NATIVE_HLS_BOOT_TIMEOUT_MS = 3600;
 const IOS_DECODED_HLS_BOOT_TIMEOUT_MS = 4200;
 const IOS_SEGMENT_BOOT_TIMEOUT_MS = 3400;
 const IOS_SEGMENT_NEXT_TIMEOUT_MS = 4200;
-const IOS_SEGMENT_CHAIN_MAX = 1;
+const IOS_SEGMENT_CHAIN_MAX = 8;
 const EMBED_READY_TIMEOUT_MS = 12000;
 const HEARTBEAT_INTERVAL_MS = 30 * 1000;
 const HEARTBEAT_REQUEST_TIMEOUT_MS = 9000;
@@ -7684,6 +7684,8 @@ function startPlaybackGuard() {
   let trackedPlayToken = Number(state.playToken || 0);
   let lastObservedTime = 0;
   let lastAdvanceAt = Date.now();
+  let trackedSourceIndex = Number(state.sourceIndex || -1);
+  let fallbackStatusSince = 0;
   let switchingSource = false;
   state.playbackGuardTimer = window.setInterval(() => {
     if (refs.playerOverlay.hidden) {
@@ -7691,9 +7693,6 @@ function startPlaybackGuard() {
       return;
     }
     if (switchingSource) {
-      return;
-    }
-    if (state.segmentFallback) {
       return;
     }
     if (state.sourceLoading || state.sourceIndex < 0 || state.manualSourceLock) {
@@ -7710,6 +7709,11 @@ function startPlaybackGuard() {
     if (isEmbedSource(currentSource)) {
       return;
     }
+    const currentSourceIndex = Number(state.sourceIndex || -1);
+    if (currentSourceIndex !== trackedSourceIndex) {
+      trackedSourceIndex = currentSourceIndex;
+      fallbackStatusSince = 0;
+    }
     const video = refs.playerVideo;
     if (!video || video.ended || video.seeking) {
       return;
@@ -7721,27 +7725,40 @@ function startPlaybackGuard() {
     const awaitingUser = isAwaitingUserPlay();
     const hasNextCandidate = state.sourceIndex + 1 < state.sourcePool.length;
     const statusText = String(refs.playerStatus?.textContent || "").toLowerCase();
+    const fallbackStatusActive = /fallback ios actif/.test(statusText);
+    if (fallbackStatusActive) {
+      if (!fallbackStatusSince) {
+        fallbackStatusSince = Date.now();
+      }
+    } else {
+      fallbackStatusSince = 0;
+    }
     if (currentTime > lastObservedTime + 0.08) {
       lastObservedTime = currentTime;
       lastAdvanceAt = Date.now();
     }
     const stalledForMs = Date.now() - lastAdvanceAt;
+    const canAutoRecoverWhileAwaiting =
+      awaitingUser &&
+      stalledForMs > PLAYBACK_STATUS_RECOVERY_MS + 1200 &&
+      /fallback ios actif|connexion source|lecture bloquee|source indisponible/.test(statusText);
+    const allowAutoRecover = !awaitingUser || canAutoRecoverWhileAwaiting;
     const startedPlayback = Math.max(lastObservedTime, currentTime) > 0.6;
-    const blockedAtStart = !awaitingUser && video.paused && currentTime < 1.2 && readyState >= 2;
+    const blockedAtStart = allowAutoRecover && video.paused && currentTime < 1.2 && readyState >= 2;
     const noSourceAtStart =
-      !awaitingUser &&
+      allowAutoRecover &&
       video.paused &&
       currentTime < 0.25 &&
       readyState === 0 &&
       (networkState === 0 || networkState === 2 || networkState === 3);
     const hardFreeze =
-      !awaitingUser &&
+      allowAutoRecover &&
       startedPlayback &&
       !video.paused &&
       stalledForMs > PLAYBACK_STALL_HARD_MS &&
       (readyState <= 2 || networkState === 2 || networkState === 3);
     const pausedBufferStall =
-      !awaitingUser &&
+      allowAutoRecover &&
       startedPlayback &&
       video.paused &&
       stalledForMs > PLAYBACK_STALL_PAUSED_MS &&
@@ -7749,7 +7766,7 @@ function startPlaybackGuard() {
     const stalledDuringPlayback = hardFreeze || pausedBufferStall;
     const startupStallWithAlternative =
       hasNextCandidate &&
-      !awaitingUser &&
+      allowAutoRecover &&
       video.paused &&
       currentTime < 0.25 &&
       stalledForMs > PLAYBACK_STARTUP_STALL_MS &&
@@ -7757,21 +7774,27 @@ function startPlaybackGuard() {
       (networkState === 0 || networkState === 2 || networkState === 3);
     const statusDrivenRecovery =
       hasNextCandidate &&
-      !awaitingUser &&
+      allowAutoRecover &&
       stalledForMs > PLAYBACK_STATUS_RECOVERY_MS &&
-      /lecture impossible|source selectionnee indisponible|source indisponible/.test(statusText);
+      /lecture impossible|source selectionnee indisponible|source indisponible|fallback ios actif/.test(statusText);
+    const prolongedFallbackStall =
+      hasNextCandidate &&
+      fallbackStatusSince > 0 &&
+      Date.now() - fallbackStatusSince > Math.max(4200, PLAYBACK_STARTUP_STALL_MS + 1800) &&
+      currentTime < 0.25;
     if (
       errorCode <= 0 &&
       !blockedAtStart &&
       !noSourceAtStart &&
       !stalledDuringPlayback &&
       !startupStallWithAlternative &&
-      !statusDrivenRecovery
+      !statusDrivenRecovery &&
+      !prolongedFallbackStall
     ) {
       return;
     }
     switchingSource = true;
-    if (stalledDuringPlayback || startupStallWithAlternative || statusDrivenRecovery) {
+    if (stalledDuringPlayback || startupStallWithAlternative || statusDrivenRecovery || prolongedFallbackStall) {
       setPlayerStatus("Lecture bloquee, bascule automatique...", true);
     }
     trySwitchToNextSource()
@@ -7811,9 +7834,15 @@ function schedulePlaybackHealthMonitor(token, step = 0) {
     const readyState = Number(video.readyState || 0);
     const networkState = Number(video.networkState || 0);
     const awaitingUser = isAwaitingUserPlay();
-    const blockedAtStart = !awaitingUser && step >= 1 && video.paused && currentTime < 1.2 && readyState >= 2;
+    const statusText = String(refs.playerStatus?.textContent || "").toLowerCase();
+    const canAutoRecoverWhileAwaiting =
+      awaitingUser &&
+      step >= 2 &&
+      /fallback ios actif|connexion source|lecture bloquee|source indisponible/.test(statusText);
+    const allowAutoRecover = !awaitingUser || canAutoRecoverWhileAwaiting;
+    const blockedAtStart = allowAutoRecover && step >= 1 && video.paused && currentTime < 1.2 && readyState >= 2;
     const noSourceAtStart =
-      !awaitingUser &&
+      allowAutoRecover &&
       step >= 2 &&
       video.paused &&
       currentTime < 0.25 &&
@@ -7934,7 +7963,7 @@ async function trySwitchToNextSource() {
 
   const currentSource = state.sourcePool[state.sourceIndex] || null;
   const avoidPremiumAuto = !currentSource?.premiumHint;
-  const allowPremiumAutoFallback = AUTO_PREMIUM_FALLBACK && !(shouldUseNativeHls(refs.playerVideo) && isLikelyMobileDevice());
+  const allowPremiumAutoFallback = AUTO_PREMIUM_FALLBACK;
   const attemptedKeys = new Set();
   const currentKey = getSourceDedupKey(currentSource);
   if (currentKey) {
@@ -9173,7 +9202,6 @@ async function startPlayerSource(source, resumeTime, token) {
 }
 
 async function waitForPlaybackBootstrap(video, token, timeoutMs = 4200) {
-  const nativeHls = shouldUseNativeHls(video);
   const deadline = Date.now() + Math.max(1200, Number(timeoutMs || 0));
   while (Date.now() < deadline) {
     if (token !== state.playToken) {
@@ -9203,10 +9231,6 @@ async function waitForPlaybackBootstrap(video, token, timeoutMs = 4200) {
   const networkState = Number(video?.networkState || 0);
   const paused = Boolean(video?.paused);
   if (currentTime <= 0.18 && paused && readyState === 0 && (networkState === 2 || networkState === 3 || networkState === 0)) {
-    if (nativeHls) {
-      markAwaitingUserPlay(60000);
-      return;
-    }
     throw new Error("Source stalled at bootstrap");
   }
   if (currentTime <= 0.18 && paused && readyState >= 2) {
