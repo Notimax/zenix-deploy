@@ -348,3 +348,10 @@ LATEST VISUAL ROLLBACK TUNING (2026-03-09, c140)
 - Disabled category skeleton opacity gating to force instant cover visibility.
 - Disabled category grid content-visibility containment to prioritize immediate rendering/fluidity.
 - Player and detail modal visual style remains the modern one.
+
+LATEST MOBILE/NAV/CALENDAR FIXES (2026-03-09, c141)
+- Removed homepage `Tendances` section from HTML + runtime render path.
+- Removed `FREE` chip and footer/version block (`Zenix Stream / Etat / Version`) from UI.
+- Mobile navbar restored on phone widths (bottom tabbar visible, desktop nav hidden on small screens).
+- `bindSafeTap` hardened to prevent accidental open while scrolling/touch-dragging cards on mobile.
+- Calendar media type resolution now prioritizes explicit/anime signals before stale ID mappings to reduce serie/anime mixing.

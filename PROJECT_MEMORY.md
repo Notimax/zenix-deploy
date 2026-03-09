@@ -48,6 +48,12 @@ Last update: 2026-03-09
     - legacy background restored for browse/category surfaces.
     - category cover rendering forced to immediate visibility (no skeleton opacity gating).
     - category grids use immediate rendering mode to reduce delayed appearance artifacts.
+  - c141 follow-up:
+    - homepage `Tendances` removed from UI and runtime render path.
+    - `FREE` chip and footer status/version block removed.
+    - mobile nav restored to tabbar mode on phone widths (desktop nav hidden on small screens).
+    - safe tap handling hardened against scroll/touch ghost-open on cards.
+    - calendar type resolver now prioritizes explicit/anime entry signals before stale ID map hints.
 
 ## Streaming/source policy
 - External embed fallback sources (e.g. generic `vidsrc`) are removed.

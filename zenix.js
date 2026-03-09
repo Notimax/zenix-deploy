@@ -919,7 +919,7 @@ async function init() {
   pruneProgressEntries();
   applyUiPrefs({ syncControls: true });
   if (refs.footerVersion) {
-    refs.footerVersion.textContent = "c140";
+    refs.footerVersion.textContent = "c141";
   }
   updateNetworkBadge();
   cleanupLegacyServiceWorker().catch(() => {
@@ -1075,23 +1075,38 @@ function bindSafeTap(target, callback, options = {}) {
     return;
   }
 
-  const moveThreshold = Math.max(6, Number(options.moveThreshold || 14));
+  const moveThreshold = Math.max(4, Number(options.moveThreshold || 10));
+  const scrollThreshold = Math.max(2, Number(options.scrollThreshold || 8));
   const tapTimeoutMs = Math.max(120, Number(options.tapTimeoutMs || 640));
   const dedupeMs = Math.max(120, Number(options.dedupeMs || 360));
 
   let activePointerId = null;
   let startX = 0;
   let startY = 0;
+  let startScrollX = 0;
+  let startScrollY = 0;
   let startAt = 0;
   let moved = false;
   let lastTouchTapAt = 0;
+  let ignoreClickUntil = 0;
 
   const clearPointer = () => {
     activePointerId = null;
     startX = 0;
     startY = 0;
+    startScrollX = 0;
+    startScrollY = 0;
     startAt = 0;
     moved = false;
+  };
+
+  const suppressGhostClick = (event) => {
+    if (event && typeof event.preventDefault === "function") {
+      event.preventDefault();
+    }
+    if (event && typeof event.stopPropagation === "function") {
+      event.stopPropagation();
+    }
   };
 
   target.addEventListener(
@@ -1106,6 +1121,8 @@ function bindSafeTap(target, callback, options = {}) {
       activePointerId = event.pointerId;
       startX = Number(event.clientX || 0);
       startY = Number(event.clientY || 0);
+      startScrollX = Number(window.scrollX || window.pageXOffset || 0);
+      startScrollY = Number(window.scrollY || window.pageYOffset || 0);
       startAt = Date.now();
       moved = false;
     },
@@ -1130,6 +1147,7 @@ function bindSafeTap(target, callback, options = {}) {
   target.addEventListener(
     "pointercancel",
     () => {
+      ignoreClickUntil = Date.now() + dedupeMs;
       clearPointer();
     },
     { passive: true }
@@ -1141,20 +1159,29 @@ function bindSafeTap(target, callback, options = {}) {
       if (activePointerId === null || event.pointerId !== activePointerId) {
         return;
       }
+      const scrollDeltaX = Math.abs((Number(window.scrollX || window.pageXOffset || 0) || 0) - startScrollX);
+      const scrollDeltaY = Math.abs((Number(window.scrollY || window.pageYOffset || 0) || 0) - startScrollY);
+      if (scrollDeltaX > scrollThreshold || scrollDeltaY > scrollThreshold) {
+        moved = true;
+      }
       const duration = Date.now() - startAt;
       const shouldTrigger = !moved && duration <= tapTimeoutMs;
       clearPointer();
       if (!shouldTrigger) {
+        ignoreClickUntil = Date.now() + dedupeMs;
         return;
       }
       lastTouchTapAt = Date.now();
+      ignoreClickUntil = lastTouchTapAt + dedupeMs;
       callback(event);
     },
     { passive: true }
   );
 
   target.addEventListener("click", (event) => {
-    if (Date.now() - lastTouchTapAt < dedupeMs) {
+    const now = Date.now();
+    if (now - lastTouchTapAt < dedupeMs || now < ignoreClickUntil) {
+      suppressGhostClick(event);
       return;
     }
     callback(event);
@@ -2995,15 +3022,24 @@ function getCalendarEntryMediaType(entry) {
   if (!entry || typeof entry !== "object") {
     return "film";
   }
+  const explicit = normalizeCalendarMediaType(
+    entry.type || entry.kind || entry.mediaType || entry.media_type || entry.category || ""
+  );
+  if (explicit === "anime" || isTruthyDataFlag(entry.isAnime) || hasCalendarAnimationCategory(entry)) {
+    return "anime";
+  }
+  if (explicit === "film" || explicit === "serie") {
+    return explicit;
+  }
   const mediaId = Number(entry.mediaId || 0);
   if (mediaId > 0) {
     const resolved = String(state.calendarTypeByMediaId.get(mediaId) || "").trim();
-    if (resolved === "film" || resolved === "serie" || resolved === "anime") {
+    if (resolved === "anime") {
+      return "anime";
+    }
+    if (resolved === "film" || resolved === "serie") {
       return resolved;
     }
-  }
-  if (isTruthyDataFlag(entry.isAnime) || hasCalendarAnimationCategory(entry)) {
-    return "anime";
   }
   if (mediaId > 0) {
     const mapped = findItemById(mediaId);
@@ -3016,12 +3052,6 @@ function getCalendarEntryMediaType(entry) {
     if (mapped?.type === "movie") {
       return "film";
     }
-  }
-  const explicit = normalizeCalendarMediaType(
-    entry.type || entry.kind || entry.mediaType || entry.media_type || entry.category || ""
-  );
-  if (explicit) {
-    return explicit;
   }
   if (Boolean(entry.isAnime)) {
     return "anime";
@@ -4789,9 +4819,6 @@ function renderAll() {
     renderHero(heroItem);
     renderCommunityStats();
     renderCatalog(visible);
-    if (!hasQuery && state.view === "all") {
-      renderTrendingRail();
-    }
     if (!hasQuery) {
       renderContinue();
       if (state.view === "all") {
@@ -4828,7 +4855,7 @@ function renderAll() {
   setHidden(refs.calendarSection, !isCalendarView);
 
   setHidden(refs.topSection, !isTopView);
-  setHidden(refs.trendingSection, !(showBrowseView && !hasQuery && state.view === "all"));
+  setHidden(refs.trendingSection, true);
   setHidden(refs.featureRailSection, true);
 
   const showCatalog = showBrowseView;

@@ -5442,3 +5442,38 @@ img[data-image-ready="1"] {
     gap: 10px;
   }
 }
+
+/* ===== Mobile navbar restore + legacy feel tuning (c141) ===== */
+.mobile-tabbar {
+  display: none !important;
+}
+
+@media (max-width: 1000px) {
+  .main-nav-shell {
+    display: none !important;
+  }
+
+  .mobile-tabbar {
+    display: grid !important;
+  }
+
+  body {
+    padding-bottom: calc(74px + env(safe-area-inset-bottom)) !important;
+  }
+}
+
+@media (max-width: 520px) {
+  .mobile-tabbar {
+    left: 8px;
+    right: 8px;
+    bottom: calc(8px + env(safe-area-inset-bottom));
+    gap: 4px;
+    padding: 4px;
+  }
+
+  .mobile-tab {
+    font-size: 0.68rem;
+    min-height: 34px;
+    padding: 6px 5px;
+  }
+}
