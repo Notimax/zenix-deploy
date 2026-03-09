@@ -5855,3 +5855,80 @@ img[data-image-ready="1"] {
   height: 0;
   display: none;
 }
+
+/* ===== Adblock gate + type classification hardening UI (c154) ===== */
+.adblock-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 210;
+  display: grid;
+  place-items: center;
+  padding: clamp(14px, 4vw, 32px);
+  background:
+    radial-gradient(circle at 15% 8%, rgba(255, 98, 76, 0.22), transparent 42%),
+    radial-gradient(circle at 90% 85%, rgba(241, 20, 36, 0.2), transparent 46%),
+    rgba(5, 6, 10, 0.86);
+  backdrop-filter: blur(8px);
+}
+
+.adblock-gate-card {
+  width: min(560px, 100%);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 18px;
+  padding: clamp(18px, 4vw, 28px);
+  background:
+    radial-gradient(circle at 0% 0%, rgba(241, 20, 36, 0.2), transparent 45%),
+    linear-gradient(160deg, rgba(16, 18, 28, 0.98), rgba(9, 10, 16, 0.98));
+  box-shadow: 0 24px 62px rgba(0, 0, 0, 0.62);
+}
+
+.adblock-gate-kicker {
+  margin: 0 0 8px;
+  font-size: 0.76rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(255, 199, 145, 0.9);
+}
+
+.adblock-gate-card h2 {
+  margin: 0;
+  font-size: clamp(1.28rem, 4.8vw, 1.78rem);
+}
+
+.adblock-gate-card p {
+  margin: 12px 0 0;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.adblock-gate-actions {
+  margin-top: 16px;
+  display: flex;
+  justify-content: flex-start;
+}
+
+.adblock-gate-status {
+  margin-top: 12px;
+  font-size: 0.82rem;
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.adblock-gate-status.is-error {
+  color: #ff949b;
+}
+
+body.adblock-locked {
+  overflow: hidden;
+}
+
+body.adblock-locked main,
+body.adblock-locked .topbar,
+body.adblock-locked .detail-modal,
+body.adblock-locked .player-overlay,
+body.adblock-locked .mobile-tabbar,
+body.adblock-locked .design-updates,
+body.adblock-locked .toast,
+body.adblock-locked .back-to-top {
+  pointer-events: none;
+  user-select: none;
+}

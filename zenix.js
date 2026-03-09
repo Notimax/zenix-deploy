@@ -137,6 +137,8 @@ const NATIVE_AD_SCRIPT_SRC = "https://maddenwiped.com/6724b59b8680ca68d3195556ff
 const NATIVE_AD_CONTAINER_ID = "container-6724b59b8680ca68d3195556ffa48409";
 const NATIVE_AD_FRAME_CLASS = "native-banner-frame";
 const NATIVE_AD_FRAME_SANDBOX = "allow-scripts allow-same-origin";
+const ADBLOCK_MONITOR_INTERVAL_MS = 8500;
+const ADBLOCK_BOOT_DELAY_MS = 950;
 const UI_THEME_ORDER = ["cine", "minimal", "neon"];
 const runtimeEnv = detectRuntimeEnvironment();
 
@@ -288,6 +290,9 @@ const state = {
   suggestionSubmitting: false,
   nativeAdActivated: false,
   navOverflowOpen: false,
+  adblockDetected: false,
+  adblockCheckTimer: 0,
+  adblockProbeInFlight: false,
 };
 
 const refs = {
@@ -382,6 +387,9 @@ const refs = {
   nativeAdDetailSection: document.getElementById("nativeAdDetailSection"),
   nativeAdDetailMount: document.getElementById("nativeAdDetailMount"),
   nativeAdUnit: document.getElementById("nativeAdUnit"),
+  adblockGate: document.getElementById("adblockGate"),
+  adblockRetryBtn: document.getElementById("adblockRetryBtn"),
+  adblockGateStatus: document.getElementById("adblockGateStatus"),
 
   catalogSection: document.getElementById("catalogSection"),
   catalogTitle: document.getElementById("catalogTitle"),
@@ -1000,7 +1008,7 @@ async function init() {
   pruneProgressEntries();
   applyUiPrefs({ syncControls: true });
   if (refs.footerVersion) {
-    refs.footerVersion.textContent = "c153";
+    refs.footerVersion.textContent = "c154";
   }
   updateNetworkBadge();
   cleanupLegacyServiceWorker().catch(() => {
@@ -1008,6 +1016,7 @@ async function init() {
   });
   bindEvents();
   initExternalNavigationGuard();
+  initAdblockGuard();
   refreshSuggestionClientTimestamp();
   hydrateLanguagePrefsMap();
   initCalendarControls();
@@ -2756,6 +2765,109 @@ function applyNativeAdPlacement() {
   activateNativeAdIfNeeded();
 }
 
+function setAdblockGateStatus(message, isError = false) {
+  if (!refs.adblockGateStatus) {
+    return;
+  }
+  refs.adblockGateStatus.textContent = String(message || "").trim();
+  refs.adblockGateStatus.classList.toggle("is-error", Boolean(isError));
+}
+
+function setAdblockGateVisible(visible) {
+  if (!refs.adblockGate) {
+    return;
+  }
+  const nextVisible = Boolean(visible);
+  refs.adblockGate.hidden = !nextVisible;
+  document.body.classList.toggle("adblock-locked", nextVisible);
+}
+
+async function detectAdblockBait() {
+  if (!document.body) {
+    return false;
+  }
+  const bait = document.createElement("div");
+  bait.className = "adsbox ad-banner ad-unit ad-zone pub_300x250 sponsor-ad";
+  bait.setAttribute("aria-hidden", "true");
+  bait.style.cssText =
+    "position:absolute !important;left:-99999px !important;top:-99999px !important;width:1px !important;height:1px !important;pointer-events:none !important;opacity:1 !important;z-index:-1 !important;";
+  document.body.appendChild(bait);
+  await wait(70);
+  const style = window.getComputedStyle(bait);
+  const blocked =
+    !style ||
+    style.display === "none" ||
+    style.visibility === "hidden" ||
+    Number(style.opacity || 1) === 0 ||
+    bait.offsetHeight === 0 ||
+    bait.clientHeight === 0 ||
+    bait.offsetParent === null;
+  bait.remove();
+  return blocked;
+}
+
+function applyAdblockDetectionState(blocked, options = {}) {
+  const nextBlocked = Boolean(blocked);
+  const wasBlocked = Boolean(state.adblockDetected);
+  state.adblockDetected = nextBlocked;
+  setAdblockGateVisible(nextBlocked);
+  if (nextBlocked) {
+    setAdblockGateStatus(
+      "Desactive ton bloqueur de pub pour continuer, puis clique sur 'Verifier de nouveau'.",
+      false
+    );
+    return;
+  }
+  setAdblockGateStatus("", false);
+  if (wasBlocked && options.manual === true) {
+    showToast("Merci. Acces restaure.");
+  }
+}
+
+async function runAdblockDetection(options = {}) {
+  if (state.adblockProbeInFlight) {
+    return state.adblockDetected;
+  }
+  state.adblockProbeInFlight = true;
+  try {
+    const blocked = await detectAdblockBait();
+    applyAdblockDetectionState(blocked, options);
+    return blocked;
+  } catch {
+    if (options.manual === true) {
+      setAdblockGateStatus("Verification impossible pour le moment. Reessaie.", true);
+    }
+    return state.adblockDetected;
+  } finally {
+    state.adblockProbeInFlight = false;
+  }
+}
+
+function initAdblockGuard() {
+  if (refs.adblockRetryBtn) {
+    bindFastPress(refs.adblockRetryBtn, () => {
+      setAdblockGateStatus("Verification en cours...");
+      runAdblockDetection({ manual: true }).catch(() => {
+        // handled in runAdblockDetection
+      });
+    });
+  }
+  if (state.adblockCheckTimer) {
+    clearInterval(state.adblockCheckTimer);
+    state.adblockCheckTimer = 0;
+  }
+  window.setTimeout(() => {
+    runAdblockDetection({ manual: false }).catch(() => {
+      // best effort only
+    });
+  }, ADBLOCK_BOOT_DELAY_MS);
+  state.adblockCheckTimer = window.setInterval(() => {
+    runAdblockDetection({ manual: false }).catch(() => {
+      // best effort only
+    });
+  }, ADBLOCK_MONITOR_INTERVAL_MS);
+}
+
 function isCompactViewport() {
   if (typeof window.matchMedia === "function") {
     return window.matchMedia(`(max-width: ${MOBILE_VIEWPORT_MAX_WIDTH}px)`).matches;
@@ -3101,6 +3213,34 @@ function hasCalendarAnimationCategory(entry) {
   });
 }
 
+function hasCalendarSeriesSignals(entry) {
+  if (!entry || typeof entry !== "object") {
+    return false;
+  }
+  const season = Number(entry?.season ?? entry?.externalSeason ?? entry?.external_season ?? 0);
+  const episode = Number(entry?.episode ?? entry?.externalEpisode ?? entry?.external_episode ?? 0);
+  if (season > 0 || episode > 0) {
+    return true;
+  }
+  const textSignals = [
+    entry?.title,
+    entry?.supplemental,
+    entry?.source,
+    entry?.url,
+    entry?.externalDetailUrl,
+    entry?.external_detail_url,
+  ]
+    .map((value) => String(value || "").toLowerCase())
+    .join(" ");
+  return (
+    /s\d{1,2}\s*e\d{1,3}/i.test(textSignals) ||
+    textSignals.includes("episode") ||
+    textSignals.includes("saison") ||
+    textSignals.includes("/series/") ||
+    textSignals.includes("/serie/")
+  );
+}
+
 function scheduleCalendarTypeReconcile() {
   if (state.calendarTypeReconcileTimer) {
     return;
@@ -3126,6 +3266,12 @@ function getCalendarEntryMediaType(entry) {
   }
   if (explicit === "film" || explicit === "serie") {
     return explicit;
+  }
+  if (hasCalendarSeriesSignals(entry)) {
+    if (isTruthyDataFlag(entry.isAnime) || hasCalendarAnimationCategory(entry)) {
+      return "anime";
+    }
+    return "serie";
   }
   const mediaId = Number(entry.mediaId || 0);
   if (mediaId > 0) {
@@ -4677,12 +4823,25 @@ async function fetchCatalogPage(page, options = {}) {
   };
 }
 
+function resolveCatalogMediaType(rawType, isAnimeFlag = false) {
+  const normalized = normalizeCalendarMediaType(rawType);
+  if (normalized === "anime" || normalized === "serie") {
+    return "tv";
+  }
+  if (normalized === "film") {
+    return "movie";
+  }
+  return isAnimeFlag ? "tv" : "movie";
+}
+
 function normalizeCatalogItem(raw) {
   if (!raw || typeof raw !== "object") {
     return null;
   }
-  const isAnime = Boolean(raw?.isAnime);
-  const type = raw?.type === "tv" ? "tv" : "movie";
+  const rawType = raw?.type ?? raw?.media_type ?? raw?.mediaType ?? raw?.kind ?? "";
+  const normalizedInputType = normalizeCalendarMediaType(rawType);
+  const isAnime = isTruthyDataFlag(raw?.isAnime ?? raw?.is_anime ?? raw?.isanime) || normalizedInputType === "anime";
+  const type = resolveCatalogMediaType(rawType, isAnime);
 
   const id = Number(raw?.id || 0);
   if (!Number.isFinite(id) || id <= 0) {

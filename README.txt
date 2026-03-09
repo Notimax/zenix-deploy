@@ -474,3 +474,13 @@ LATEST MODAL/PLAYER SCROLLBAR HIDE (2026-03-09, c153)
   - player overlay/panel
   - source chips scroller
 - Cross-browser rules applied (`scrollbar-width`, `-ms-overflow-style`, `::-webkit-scrollbar`).
+
+LATEST TYPE + ADBLOCK GATE FIX (2026-03-09, c154)
+- Film/serie classification hardening:
+  - catalog item normalization now handles mixed upstream type labels (`movie/film`, `tv/serie/series`, `anime`).
+  - `isAnime` coercion now uses truthy parsing (prevents string `"0"` from being treated as `true`).
+  - calendar type resolver now adds stronger serie signals (`season/episode`, title/url hints) to reduce film/serie mismatches.
+- Added anti-adblock access gate (desktop + mobile):
+  - themed blocking modal appears when adblock is detected.
+  - message explains free access model (small non-intrusive ads fund infra/domain).
+  - retry button checks again and restores access immediately when adblock is disabled.

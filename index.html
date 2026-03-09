@@ -67,8 +67,8 @@
       "logo": "https://zenix.best/android-chrome-512x512.png"
     }
   </script>
-    <link rel="stylesheet" href="/zenix.css?v=20260309-c153" />
-    <script defer src="/zenix.js?v=20260309-c153"></script>
+    <link rel="stylesheet" href="/zenix.css?v=20260309-c154" />
+    <script defer src="/zenix.js?v=20260309-c154"></script>
 </head>
 <body>
   <div class="startup-splash" id="startupSplash" aria-hidden="true">
@@ -544,6 +544,21 @@
     <button class="mobile-tab" type="button" data-mobile-view="tv">Series</button>
     <button class="mobile-tab" type="button" data-mobile-view="list">Liste</button>
   </nav>
+
+  <section class="adblock-gate" id="adblockGate" hidden role="dialog" aria-modal="true" aria-labelledby="adblockGateTitle">
+    <article class="adblock-gate-card">
+      <p class="adblock-gate-kicker">Acces requis</p>
+      <h2 id="adblockGateTitle">Bloqueur de pub detecte</h2>
+      <p>
+        Zenix est 100% gratuit. De petites pubs non intrusives financent l'hebergement et le domaine.
+        Merci de desactiver le bloqueur de pub pour continuer la lecture.
+      </p>
+      <div class="adblock-gate-actions">
+        <button class="btn btn-primary" id="adblockRetryBtn" type="button">Verifier de nouveau</button>
+      </div>
+      <p class="adblock-gate-status" id="adblockGateStatus">Verification en cours...</p>
+    </article>
+  </section>
 
   <div class="toast" id="toast" hidden role="status" aria-live="polite"></div>
   <input id="importListInput" type="file" accept="application/json,.json" hidden />

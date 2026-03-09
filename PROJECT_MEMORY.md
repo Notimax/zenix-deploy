@@ -90,6 +90,10 @@ Last update: 2026-03-09
   - c153 follow-up:
     - detail modal and player surfaces now visually hide scrollbars while preserving scroll behavior.
     - applied to overlay/panel containers and player source chips for cleaner modal/player UI.
+  - c154 follow-up:
+    - added a themed anti-adblock access gate (desktop + mobile) with live retry/unlock flow.
+    - gate blocks interaction while adblock is detected, then restores access immediately after successful recheck.
+    - copy explains free model funding (small non-intrusive ads for hosting/domain).
 
 ## Streaming/source policy
 - External embed fallback sources (e.g. generic `vidsrc`) are removed.
@@ -173,6 +177,9 @@ Last update: 2026-03-09
 - Native script runs inside a sandboxed iframe (`allow-scripts allow-same-origin`) mounted in sponsor slots.
 - Top document must not inject ad script tags directly (`maddenwiped.com` should stay iframe-contained).
 - Objective: keep sponsor impressions in dedicated blocks while minimizing forced top-level redirects/popups.
+- Anti-adblock flow:
+  - adblock detection uses a bait probe and periodic checks.
+  - when detected, access gate is shown and main UI interaction is locked until user disables blocker and rechecks.
 
 ## In-app browser loading policy
 - Detect in-app/webview environments (including Snapchat) at runtime.
