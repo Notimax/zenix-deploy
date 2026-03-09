@@ -258,6 +258,21 @@ LATEST SPONSOR + SNAP LOAD FIX (2026-03-09)
   - cover assignment uses direct image source path (no preload gate) for faster first paint
   - result: covers load without needing category switch in Snap browser simulation.
 
+POST-FIX VERIFICATION (2026-03-09)
+- Local Snap UA probe:
+  - first view covers loaded: 40/40
+  - after category swap: 40/40
+  - top document ad script count: 0
+  - sponsor iframe sandbox: `allow-scripts allow-same-origin`
+- Live Snap UA probe (`https://zenix.best`):
+  - first view covers loaded: 40/40
+  - top document ad script count: 0
+  - sponsor iframe active in `Sponsorise`.
+- Local brute playback matrix rerun (`F1` + `Mercredi`, desktop + iPhone 13):
+  - total runs: 8
+  - passed: 8
+  - failed: 0
+
 LATEST LANGUAGE LABEL + IOS AUTOSWITCH TUNING (2026-03-09)
 - Source language labeling is now reconciled from multiple signals:
   - provider language field
