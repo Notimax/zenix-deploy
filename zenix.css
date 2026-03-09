@@ -1176,6 +1176,22 @@ body.nav-fit-stack .search-input {
   contain-intrinsic-size: 1px 760px;
 }
 
+body.in-app-browser .calendar-section,
+body.in-app-browser .feature-rail,
+body.in-app-browser .top-section,
+body.in-app-browser .spotlight,
+body.in-app-browser .continue,
+body.in-app-browser .catalog-section,
+body.in-app-browser .sponsor-slot,
+body.in-app-browser .my-list,
+body.in-app-browser .top-grid,
+body.in-app-browser .continue-grid,
+body.in-app-browser .catalog-grid {
+  contain: none;
+  content-visibility: visible;
+  contain-intrinsic-size: auto;
+}
+
 .sponsor-slot {
   border-radius: var(--radius-lg);
   border: 1px solid rgba(255, 255, 255, 0.14);
@@ -1207,25 +1223,12 @@ body.nav-fit-stack .search-input {
   overflow: hidden;
 }
 
-.native-banner-wrap > [id^="container-"] {
-  width: 100%;
-}
-
-.native-banner-gate {
+.native-banner-frame {
   width: 100%;
   min-height: 120px;
-  display: grid;
-  place-items: center;
-  gap: 8px;
-  padding: 14px;
-  text-align: center;
-  color: #b9becc;
-}
-
-.native-banner-gate p {
-  margin: 0;
-  max-width: 560px;
-  font-size: 0.9rem;
+  border: 0;
+  display: block;
+  background: transparent;
 }
 
 .detail-native-ad {

@@ -247,11 +247,16 @@ LATEST IOS AUTO-SWITCH FIX (2026-03-09)
   - summary: passed 8 / failed 0
   - iPhone 13 runs show source progression up to source 4 on Mercredi when fallback blocks.
 
-LATEST SPONSOR UX SAFETY FIX (2026-03-09)
-- Native sponsor script is no longer injected in initial HTML.
-- Sponsor block stays visible, but ad script loads only after explicit user click on:
-  - `Afficher le sponsorise`
-- Goal: no forced ad/open redirect on page load or passive browsing.
+LATEST SPONSOR + SNAP LOAD FIX (2026-03-09)
+- Native sponsor is now rendered only inside `Sponsorise` slots (home/catalog/detail) through a sandboxed iframe.
+- Third-party ad script is no longer present in the top document (`script[src*="maddenwiped.com"]` stays 0 outside iframe context).
+- Removed manual sponsor gate button; sponsor display is automatic only inside sponsor blocks.
+- Sandboxed frame policy prevents top-level pop/redirect behavior from sponsor script context.
+- In-app browser hardening (Snapchat/WebView):
+  - runtime class flags: `in-app-browser`, `snap-browser`
+  - `content-visibility` is disabled in in-app mode for key sections/grids
+  - cover assignment uses direct image source path (no preload gate) for faster first paint
+  - result: covers load without needing category switch in Snap browser simulation.
 
 LATEST LANGUAGE LABEL + IOS AUTOSWITCH TUNING (2026-03-09)
 - Source language labeling is now reconciled from multiple signals:

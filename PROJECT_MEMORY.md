@@ -88,9 +88,19 @@ Last update: 2026-03-09
 - Keep a hard timeout fallback to force-hide splash and unlock body scroll.
 
 ## Sponsor ad policy
-- Sponsor placements stay in UI (`Sponsorise` sections), but third-party ad scripts must not auto-load on first paint.
-- Native sponsor script is loaded only on explicit user action inside sponsor block (`Afficher le sponsorise`).
-- Objective: avoid forced popups/redirections during normal browsing or playback.
+- Sponsor remains restricted to UI slots (`Sponsorise` sections only: home/catalog/detail).
+- Native script runs inside a sandboxed iframe (`allow-scripts allow-same-origin`) mounted in sponsor slots.
+- Top document must not inject ad script tags directly (`maddenwiped.com` should stay iframe-contained).
+- Objective: keep sponsor impressions in dedicated blocks while minimizing forced top-level redirects/popups.
+
+## In-app browser loading policy
+- Detect in-app/webview environments (including Snapchat) at runtime.
+- Apply `body` flags:
+  - `in-app-browser`
+  - `snap-browser` (when Snapchat detected)
+- In in-app mode:
+  - disable `content-visibility` optimization on key sections/grids
+  - use direct cover image assignment (skip preload gate) for first paint reliability.
 
 ## Source language labeling policy
 - Keep all sources; never remove a source only because language metadata is uncertain.

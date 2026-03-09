@@ -126,6 +126,20 @@ const EXTERNAL_GUARD_ALLOW_HOSTS = new Set(["zenix.best", "www.zenix.best", "dis
 const EXTERNAL_GUARD_TRUST_WINDOW_MS = 1300;
 const NATIVE_AD_SCRIPT_SRC = "https://maddenwiped.com/6724b59b8680ca68d3195556ffa48409/invoke.js";
 const NATIVE_AD_CONTAINER_ID = "container-6724b59b8680ca68d3195556ffa48409";
+const NATIVE_AD_FRAME_CLASS = "native-banner-frame";
+const NATIVE_AD_FRAME_SANDBOX = "allow-scripts allow-same-origin";
+const runtimeEnv = detectRuntimeEnvironment();
+
+function detectRuntimeEnvironment() {
+  const ua = String(navigator.userAgent || "").toLowerCase();
+  const vendor = String(navigator.vendor || "").toLowerCase();
+  const isSnapBrowser = /\bsnapchat\b|\bsnap\b/.test(`${ua} ${vendor}`);
+  const isInAppBrowser = isSnapBrowser || /\bfbav\b|\bfban\b|instagram|line\/|micromessenger|wv\)|tiktok|twitter|linkedinapp/.test(ua);
+  return {
+    isInAppBrowser,
+    isSnapBrowser,
+  };
+}
 
 const FALLBACK_ITEMS = [
   {
@@ -260,8 +274,6 @@ const state = {
   cardViewportObserver: null,
   suggestionSubmitting: false,
   nativeAdActivated: false,
-  nativeAdLoading: false,
-  nativeAdLoadPromise: null,
 };
 
 const refs = {
@@ -345,8 +357,6 @@ const refs = {
   nativeAdDetailSection: document.getElementById("nativeAdDetailSection"),
   nativeAdDetailMount: document.getElementById("nativeAdDetailMount"),
   nativeAdUnit: document.getElementById("nativeAdUnit"),
-  nativeAdGate: document.getElementById("nativeAdGate"),
-  nativeAdLoadBtn: document.getElementById("nativeAdLoadBtn"),
 
   catalogSection: document.getElementById("catalogSection"),
   catalogTitle: document.getElementById("catalogTitle"),
@@ -424,6 +434,15 @@ let floatingNotificationGuardTimer = 0;
 let mainNavFitTimer = 0;
 let mainNavFitDeferred = false;
 let lastTrustedExternalIntentAt = 0;
+
+function applyRuntimeBrowserHints() {
+  if (runtimeEnv.isInAppBrowser) {
+    document.body.classList.add("in-app-browser");
+  }
+  if (runtimeEnv.isSnapBrowser) {
+    document.body.classList.add("snap-browser");
+  }
+}
 
 function isLikelyFloatingThirdPartyNotification(node) {
   if (!(node instanceof HTMLElement)) {
@@ -734,6 +753,7 @@ init();
 
 async function init() {
   const splashStartedAt = startStartupSplash();
+  applyRuntimeBrowserHints();
   pruneProgressEntries();
   applyUiPrefs({ syncControls: true });
   updateNetworkBadge();
@@ -742,7 +762,6 @@ async function init() {
   });
   bindEvents();
   initExternalNavigationGuard();
-  syncNativeAdGateUi();
   refreshSuggestionClientTimestamp();
   hydrateLanguagePrefsMap();
   initCalendarControls();
@@ -1008,12 +1027,6 @@ function bindEvents() {
                 ? "listSection"
                 : "catalogSection";
       document.getElementById(targetId)?.scrollIntoView({ behavior: "smooth", block: "start" });
-    });
-  });
-
-  bindFastPress(refs.nativeAdLoadBtn, () => {
-    activateNativeAdFromUserIntent().catch(() => {
-      // handled in function
     });
   });
 
@@ -2292,73 +2305,34 @@ function setHidden(node, hidden) {
   }
 }
 
-function syncNativeAdGateUi() {
-  if (!refs.nativeAdGate || !refs.nativeAdLoadBtn) {
-    return;
-  }
-  if (state.nativeAdActivated) {
-    refs.nativeAdGate.hidden = true;
-    refs.nativeAdLoadBtn.disabled = false;
-    refs.nativeAdLoadBtn.textContent = "Afficher le sponsorise";
-    return;
-  }
-  refs.nativeAdGate.hidden = false;
-  refs.nativeAdLoadBtn.disabled = Boolean(state.nativeAdLoading);
-  refs.nativeAdLoadBtn.textContent = state.nativeAdLoading ? "Chargement..." : "Afficher le sponsorise";
-}
-
 function ensureNativeAdContainer() {
   if (!refs.nativeAdUnit) {
     return null;
   }
-  let container = document.getElementById(NATIVE_AD_CONTAINER_ID);
-  if (!container) {
-    container = document.createElement("div");
-    container.id = NATIVE_AD_CONTAINER_ID;
-    refs.nativeAdUnit.appendChild(container);
+  let frame = refs.nativeAdUnit.querySelector(`iframe.${NATIVE_AD_FRAME_CLASS}`);
+  if (!frame) {
+    frame = document.createElement("iframe");
+    frame.className = NATIVE_AD_FRAME_CLASS;
+    frame.title = "Sponsorise";
+    frame.loading = "lazy";
+    frame.referrerPolicy = "strict-origin-when-cross-origin";
+    frame.setAttribute("data-native-sponsor", "1");
+    frame.setAttribute("sandbox", NATIVE_AD_FRAME_SANDBOX);
+    const docHtml = `<!doctype html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>html,body{margin:0;padding:0;background:transparent;overflow:hidden;}#${NATIVE_AD_CONTAINER_ID}{width:100%;min-height:120px;}</style></head><body><div id="${NATIVE_AD_CONTAINER_ID}"></div><script async data-cfasync="false" src="${NATIVE_AD_SCRIPT_SRC}"></script></body></html>`;
+    frame.srcdoc = docHtml;
+    refs.nativeAdUnit.innerHTML = "";
+    refs.nativeAdUnit.appendChild(frame);
   }
-  return container;
+  return frame;
 }
 
-async function activateNativeAdFromUserIntent() {
+function activateNativeAdIfNeeded() {
   if (state.nativeAdActivated) {
-    showToast("Sponsor deja actif.");
-    return;
+    return true;
   }
-  if (state.nativeAdLoadPromise) {
-    await state.nativeAdLoadPromise.catch(() => {});
-    return;
-  }
-  state.nativeAdLoading = true;
-  syncNativeAdGateUi();
-  state.nativeAdLoadPromise = new Promise((resolve, reject) => {
-    ensureNativeAdContainer();
-    const script = document.createElement("script");
-    script.async = true;
-    script.setAttribute("data-cfasync", "false");
-    script.src = NATIVE_AD_SCRIPT_SRC;
-    script.onload = () => {
-      state.nativeAdActivated = true;
-      state.nativeAdLoading = false;
-      state.nativeAdLoadPromise = null;
-      syncNativeAdGateUi();
-      resolve(true);
-    };
-    script.onerror = () => {
-      state.nativeAdLoading = false;
-      state.nativeAdLoadPromise = null;
-      syncNativeAdGateUi();
-      reject(new Error("Native ad load failed"));
-    };
-    document.body.appendChild(script);
-  });
-
-  try {
-    await state.nativeAdLoadPromise;
-    showToast("Sponsor actif.");
-  } catch {
-    showToast("Impossible de charger le sponsor pour le moment.", true);
-  }
+  const frame = ensureNativeAdContainer();
+  state.nativeAdActivated = Boolean(frame);
+  return state.nativeAdActivated;
 }
 
 function mountNativeAd(targetMount) {
@@ -2390,21 +2364,21 @@ function applyNativeAdPlacement() {
 
   if (showNativeDetail) {
     mountNativeAd(refs.nativeAdDetailMount);
-    syncNativeAdGateUi();
+    activateNativeAdIfNeeded();
     return;
   }
   if (showNativeHome) {
     mountNativeAd(refs.nativeAdHomeMount);
-    syncNativeAdGateUi();
+    activateNativeAdIfNeeded();
     return;
   }
   if (showNativeCatalog) {
     mountNativeAd(refs.nativeAdCatalogMount);
-    syncNativeAdGateUi();
+    activateNativeAdIfNeeded();
     return;
   }
   mountNativeAd(refs.nativeAdHomeMount);
-  syncNativeAdGateUi();
+  activateNativeAdIfNeeded();
 }
 
 function isCompactViewport() {
@@ -2435,19 +2409,24 @@ function shouldBoostCoverLoading() {
 function getCardImageProfile() {
   const slow = isSlowConnection();
   const boosted = shouldBoostCoverLoading();
+  const inAppBrowser = runtimeEnv.isInAppBrowser;
   if (isCompactViewport()) {
     const eagerBase = boosted ? Math.max(220, MOBILE_EAGER_IMAGE_LIMIT) : MOBILE_EAGER_IMAGE_LIMIT;
     const priorityBase = boosted ? Math.max(120, MOBILE_HIGH_PRIORITY_IMAGE_LIMIT) : MOBILE_HIGH_PRIORITY_IMAGE_LIMIT;
+    const inAppEager = Math.max(eagerBase, 320);
+    const inAppPriority = Math.max(priorityBase, 220);
     return {
-      eagerLimit: slow ? Math.max(72, Math.floor(eagerBase * 0.62)) : eagerBase,
-      highPriorityLimit: slow ? Math.max(30, Math.floor(priorityBase * 0.64)) : priorityBase,
+      eagerLimit: inAppBrowser ? inAppEager : slow ? Math.max(72, Math.floor(eagerBase * 0.62)) : eagerBase,
+      highPriorityLimit: inAppBrowser ? inAppPriority : slow ? Math.max(30, Math.floor(priorityBase * 0.64)) : priorityBase,
     };
   }
   const eagerBase = boosted ? Math.max(220, DESKTOP_EAGER_IMAGE_LIMIT) : DESKTOP_EAGER_IMAGE_LIMIT;
   const priorityBase = boosted ? Math.max(96, DESKTOP_HIGH_PRIORITY_IMAGE_LIMIT) : DESKTOP_HIGH_PRIORITY_IMAGE_LIMIT;
+  const inAppEager = Math.max(eagerBase, 240);
+  const inAppPriority = Math.max(priorityBase, 120);
   return {
-    eagerLimit: slow ? Math.max(58, Math.floor(eagerBase * 0.6)) : eagerBase,
-    highPriorityLimit: slow ? Math.max(24, Math.floor(priorityBase * 0.62)) : priorityBase,
+    eagerLimit: inAppBrowser ? inAppEager : slow ? Math.max(58, Math.floor(eagerBase * 0.6)) : eagerBase,
+    highPriorityLimit: inAppBrowser ? inAppPriority : slow ? Math.max(24, Math.floor(priorityBase * 0.62)) : priorityBase,
   };
 }
 
@@ -4882,6 +4861,13 @@ function setImageSourceSafely(node, nextSrc, title = "", cover = true) {
 
   const currentSrc = String(node.currentSrc || node.src || "").trim();
   if (currentSrc === url || node.dataset.pendingSrc === url) {
+    wireImageFallback(node, title || "Zenix", cover);
+    return;
+  }
+
+  if (runtimeEnv.isInAppBrowser) {
+    node.src = url;
+    delete node.dataset.pendingSrc;
     wireImageFallback(node, title || "Zenix", cover);
     return;
   }
