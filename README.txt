@@ -664,3 +664,7 @@ LOCAL BRUTE RESULT (HXH, c180, 2026-03-10)
 LIVE BRUTE RESULT (HXH, c180, 2026-03-10)
 - Source: `__tmp_brut_hxh_matrix_result_live_c180_2026-03-10.json`
 - Summary: total 2, passed 2, failed 0
+
+LATEST WEBHOOK RATE LIMIT FIX (2026-03-10, c181)
+- Discord webhook push interval raised to 30s (min 15s) to avoid 429 spam blocks.
+- Goal: stabilize message creation so a permanent message ID can be pinned.
