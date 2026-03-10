@@ -350,3 +350,8 @@ Last update: 2026-03-10
 - Embed guard auto-switches when an embedded player stays stuck too long.
 - Episode playback primes Anime-Sama seasons before resolving sources to enforce anime-only pool.
 - Local HXH brute (2026-03-10): 2/2 passed. Source: `__tmp_brut_hxh_matrix_result_local_c177_embedfix2_2026-03-10.json`.
+
+## c178 follow-up (2026-03-10)
+- Anime playback now probes Anime-Sama seasons directly before resolving sources.
+- Anime-only tagging only flips when Anime-Sama responds (prevents false anime tagging on regular series).
+- Local HXH brute (2026-03-10): 2/2 passed. Source: `__tmp_brut_hxh_matrix_result_local_c178_2026-03-10.json`.

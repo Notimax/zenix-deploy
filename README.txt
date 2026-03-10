@@ -635,3 +635,12 @@ LATEST EMBED RECOVERY + ANIME FLAG PRELOAD (2026-03-10, c177)
 LOCAL BRUTE RESULT (HXH, c177, 2026-03-10)
 - Source: `__tmp_brut_hxh_matrix_result_local_c177_embedfix2_2026-03-10.json`
 - Summary: total 2, passed 2, failed 0
+
+LATEST ANIME CLASSIFICATION GUARD (2026-03-10, c178)
+- Episode playback now probes Anime-Sama seasons directly before source resolution.
+- Only marks anime when Anime-Sama responds (prevents false anime tagging on regular series).
+- Ensures anime-only source filtering stays consistent for playback.
+
+LOCAL BRUTE RESULT (HXH, c178, 2026-03-10)
+- Source: `__tmp_brut_hxh_matrix_result_local_c178_2026-03-10.json`
+- Summary: total 2, passed 2, failed 0

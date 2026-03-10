@@ -8631,13 +8631,29 @@ async function loadEpisodeStream(
   setPlayerStatus(`Chargement S${safeSeason}E${safeEpisode}...`);
 
   if (item && item.type === "tv" && !item.isAnime) {
-    try {
-      const animeSeasons = await ensureSeasons(item.id);
-      if (Array.isArray(animeSeasons) && animeSeasons.length > 0) {
-        item.isAnime = true;
+    const title = String(item.title || "").trim();
+    if (title) {
+      const params = new URLSearchParams({
+        title,
+        language: "vf",
+      });
+      const catalogUrl = getAnimeSamaCatalogUrl(item);
+      if (catalogUrl) {
+        params.set("catalogUrl", catalogUrl);
       }
-    } catch {
-      // keep default classification
+      try {
+        const animePayload = await fetchJson(`${API_BASE}/anime-seasons?${params.toString()}`, {
+          timeoutMs: ANIME_SIBNET_TIMEOUT_MS,
+          retryDelays: [350, 900],
+        });
+        const animeRows = Array.isArray(animePayload?.data?.items) ? animePayload.data.items : [];
+        if (animeRows.length > 0) {
+          item.isAnime = true;
+          state.seasonsCache.set(item.id, animeRows);
+        }
+      } catch {
+        // keep default classification
+      }
     }
   }
 
