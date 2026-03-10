@@ -355,3 +355,8 @@ Last update: 2026-03-10
 - Anime playback now probes Anime-Sama seasons directly before resolving sources.
 - Anime-only tagging only flips when Anime-Sama responds (prevents false anime tagging on regular series).
 - Local HXH brute (2026-03-10): 2/2 passed. Source: `__tmp_brut_hxh_matrix_result_local_c178_2026-03-10.json`.
+
+## c179 follow-up (2026-03-10)
+- Anime playback now bypasses Purstream/Nakios episode fetches (Anime-Sama only).
+- Nakios merge skipped for anime playback to reduce delays and enforce source policy.
+- Local HXH brute (2026-03-10): 2/2 passed. Source: `__tmp_brut_hxh_matrix_result_local_c179_2026-03-10.json`.

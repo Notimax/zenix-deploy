@@ -8349,6 +8349,15 @@ async function resolveEpisodePayloadWithStrategy(item, season = 1, episode = 1) 
     selectedItem = await resolvePlayableProviderItem(item, safeSeason, safeEpisode);
   }
 
+  if (selectedItem?.isAnime) {
+    return {
+      selectedItem,
+      payload: buildSourcePayloadFromList([]),
+      preloadedNakios: [],
+      nakiosPromise: Promise.resolve([]),
+    };
+  }
+
   const streamPath = `/stream/${selectedItem.id}/episode?season=${safeSeason}&episode=${safeEpisode}`;
   const streamPromise = fetchStreamJson(streamPath, { force: true })
     .then((payload) => ({
@@ -8676,17 +8685,26 @@ async function loadEpisodeStream(
 
     let nakiosMergedSources = ownedMergedSources;
     let warmNakiosSources = Array.isArray(preloadedNakiosSources) ? preloadedNakiosSources : [];
-    if (warmNakiosSources.length === 0 && nakiosWarmPromise && typeof nakiosWarmPromise.then === "function") {
-      warmNakiosSources = await Promise.race([
-        nakiosWarmPromise.then((sources) => (Array.isArray(sources) ? sources : [])).catch(() => []),
-        wait(2200).then(() => []),
-      ]);
-    }
-    if (warmNakiosSources.length === 0 && ownedMergedSources.length === 0 && nakiosWarmPromise && typeof nakiosWarmPromise.then === "function") {
-      warmNakiosSources = await nakiosWarmPromise.then((sources) => (Array.isArray(sources) ? sources : [])).catch(() => []);
-    }
-    if (warmNakiosSources.length > 0) {
-      nakiosMergedSources = mergeSourceLists(ownedMergedSources, warmNakiosSources);
+    if (!selectedItem?.isAnime) {
+      if (warmNakiosSources.length === 0 && nakiosWarmPromise && typeof nakiosWarmPromise.then === "function") {
+        warmNakiosSources = await Promise.race([
+          nakiosWarmPromise.then((sources) => (Array.isArray(sources) ? sources : [])).catch(() => []),
+          wait(2200).then(() => []),
+        ]);
+      }
+      if (
+        warmNakiosSources.length === 0 &&
+        ownedMergedSources.length === 0 &&
+        nakiosWarmPromise &&
+        typeof nakiosWarmPromise.then === "function"
+      ) {
+        warmNakiosSources = await nakiosWarmPromise
+          .then((sources) => (Array.isArray(sources) ? sources : []))
+          .catch(() => []);
+      }
+      if (warmNakiosSources.length > 0) {
+        nakiosMergedSources = mergeSourceLists(ownedMergedSources, warmNakiosSources);
+      }
     }
 
     state.allEpisodeSources = await appendAnimeSibnetSource(

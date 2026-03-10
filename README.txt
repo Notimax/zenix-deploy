@@ -644,3 +644,11 @@ LATEST ANIME CLASSIFICATION GUARD (2026-03-10, c178)
 LOCAL BRUTE RESULT (HXH, c178, 2026-03-10)
 - Source: `__tmp_brut_hxh_matrix_result_local_c178_2026-03-10.json`
 - Summary: total 2, passed 2, failed 0
+
+LATEST ANIME FAST-PATH (2026-03-10, c179)
+- Anime episodes now bypass Purstream/Nakios fetches and use Anime-Sama sources directly.
+- Nakios merge is skipped for anime playback to enforce Anime-Sama-only policy and reduce delays.
+
+LOCAL BRUTE RESULT (HXH, c179, 2026-03-10)
+- Source: `__tmp_brut_hxh_matrix_result_local_c179_2026-03-10.json`
+- Summary: total 2, passed 2, failed 0
