@@ -6279,7 +6279,7 @@ async function fetchRemoteForm(target, formData = {}, accept = "text/html", extr
   }
 }
 
-function normalizeSibnetUrl(value) {
+function normalizeAnimeEpisodeUrl(value) {
   let url = String(value || "").trim();
   if (!url) {
     return "";
@@ -6287,10 +6287,55 @@ function normalizeSibnetUrl(value) {
   if (url.startsWith("//")) {
     url = `https:${url}`;
   }
-  if (/^http:\/\/video\.sibnet\.ru/i.test(url)) {
+  if (/^http:\/\//i.test(url)) {
     url = url.replace(/^http:\/\//i, "https://");
   }
+  if (!/^https?:\/\//i.test(url)) {
+    return "";
+  }
   return url;
+}
+
+function normalizeSibnetUrl(value) {
+  const normalized = normalizeAnimeEpisodeUrl(value);
+  if (!normalized) {
+    return "";
+  }
+  return /sibnet\.ru/i.test(normalized) ? normalized : "";
+}
+
+function inferAnimeSourceFormat(url) {
+  const cleanUrl = String(url || "").split("#")[0].split("?")[0].toLowerCase();
+  if (cleanUrl.endsWith(".m3u8")) {
+    return "hls";
+  }
+  if (cleanUrl.endsWith(".mp4")) {
+    return "mp4";
+  }
+  if (cleanUrl.endsWith(".webm")) {
+    return "webm";
+  }
+  if (cleanUrl.endsWith(".mpd")) {
+    return "dash";
+  }
+  return "embed";
+}
+
+function inferAnimeSourceName(url, fallback = "") {
+  try {
+    const host = new URL(url).hostname.replace(/^www\./, "");
+    if (!host) {
+      return fallback || "Anime";
+    }
+    if (/sibnet\.ru$/i.test(host)) {
+      return "Sibnet";
+    }
+    const parts = host.split(".").filter(Boolean);
+    const base = parts.length >= 2 ? parts[parts.length - 2] : host;
+    return base ? base.charAt(0).toUpperCase() + base.slice(1) : fallback || "Anime";
+  } catch {
+    return fallback || "Anime";
+  }
 }
 
 
@@ -6504,16 +6549,70 @@ function parseEpisodeArrays(episodesScript) {
     const urlRegex = /['"]([^'"]+)['"]/g;
     let urlMatch;
     while ((urlMatch = urlRegex.exec(body)) !== null) {
-      const normalized = normalizeSibnetUrl(String(urlMatch?.[1] || "").trim());
-      if (normalized) {
-        urls.push(normalized);
+      const normalized = normalizeAnimeEpisodeUrl(String(urlMatch?.[1] || "").trim());
+      if (!normalized) {
+        continue;
       }
+      urls.push(normalized);
     }
     if (urls.length > 0) {
       arrays.push({ name, urls });
     }
   }
   return arrays;
+}
+
+function pickEpisodeSources(episodeArrays, episode = 1) {
+  const safeEpisode = Math.max(1, Number(episode || 1));
+  const index = safeEpisode - 1;
+  const rows = Array.isArray(episodeArrays) ? episodeArrays : [];
+  const sources = [];
+  const seen = new Set();
+  rows.forEach((entry) => {
+    const urls = Array.isArray(entry?.urls) ? entry.urls : [];
+    const candidate = normalizeAnimeEpisodeUrl(urls[index] || "");
+    if (!candidate) {
+      return;
+    }
+    const key = candidate.toLowerCase();
+    if (seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    sources.push({
+      name: String(entry?.name || ""),
+      candidate,
+      format: inferAnimeSourceFormat(candidate),
+      host: inferAnimeSourceName(candidate, String(entry?.name || "")),
+    });
+  });
+  return sources;
+}
+
+function rankAnimeEpisodeSources(sources) {
+  const rows = Array.isArray(sources) ? sources.slice() : [];
+  const formatScore = new Map([
+    ["hls", 4],
+    ["mp4", 3],
+    ["webm", 2],
+    ["dash", 2],
+    ["embed", 1],
+    ["unknown", 0],
+  ]);
+  rows.sort((left, right) => {
+    const leftScore = Number(formatScore.get(String(left?.format || "embed")) || 0);
+    const rightScore = Number(formatScore.get(String(right?.format || "embed")) || 0);
+    if (leftScore !== rightScore) {
+      return rightScore - leftScore;
+    }
+    const leftIsSibnet = /sibnet\.ru/i.test(String(left?.candidate || ""));
+    const rightIsSibnet = /sibnet\.ru/i.test(String(right?.candidate || ""));
+    if (leftIsSibnet !== rightIsSibnet) {
+      return leftIsSibnet ? -1 : 1;
+    }
+    return 0;
+  });
+  return rows;
 }
 
 function pickSibnetEpisodeUrl(episodeArrays, episode = 1) {
@@ -6629,11 +6728,22 @@ async function resolveAnimeSibnetSource(title, season, episode, language = "vost
   }
 
   const arrays = parseEpisodeArrays(episodesScript.body);
-  const picked = pickSibnetEpisodeUrl(arrays, safeEpisode);
-  const sourceUrl = normalizeSibnetUrl(picked.candidate);
-  if (!sourceUrl || !/^https?:\/\//i.test(sourceUrl)) {
-    throw new Error("Sibnet source unavailable");
+  const episodeSources = rankAnimeEpisodeSources(pickEpisodeSources(arrays, safeEpisode));
+  if (episodeSources.length === 0) {
+    throw new Error("Anime sources unavailable");
   }
+  const sibnetPick = episodeSources.find((entry) => /sibnet\.ru/i.test(String(entry?.candidate || "")));
+  const primary = sibnetPick || episodeSources[0];
+  const sourceUrl = normalizeAnimeEpisodeUrl(primary?.candidate || "");
+  if (!sourceUrl) {
+    throw new Error("Anime source unavailable");
+  }
+  const sources = episodeSources.map((entry) => ({
+    stream_url: String(entry?.candidate || "").trim(),
+    source_name: inferAnimeSourceName(entry?.candidate || "", String(entry?.host || entry?.name || "")),
+    format: inferAnimeSourceFormat(entry?.candidate || ""),
+    language: resolvedLanguage,
+  }));
 
   const payload = {
     title: safeTitle,
@@ -6646,9 +6756,10 @@ async function resolveAnimeSibnetSource(title, season, episode, language = "vost
     seasonPageUrl,
     episodesScriptUrl,
     sourceUrl,
-    sourceArray: picked.name,
+    sourceArray: primary?.name || "",
     panelPath: selectedPanelPath,
     panelLabel: selectedPanel.label,
+    sources,
   };
 
   animeSibnetCache.set(cacheKey, {

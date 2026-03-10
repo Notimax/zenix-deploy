@@ -555,3 +555,14 @@ LATEST BRUTE RESULT (LOCAL, 2026-03-10)
 ANIME SIBNET PROBE (LOCAL, 2026-03-10)
 - Source: `__tmp_anime_sibnet_hxh_probe_local_c165.json`
 - Summary: Hunter x Hunter S1E1 resolves to Anime-Sama Sibnet VOSTFR.
+
+LATEST ANIME SOURCE RESTORE (2026-03-10, c166)
+- Anime-Sama endpoint now returns multiple hosters per episode (not only Sibnet).
+- Frontend injects Anime-Sama sources with origin tagging so all hosters stay available.
+- Anime language strategy: try VF first, fallback to VOSTFR if VF is missing.
+- Frontend VF lookup now falls back to VOSTFR on 404/timeout (prevents empty anime sources).
+- Added anime source ranking on backend to prefer direct HLS/MP4 before embeds.
+
+LOCAL BRUTE RESULT (c166, 2026-03-10)
+- Source: `__tmp_brut_f1_mercredi_matrix_result_local_c166_fix7_2026-03-10.json`
+- Summary: total 8, passed 8, failed 0, `/api/media/*/sheet` 404: 0

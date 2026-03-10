@@ -9005,8 +9005,17 @@ async function appendRendezvousSources(item, season, episode, sources) {
   return base;
 }
 
-function isAnimeSamaSourceUrl(value) {
-  const raw = String(value || "").trim().toLowerCase();
+function isAnimeSamaSourceEntry(entry) {
+  if (!entry) {
+    return false;
+  }
+  const origin = String(entry?.origin || entry?.provider || entry?.source || "")
+    .trim()
+    .toLowerCase();
+  if (origin.includes("anime-sama") || origin.includes("animesama")) {
+    return true;
+  }
+  const raw = String(entry?.url || "").trim().toLowerCase();
   if (!raw) {
     return false;
   }
@@ -9043,15 +9052,12 @@ function preferAnimeSamaSources(item, sources) {
   if (!item?.isAnime) {
     return base;
   }
-  const animeSources = base.filter((entry) => isAnimeSamaSourceUrl(entry?.url));
+  const animeSources = base.filter((entry) => isAnimeSamaSourceEntry(entry));
   return animeSources;
 }
 async function appendAnimeSibnetSource(item, season, episode, sources, language = "") {
   const base = Array.isArray(sources) ? sources.slice() : [];
   if (!item || !item.isAnime) {
-    return base;
-  }
-  if (base.some((entry) => /sibnet\.ru/i.test(String(entry?.url || "")))) {
     return base;
   }
 
@@ -9062,43 +9068,101 @@ async function appendAnimeSibnetSource(item, season, episode, sources, language 
 
   const safeSeason = Math.max(1, Number(season || 1));
   const safeEpisode = Math.max(1, Number(episode || 1));
-  const langToken = toAnimeSibnetLanguageToken(language);
-  const fallbackLanguage = langToken === "vf" ? "VF" : "VOSTFR";
-  const params = new URLSearchParams({
-    title: safeTitle,
-    season: String(safeSeason),
-    episode: String(safeEpisode),
-    language: langToken,
-  });
-  const catalogUrl = getAnimeSamaCatalogUrl(item);
-  if (catalogUrl) {
-    params.set("catalogUrl", catalogUrl);
+  const preferredLanguage = normalizeLanguageLabel(language);
+  let languageTokens = ["vf", "vostfr"];
+  if (preferredLanguage === "VOSTFR") {
+    languageTokens = ["vostfr"];
+  } else if (preferredLanguage === "VF") {
+    languageTokens = ["vf", "vostfr"];
   }
+  const catalogUrl = getAnimeSamaCatalogUrl(item);
 
   try {
-    const payload = await fetchJson(`${API_BASE}/anime-sibnet?${params.toString()}`, {
-      timeoutMs: ANIME_SIBNET_TIMEOUT_MS,
-      retryDelays: [350, 900],
-    });
-    const sourceUrl = String(payload?.data?.sourceUrl || "").trim();
-    if (!sourceUrl) {
+    let payload = null;
+    let usedToken = languageTokens[0];
+    for (const token of languageTokens) {
+      const params = new URLSearchParams({
+        title: safeTitle,
+        season: String(safeSeason),
+        episode: String(safeEpisode),
+        language: token,
+      });
+      if (catalogUrl) {
+        params.set("catalogUrl", catalogUrl);
+      }
+      let response = null;
+      try {
+        response = await fetchJson(`${API_BASE}/anime-sibnet?${params.toString()}`, {
+          timeoutMs: ANIME_SIBNET_TIMEOUT_MS,
+          retryDelays: [350, 900],
+        });
+      } catch {
+        continue;
+      }
+      const hasSources = Array.isArray(response?.data?.sources) && response.data.sources.length > 0;
+      const hasUrl = Boolean(String(response?.data?.sourceUrl || "").trim());
+      if (hasSources || hasUrl) {
+        payload = response;
+        usedToken = token;
+        break;
+      }
+    }
+    if (!payload) {
       return base;
     }
+
     const resolvedLanguage = normalizeLanguageLabel(payload?.data?.language || "");
-    const sourceLanguage = resolvedLanguage || fallbackLanguage;
-    const sibnetEntry = normalizeSourceEntry(
-      {
-        stream_url: sourceUrl,
-        format: "embed",
-        quality: "Sibnet",
-        language: sourceLanguage,
-        source_name: "Sibnet",
-      },
-      base.length
-    );
-    if (sibnetEntry && !base.some((entry) => String(entry?.url || "").trim() === sibnetEntry.url)) {
-      base.unshift(sibnetEntry);
+    const sourceLanguage =
+      resolvedLanguage || (usedToken === "vf" ? "VF" : usedToken === "vostfr" ? "VOSTFR" : "");
+    const rawSources = Array.isArray(payload?.data?.sources) ? payload.data.sources : [];
+    const candidateSources =
+      rawSources.length > 0
+        ? rawSources
+        : (() => {
+            const sourceUrl = String(payload?.data?.sourceUrl || "").trim();
+            if (!sourceUrl) {
+              return [];
+            }
+            return [
+              {
+                stream_url: sourceUrl,
+                format: "embed",
+                quality: "Sibnet",
+                source_name: "Sibnet",
+              },
+            ];
+          })();
+
+    if (candidateSources.length === 0) {
+      return base;
     }
+
+    const existing = new Set(base.map((entry) => getSourceDedupKey(entry)).filter(Boolean));
+    const added = [];
+    candidateSources.forEach((entry, index) => {
+      const sourceEntry = normalizeSourceEntry(
+        {
+          ...entry,
+          language: normalizeLanguageLabel(entry?.language || "") || sourceLanguage,
+          source_name: String(entry?.source_name || entry?.name || "Anime-Sama").trim() || "Anime-Sama",
+          origin: "anime-sama",
+        },
+        base.length + index
+      );
+      if (!sourceEntry) {
+        return;
+      }
+      const key = getSourceDedupKey(sourceEntry);
+      if (!key || existing.has(key)) {
+        return;
+      }
+      existing.add(key);
+      added.push(sourceEntry);
+    });
+    if (added.length === 0) {
+      return base;
+    }
+    return added.concat(base);
   } catch {
     // optional fallback source only
   }
@@ -9756,6 +9820,7 @@ function normalizeSourceEntry(entry, index) {
     language,
     quality,
   });
+  const origin = String(entry?.origin || entry?.provider || entry?.source || "").trim();
 
   return {
     url,
@@ -9765,6 +9830,7 @@ function normalizeSourceEntry(entry, index) {
     host,
     score,
     premiumHint,
+    origin,
   };
 }
 

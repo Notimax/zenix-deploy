@@ -292,3 +292,11 @@ Last update: 2026-03-09
 - Added Playwright dependency for local brute tests.
 - Local brute matrix (F1 + Mercredi, 2026-03-10): total 8, passed 8, failed 0.
 - Anime Sibnet probe (Hunter x Hunter S1E1) resolved to Anime-Sama Sibnet VOSTFR.
+
+## c166 follow-up (2026-03-10)
+- Anime-Sama backend now returns multiple hoster URLs per episode (not only Sibnet).
+- Frontend keeps Anime-Sama sources via `origin=anime-sama` tagging, so VF hosters remain available.
+- Anime language preference now tries VF first, with automatic fallback to VOSTFR when VF missing.
+- Frontend VF lookup now falls back to VOSTFR on 404/timeout (prevents empty anime source lists).
+- Anime source ordering prefers direct HLS/MP4 before embeds.
+- Local brute matrix (c166, 2026-03-10): total 8, passed 8, failed 0.
