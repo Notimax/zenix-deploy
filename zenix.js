@@ -9049,8 +9049,15 @@ function preferAnimeSamaSources(item, sources) {
   if (!item?.isAnime) {
     return base;
   }
-  // Keep all readers for anime, but enforce a stable, score-based order.
-  return sortSourcesByScore(base);
+  const animeOnly = base.filter((entry) => isAnimeSamaSourceEntry(entry));
+  const frenchOnly = animeOnly.filter((entry) => {
+    const lang = String(entry?.language || "").trim().toUpperCase();
+    return lang === "VF" || lang === "MULTI";
+  });
+  if (frenchOnly.length === 0) {
+    return [];
+  }
+  return sortSourcesByScore(frenchOnly);
 }
 
 function sortSourcesByScore(sources) {
@@ -9077,9 +9084,7 @@ async function appendAnimeSibnetSource(item, season, episode, sources, language 
 
   const safeSeason = Math.max(1, Number(season || 1));
   const safeEpisode = Math.max(1, Number(episode || 1));
-  const preferredLanguage = normalizeLanguageLabel(language);
-  const languageTokens =
-    preferredLanguage === "VOSTFR" ? ["vostfr", "vf"] : ["vf", "vostfr"];
+  const languageTokens = ["vf"];
   const catalogUrl = getAnimeSamaCatalogUrl(item);
 
   try {

@@ -325,3 +325,8 @@ Last update: 2026-03-10
 - Local brute matrix (F1 + Mercredi, 2026-03-10):
   - Source: `__tmp_brut_f1_mercredi_matrix_result_local_c172_2026-03-10.json`
   - Summary: total 8, passed 8, failed 0.
+
+## c173 follow-up (2026-03-10)
+- Anime playback now keeps only Anime-Sama sources and filters to `VF` / `MULTI` (no VO/VOSTFR).
+- VF panel probing now prioritizes exact `saisonN/vf` before `saisonNhs/vf`.
+- Anime catalogue search scoring now prefers non-year slugs to avoid wrong series variants (e.g., HxH 1999).

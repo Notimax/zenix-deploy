@@ -599,3 +599,8 @@ LATEST ANIME VF/VOSTFR DUAL FETCH (2026-03-10, c172)
 LOCAL BRUTE RESULT (c172, 2026-03-10)
 - Source: `__tmp_brut_f1_mercredi_matrix_result_local_c172_2026-03-10.json`
 - Summary: total 8, passed 8, failed 0, `/api/media/*/sheet` 404: 0
+
+LATEST ANIME VF-ONLY POLICY (2026-03-10, c173)
+- Anime playback now keeps only Anime-Sama sources and filters to `VF` / `MULTI` (no VO/VOSTFR).
+- Anime-Sama VF panel probing order now prioritizes exact `saisonN/vf` before `saisonNhs/vf`.
+- Catalogue search scoring now prefers non-year slugs (fixes Hunter x Hunter 2011 vs 1999 mismatch).

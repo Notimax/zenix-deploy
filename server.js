@@ -6402,9 +6402,6 @@ function scoreAnimeCatalogueCandidate(url, titleKey) {
     if (!slugKey) {
       return 0;
     }
-    if (slugKey === safeTitleKey) {
-      return 1000;
-    }
     const slugTokens = slugKey.split(" ").filter((token) => token.length >= 3);
     const titleTokens = safeTitleKey.split(" ").filter((token) => token.length >= 3);
     if (slugTokens.length === 0 || titleTokens.length === 0) {
@@ -6417,7 +6414,17 @@ function scoreAnimeCatalogueCandidate(url, titleKey) {
         shared += 1;
       }
     });
-    return shared * 10 - Math.abs(slugTokens.length - titleTokens.length);
+    let score = shared * 10 - Math.abs(slugTokens.length - titleTokens.length);
+    if (slugKey === safeTitleKey) {
+      score = 1000;
+    }
+    if (/\b(19|20)\d{2}\b/.test(slug)) {
+      score -= 25;
+    }
+    if (/(^|\/)saison\d+hs\b|hors[-\s]?serie|ova|special/i.test(slug)) {
+      score -= 12;
+    }
+    return score;
   } catch {
     return 0;
   }
@@ -6582,6 +6589,23 @@ function buildAnimeVfCandidatePanels(panels, season = 1) {
   });
 
   pushCandidate(`${seasonToken}/vf`, "VF");
+  const scoreCandidate = (path) => {
+    const lower = String(path || "").toLowerCase();
+    let score = 0;
+    if (new RegExp(`(^|/)${seasonToken}(/|$)`, "i").test(lower)) {
+      score += 80;
+    } else if (lower.includes(`/${seasonToken}`)) {
+      score += 40;
+    }
+    if (/\/vf(\/|$)/i.test(lower)) {
+      score += 10;
+    }
+    if (/(^|\/)saison\d+hs\b|hors[-\s]?serie|ova|special/i.test(lower)) {
+      score -= 20;
+    }
+    return score;
+  };
+  candidates.sort((left, right) => scoreCandidate(right.path) - scoreCandidate(left.path));
   return candidates;
 }
 
