@@ -344,3 +344,9 @@ Last update: 2026-03-10
 - Anime titles are auto-marked as anime if Anime-Sama seasons resolve, ensuring sources load.
 - Local HXH brute (desktop + iPhone 13 WebKit, 20s): 2/2 passed.
 - HXH brute rerun (2026-03-10): 2/2 passed. Source: `__tmp_brut_hxh_matrix_result_local_c177_2026-03-10.json`.
+
+## c177 follow-up (2026-03-10)
+- Embed iframe load now soft-resolves after timeout, avoiding long source blocking.
+- Embed guard auto-switches when an embedded player stays stuck too long.
+- Episode playback primes Anime-Sama seasons before resolving sources to enforce anime-only pool.
+- Local HXH brute (2026-03-10): 2/2 passed. Source: `__tmp_brut_hxh_matrix_result_local_c177_embedfix2_2026-03-10.json`.

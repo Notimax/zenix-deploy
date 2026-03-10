@@ -92,7 +92,7 @@ const IOS_DECODED_HLS_BOOT_TIMEOUT_MS = 4200;
 const IOS_SEGMENT_BOOT_TIMEOUT_MS = 3400;
 const IOS_SEGMENT_NEXT_TIMEOUT_MS = 4200;
 const IOS_SEGMENT_CHAIN_MAX = 8;
-const EMBED_READY_TIMEOUT_MS = 12000;
+const EMBED_READY_TIMEOUT_MS = 6000;
 const HEARTBEAT_INTERVAL_MS = 30 * 1000;
 const HEARTBEAT_REQUEST_TIMEOUT_MS = 9000;
 const HEARTBEAT_KEY = "zenix-client-id-v1";
@@ -132,7 +132,9 @@ const PLAYBACK_HEALTH_FIRST_DELAY_MS = 1400;
 const PLAYBACK_HEALTH_REPEAT_DELAY_MS = 2100;
 const MOBILE_PLAYBACK_BOOTSTRAP_TIMEOUT_MS = 2600;
 const MOBILE_VIDEO_READY_TIMEOUT_MS = 7000;
-const MOBILE_EMBED_READY_TIMEOUT_MS = 7200;
+const MOBILE_EMBED_READY_TIMEOUT_MS = 6000;
+const EMBED_STALL_SWITCH_MS = 8000;
+const MOBILE_EMBED_STALL_SWITCH_MS = 7000;
 const SKIP_INTRO_SECONDS = 85;
 const SKIP_RECAP_SECONDS = 45;
 const INTEREST_QUERY_MAX = 40;
@@ -231,6 +233,9 @@ const state = {
   hlsLangProbeToken: 0,
   sourceLoading: false,
   sourceLoadTicket: 0,
+  embedLoadStartedAt: 0,
+  embedLoadFinishedAt: 0,
+  embedSourceKey: "",
   lastPlaybackHardRefreshAt: 0,
   playbackHealthTimer: 0,
   playbackGuardTimer: 0,
@@ -8625,6 +8630,17 @@ async function loadEpisodeStream(
   const safeEpisode = Math.max(1, Number(episode || 1));
   setPlayerStatus(`Chargement S${safeSeason}E${safeEpisode}...`);
 
+  if (item && item.type === "tv" && !item.isAnime) {
+    try {
+      const animeSeasons = await ensureSeasons(item.id);
+      if (Array.isArray(animeSeasons) && animeSeasons.length > 0) {
+        item.isAnime = true;
+      }
+    } catch {
+      // keep default classification
+    }
+  }
+
   let resolved = await resolveEpisodePayloadWithStrategy(item, safeSeason, safeEpisode);
   if (token !== state.playToken) {
     return;
@@ -9384,7 +9400,30 @@ function startPlaybackGuard() {
       return;
     }
     const currentSource = state.sourcePool[state.sourceIndex] || null;
+    const statusText = String(refs.playerStatus?.textContent || "").toLowerCase();
+    const hasNextCandidate = state.sourceIndex + 1 < state.sourcePool.length;
     if (isEmbedSource(currentSource)) {
+      const embedSince = Number(state.embedLoadFinishedAt || 0) || Number(state.embedLoadStartedAt || 0);
+      const embedStallMs = mobileGuard ? MOBILE_EMBED_STALL_SWITCH_MS : EMBED_STALL_SWITCH_MS;
+      const embedStall =
+        hasNextCandidate &&
+        embedSince > 0 &&
+        Date.now() - embedSince > embedStallMs &&
+        /chargement source integree|lecture en cours|lecture bloquee|source indisponible|lecture impossible/.test(
+          statusText
+        );
+      if (!embedStall) {
+        return;
+      }
+      switchingSource = true;
+      setPlayerStatus("Lecture bloquee, bascule automatique...", true);
+      trySwitchToNextSource()
+        .catch(() => {
+          setPlayerStatus("Erreur video detectee. Choisis une autre source.", true);
+        })
+        .finally(() => {
+          switchingSource = false;
+        });
       return;
     }
     const currentSourceIndex = Number(state.sourceIndex || -1);
@@ -9401,8 +9440,6 @@ function startPlaybackGuard() {
     const readyState = Number(video.readyState || 0);
     const networkState = Number(video.networkState || 0);
     const awaitingUser = isAwaitingUserPlay();
-    const hasNextCandidate = state.sourceIndex + 1 < state.sourcePool.length;
-    const statusText = String(refs.playerStatus?.textContent || "").toLowerCase();
     const fallbackStatusActive = /fallback ios actif/.test(statusText);
     if (fallbackStatusActive) {
       if (!fallbackStatusSince) {
@@ -10526,10 +10563,28 @@ function isEmbedSource(source, url = "") {
   return /video\.sibnet\.ru\/shell\.php/i.test(raw) || /\/embed[-_/]/i.test(raw);
 }
 
+function markEmbedLoadStart(source, url = "") {
+  state.embedLoadStartedAt = Date.now();
+  state.embedLoadFinishedAt = 0;
+  const key = getSourceDedupKey(source) || canonicalizeSourceUrl(url) || String(source?.url || url || "").trim();
+  state.embedSourceKey = key;
+}
+
+function markEmbedLoadSuccess() {
+  state.embedLoadFinishedAt = Date.now();
+}
+
+function clearEmbedLoadState() {
+  state.embedLoadStartedAt = 0;
+  state.embedLoadFinishedAt = 0;
+  state.embedSourceKey = "";
+}
+
 function resetPlayerEmbedFrame() {
   if (!refs.playerEmbedFrame) {
     return;
   }
+  clearEmbedLoadState();
   refs.playerEmbedFrame.hidden = true;
   const current = String(refs.playerEmbedFrame.getAttribute("src") || "").trim();
   if (!current || current === "about:blank") {
@@ -10607,7 +10662,7 @@ function showPlayerEmbedFrame(url, options = {}) {
         done();
         return;
       }
-      done(new Error("Embed timeout"));
+      done();
     }, timeoutMs);
   });
 }
@@ -11211,11 +11266,13 @@ async function startPlayerSource(source, resumeTime, token) {
       try {
         teardownPlayerEngine(video);
         if (useEmbed) {
+          markEmbedLoadStart(source, streamUrl);
           setPlayerStatus("Chargement source integree...");
           await showPlayerEmbedFrame(streamUrl, {
             token,
             timeoutMs: embedReadyTimeout,
           });
+          markEmbedLoadSuccess();
           setPlayerStatus("Lecture en cours.");
           setPlayerLoading(false);
         } else if (useHls) {

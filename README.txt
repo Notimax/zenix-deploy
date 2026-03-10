@@ -625,3 +625,13 @@ LOCAL BRUTE RESULT (HXH, c176, 2026-03-10)
 LOCAL BRUTE RESULT (HXH RERUN, 2026-03-10)
 - Source: `__tmp_brut_hxh_matrix_result_local_c177_2026-03-10.json`
 - Summary: total 2, passed 2, failed 0
+
+LATEST EMBED RECOVERY + ANIME FLAG PRELOAD (2026-03-10, c177)
+- Embed iframe load now soft-resolves after timeout to avoid blocking playback forever.
+- Embed auto-switch guard added to swap source if an embedded player stays stuck too long.
+- Embed readiness timeouts shortened to accelerate fallback.
+- Episode playback primes Anime-Sama seasons before source resolution to enforce anime-only sources.
+
+LOCAL BRUTE RESULT (HXH, c177, 2026-03-10)
+- Source: `__tmp_brut_hxh_matrix_result_local_c177_embedfix2_2026-03-10.json`
+- Summary: total 2, passed 2, failed 0
