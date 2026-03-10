@@ -364,3 +364,4 @@ Last update: 2026-03-10
 ## c180 follow-up (2026-03-10)
 - Empty season caches are no longer persisted (forces retry if Anime-Sama was temporarily unavailable).
 - Local HXH brute (2026-03-10): 2/2 passed. Source: `__tmp_brut_hxh_matrix_result_local_c180_2026-03-10.json`.
+- Live HXH brute (2026-03-10): 2/2 passed. Source: `__tmp_brut_hxh_matrix_result_live_c180_2026-03-10.json`.

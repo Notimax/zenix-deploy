@@ -660,3 +660,7 @@ LATEST SEASONS CACHE SAFETY (2026-03-10, c180)
 LOCAL BRUTE RESULT (HXH, c180, 2026-03-10)
 - Source: `__tmp_brut_hxh_matrix_result_local_c180_2026-03-10.json`
 - Summary: total 2, passed 2, failed 0
+
+LIVE BRUTE RESULT (HXH, c180, 2026-03-10)
+- Source: `__tmp_brut_hxh_matrix_result_live_c180_2026-03-10.json`
+- Summary: total 2, passed 2, failed 0
