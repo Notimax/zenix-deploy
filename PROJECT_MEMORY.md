@@ -360,3 +360,7 @@ Last update: 2026-03-10
 - Anime playback now bypasses Purstream/Nakios episode fetches (Anime-Sama only).
 - Nakios merge skipped for anime playback to reduce delays and enforce source policy.
 - Local HXH brute (2026-03-10): 2/2 passed. Source: `__tmp_brut_hxh_matrix_result_local_c179_2026-03-10.json`.
+
+## c180 follow-up (2026-03-10)
+- Empty season caches are no longer persisted (forces retry if Anime-Sama was temporarily unavailable).
+- Local HXH brute (2026-03-10): 2/2 passed. Source: `__tmp_brut_hxh_matrix_result_local_c180_2026-03-10.json`.

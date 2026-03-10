@@ -7168,7 +7168,10 @@ async function ensureTrailers(id) {
 
 async function ensureSeasons(id) {
   if (state.seasonsCache.has(id)) {
-    return state.seasonsCache.get(id);
+    const cached = state.seasonsCache.get(id);
+    if (Array.isArray(cached) && cached.length > 0) {
+      return cached;
+    }
   }
   if (state.seasonsInFlight.has(id)) {
     return state.seasonsInFlight.get(id);
@@ -7265,7 +7268,11 @@ async function ensureSeasons(id) {
       }
     }
 
-    state.seasonsCache.set(id, seasons);
+    if (seasons.length > 0) {
+      state.seasonsCache.set(id, seasons);
+    } else {
+      state.seasonsCache.delete(id);
+    }
     return seasons;
   })();
   state.seasonsInFlight.set(id, task);

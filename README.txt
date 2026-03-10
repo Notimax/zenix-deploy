@@ -652,3 +652,11 @@ LATEST ANIME FAST-PATH (2026-03-10, c179)
 LOCAL BRUTE RESULT (HXH, c179, 2026-03-10)
 - Source: `__tmp_brut_hxh_matrix_result_local_c179_2026-03-10.json`
 - Summary: total 2, passed 2, failed 0
+
+LATEST SEASONS CACHE SAFETY (2026-03-10, c180)
+- Empty season caches are no longer persisted to avoid permanent “0 episode” fallbacks.
+- Forces a fresh Anime-Sama retry on next open when a previous attempt failed.
+
+LOCAL BRUTE RESULT (HXH, c180, 2026-03-10)
+- Source: `__tmp_brut_hxh_matrix_result_local_c180_2026-03-10.json`
+- Summary: total 2, passed 2, failed 0
