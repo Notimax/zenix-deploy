@@ -583,3 +583,19 @@ LATEST ANIME SOURCE POOL UNLOCK (2026-03-10, c168)
 LOCAL BRUTE RESULT (c168, 2026-03-10)
 - Source: `__tmp_brut_f1_mercredi_matrix_result_local_c168_2026-03-10.json`
 - Summary: total 8, passed 8, failed 0, `/api/media/*/sheet` 404: 0
+
+LATEST ANIME VF OVERRIDE + PANEL PICK (2026-03-10, c169)
+- Anime VF fallback now probes hidden `/vf` panels even if not listed in the catalogue panel list.
+- Episode panel selection prefers exact `saisonN/` paths over `saisonNhs/` variants when both exist.
+- Example: Dr Stone S4 VF resolved via `saison4/vf` even when only `saison4/vostfr` is listed.
+
+LATEST IOS ERROR GUARD (2026-03-10, c170)
+- Ignore spurious HTML5 `error` events with code `0` to prevent false auto-switch resets on iPhone.
+
+LATEST ANIME VF/VOSTFR DUAL FETCH (2026-03-10, c172)
+- Anime-Sama fetch now pulls both VF + VOSTFR sources when available (order respects preference).
+- Default language still prefers VF, but VOSTFR is kept in the pool for auto-switch fallback if VF stalls.
+
+LOCAL BRUTE RESULT (c172, 2026-03-10)
+- Source: `__tmp_brut_f1_mercredi_matrix_result_local_c172_2026-03-10.json`
+- Summary: total 8, passed 8, failed 0, `/api/media/*/sheet` 404: 0

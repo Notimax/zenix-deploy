@@ -9078,17 +9078,12 @@ async function appendAnimeSibnetSource(item, season, episode, sources, language 
   const safeSeason = Math.max(1, Number(season || 1));
   const safeEpisode = Math.max(1, Number(episode || 1));
   const preferredLanguage = normalizeLanguageLabel(language);
-  let languageTokens = ["vf", "vostfr"];
-  if (preferredLanguage === "VOSTFR") {
-    languageTokens = ["vostfr"];
-  } else if (preferredLanguage === "VF") {
-    languageTokens = ["vf", "vostfr"];
-  }
+  const languageTokens =
+    preferredLanguage === "VOSTFR" ? ["vostfr", "vf"] : ["vf", "vostfr"];
   const catalogUrl = getAnimeSamaCatalogUrl(item);
 
   try {
-    let payload = null;
-    let usedToken = languageTokens[0];
+    const payloads = [];
     for (const token of languageTokens) {
       const params = new URLSearchParams({
         title: safeTitle,
@@ -9111,62 +9106,58 @@ async function appendAnimeSibnetSource(item, season, episode, sources, language 
       const hasSources = Array.isArray(response?.data?.sources) && response.data.sources.length > 0;
       const hasUrl = Boolean(String(response?.data?.sourceUrl || "").trim());
       if (hasSources || hasUrl) {
-        payload = response;
-        usedToken = token;
-        break;
+        payloads.push({ token, response });
       }
     }
-    if (!payload) {
-      return base;
-    }
-
-    const resolvedLanguage = normalizeLanguageLabel(payload?.data?.language || "");
-    const sourceLanguage =
-      resolvedLanguage || (usedToken === "vf" ? "VF" : usedToken === "vostfr" ? "VOSTFR" : "");
-    const rawSources = Array.isArray(payload?.data?.sources) ? payload.data.sources : [];
-    const candidateSources =
-      rawSources.length > 0
-        ? rawSources
-        : (() => {
-            const sourceUrl = String(payload?.data?.sourceUrl || "").trim();
-            if (!sourceUrl) {
-              return [];
-            }
-            return [
-              {
-                stream_url: sourceUrl,
-                format: "embed",
-                quality: "Sibnet",
-                source_name: "Sibnet",
-              },
-            ];
-          })();
-
-    if (candidateSources.length === 0) {
+    if (payloads.length === 0) {
       return base;
     }
 
     const existing = new Set(base.map((entry) => getSourceDedupKey(entry)).filter(Boolean));
     const added = [];
-    candidateSources.forEach((entry, index) => {
-      const sourceEntry = normalizeSourceEntry(
-        {
-          ...entry,
-          language: normalizeLanguageLabel(entry?.language || "") || sourceLanguage,
-          source_name: String(entry?.source_name || entry?.name || "Anime-Sama").trim() || "Anime-Sama",
-          origin: "anime-sama",
-        },
-        base.length + index
-      );
-      if (!sourceEntry) {
-        return;
-      }
-      const key = getSourceDedupKey(sourceEntry);
-      if (!key || existing.has(key)) {
-        return;
-      }
-      existing.add(key);
-      added.push(sourceEntry);
+    payloads.forEach(({ token, response }) => {
+      const resolvedLanguage = normalizeLanguageLabel(response?.data?.language || "");
+      const sourceLanguage =
+        resolvedLanguage || (token === "vf" ? "VF" : token === "vostfr" ? "VOSTFR" : "");
+      const rawSources = Array.isArray(response?.data?.sources) ? response.data.sources : [];
+      const candidateSources =
+        rawSources.length > 0
+          ? rawSources
+          : (() => {
+              const sourceUrl = String(response?.data?.sourceUrl || "").trim();
+              if (!sourceUrl) {
+                return [];
+              }
+              return [
+                {
+                  stream_url: sourceUrl,
+                  format: "embed",
+                  quality: "Sibnet",
+                  source_name: "Sibnet",
+                },
+              ];
+            })();
+
+      candidateSources.forEach((entry) => {
+        const sourceEntry = normalizeSourceEntry(
+          {
+            ...entry,
+            language: normalizeLanguageLabel(entry?.language || "") || sourceLanguage,
+            source_name: String(entry?.source_name || entry?.name || "Anime-Sama").trim() || "Anime-Sama",
+            origin: "anime-sama",
+          },
+          base.length + added.length
+        );
+        if (!sourceEntry) {
+          return;
+        }
+        const key = getSourceDedupKey(sourceEntry);
+        if (!key || existing.has(key)) {
+          return;
+        }
+        existing.add(key);
+        added.push(sourceEntry);
+      });
     });
     if (added.length === 0) {
       return base;
@@ -9252,6 +9243,10 @@ function shouldIgnoreVideoErrorFallback() {
     return true;
   }
   const videoErrorCode = Number(refs.playerVideo?.error?.code || 0);
+  const errorTime = Number(refs.playerVideo?.currentTime || 0);
+  if (videoErrorCode === 0 && errorTime > 2.2) {
+    return true;
+  }
   if (videoErrorCode === 1) {
     return true;
   }

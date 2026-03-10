@@ -311,3 +311,17 @@ Last update: 2026-03-10
 - Anime playback now keeps all readers (Anime-Sama + internal + Nakios) instead of filtering to Anime-Sama only.
 - Source ordering is re-sorted by score after merge to prioritize VF/MULTI over VOSTFR/VO.
 - This supersedes the earlier “anime sources restricted to Anime-Sama” policy for playback only.
+
+## c169 follow-up (2026-03-10)
+- Anime VF override now probes hidden `/vf` panels even if missing in the panel list.
+- Panel selection now prefers exact `saisonN/` paths over `saisonNhs/` when both exist.
+
+## c170 follow-up (2026-03-10)
+- Ignore spurious HTML5 `error` events with code `0` to reduce false auto-switch resets on iPhone.
+
+## c172 follow-up (2026-03-10)
+- Anime-Sama fetch now pulls both VF and VOSTFR sources when available (respecting preference order).
+- VF remains default, but VOSTFR stays in the pool so auto-switch can recover if VF stalls.
+- Local brute matrix (F1 + Mercredi, 2026-03-10):
+  - Source: `__tmp_brut_f1_mercredi_matrix_result_local_c172_2026-03-10.json`
+  - Summary: total 8, passed 8, failed 0.
