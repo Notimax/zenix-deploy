@@ -306,3 +306,8 @@ Last update: 2026-03-10
 - Panel selection now uses inferred label language when path does not contain explicit `vf/vostfr`.
 - Episodes parser now accepts `var/let/const` (and bare) `epsN` arrays to keep multi-hoster sources visible.
 - Local brute matrix (c167, 2026-03-10): total 8, passed 8, failed 0.
+
+## c168 follow-up (2026-03-10)
+- Anime playback now keeps all readers (Anime-Sama + internal + Nakios) instead of filtering to Anime-Sama only.
+- Source ordering is re-sorted by score after merge to prioritize VF/MULTI over VOSTFR/VO.
+- This supersedes the earlier “anime sources restricted to Anime-Sama” policy for playback only.

@@ -575,3 +575,11 @@ LATEST ANIME PANEL PARSING HARDENING (2026-03-10, c167)
 LOCAL BRUTE RESULT (c167, 2026-03-10)
 - Source: `__tmp_brut_f1_mercredi_matrix_result_local_c167_2026-03-10.json`
 - Summary: total 8, passed 8, failed 0, `/api/media/*/sheet` 404: 0
+
+LATEST ANIME SOURCE POOL UNLOCK (2026-03-10, c168)
+- Anime playback now keeps all available readers (Anime-Sama + internal + Nakios) instead of filtering Anime-Sama only.
+- Source ordering is re-sorted by score after merge to keep VF/MULTI ahead of VOSTFR/VO.
+
+LOCAL BRUTE RESULT (c168, 2026-03-10)
+- Source: `__tmp_brut_f1_mercredi_matrix_result_local_c168_2026-03-10.json`
+- Summary: total 8, passed 8, failed 0, `/api/media/*/sheet` 404: 0

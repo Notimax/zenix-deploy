@@ -8920,9 +8920,6 @@ async function appendNakiosSources(item, season, episode, sources) {
   if (!item) {
     return base;
   }
-  if (getItemTypeBucket(item) === "anime") {
-    return base;
-  }
 
   const title = String(item?.title || "").trim();
   if (title.length < 2) {
@@ -9052,8 +9049,20 @@ function preferAnimeSamaSources(item, sources) {
   if (!item?.isAnime) {
     return base;
   }
-  const animeSources = base.filter((entry) => isAnimeSamaSourceEntry(entry));
-  return animeSources;
+  // Keep all readers for anime, but enforce a stable, score-based order.
+  return sortSourcesByScore(base);
+}
+
+function sortSourcesByScore(sources) {
+  const rows = Array.isArray(sources) ? sources.slice() : [];
+  rows.sort((left, right) => {
+    const premiumDelta = Number(Boolean(left?.premiumHint)) - Number(Boolean(right?.premiumHint));
+    if (premiumDelta !== 0) {
+      return premiumDelta;
+    }
+    return Number(right?.score || 0) - Number(left?.score || 0);
+  });
+  return rows;
 }
 async function appendAnimeSibnetSource(item, season, episode, sources, language = "") {
   const base = Array.isArray(sources) ? sources.slice() : [];
