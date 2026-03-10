@@ -6470,7 +6470,7 @@ function inferAnimePanelLanguage(panel) {
   if (/(^|\/|\s)vostfr($|\/|\s)/i.test(probe)) {
     return "vostfr";
   }
-  if (/(^|\/|\s)vf($|\/|\s)/i.test(probe)) {
+  if (/(^|\/|\s)(vf|vffr|version\s+fr|version\s+fran[cç]aise|fran[cç]ais|french)($|\/|\s)/i.test(probe)) {
     return "vf";
   }
   if (/(^|\/|\s)vo($|\/|\s)/i.test(probe)) {
@@ -6487,6 +6487,17 @@ function chooseAnimePanelPath(panels, season = 1, language = "vostfr") {
   const safeSeason = Math.max(1, Number(season || 1));
   const safeLang = String(language || "vostfr").toLowerCase() === "vf" ? "vf" : "vostfr";
   const seasonToken = `saison${safeSeason}`;
+  const matchesLang = (entry) => {
+    if (!entry) {
+      return false;
+    }
+    const inferred = inferAnimePanelLanguage(entry);
+    if (inferred && inferred === safeLang) {
+      return true;
+    }
+    const value = String(entry.path || "").toLowerCase();
+    return value.endsWith(`/${safeLang}`) || value.includes(`/${safeLang}/`) || value.endsWith(safeLang);
+  };
   const toResult = (panel, matchedRequested = false) => {
     if (!panel) {
       return null;
@@ -6500,20 +6511,14 @@ function chooseAnimePanelPath(panels, season = 1, language = "vostfr") {
   };
 
   const withSeason = rows.filter((entry) => String(entry.path || "").toLowerCase().includes(seasonToken));
-  const seasonAndLang = withSeason.find((entry) => {
-    const value = String(entry.path || "").toLowerCase();
-    return value.endsWith(`/${safeLang}`) || value.includes(`/${safeLang}/`) || value.endsWith(safeLang);
-  });
+  const seasonAndLang = withSeason.find((entry) => matchesLang(entry));
   if (seasonAndLang) {
     return toResult(seasonAndLang, true);
   }
   if (withSeason.length > 0) {
     return toResult(withSeason[0], false);
   }
-  const langOnly = rows.find((entry) => {
-    const value = String(entry.path || "").toLowerCase();
-    return value.endsWith(`/${safeLang}`) || value.includes(`/${safeLang}/`) || value.endsWith(safeLang);
-  });
+  const langOnly = rows.find((entry) => matchesLang(entry));
   if (langOnly) {
     return toResult(langOnly, true);
   }
@@ -6540,7 +6545,7 @@ function extractEpisodesScriptUrl(pageHtml, pageUrl) {
 function parseEpisodeArrays(episodesScript) {
   const text = String(episodesScript || "");
   const arrays = [];
-  const regex = /var\s+eps(\d+)\s*=\s*\[([\s\S]*?)\];/gi;
+  const regex = /(?:^|[;\r\n])\s*(?:var|let|const)?\s*eps(\d+)\s*=\s*\[([\s\S]*?)\];/gi;
   let match;
   while ((match = regex.exec(text)) !== null) {
     const name = `eps${String(match?.[1] || "").trim()}`;

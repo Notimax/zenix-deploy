@@ -1,6 +1,6 @@
 # Zenix Project Memory
 
-Last update: 2026-03-09
+Last update: 2026-03-10
 
 ## Core product constraints
 - Domain: `https://zenix.best`
@@ -300,3 +300,9 @@ Last update: 2026-03-09
 - Frontend VF lookup now falls back to VOSTFR on 404/timeout (prevents empty anime source lists).
 - Anime source ordering prefers direct HLS/MP4 before embeds.
 - Local brute matrix (c166, 2026-03-10): total 8, passed 8, failed 0.
+
+## c167 follow-up (2026-03-10)
+- Anime panel language inference expanded (VF labels like `version fr`, `francais`, `french` are recognized).
+- Panel selection now uses inferred label language when path does not contain explicit `vf/vostfr`.
+- Episodes parser now accepts `var/let/const` (and bare) `epsN` arrays to keep multi-hoster sources visible.
+- Local brute matrix (c167, 2026-03-10): total 8, passed 8, failed 0.

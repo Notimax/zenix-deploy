@@ -1,5 +1,5 @@
 ZENIX STREAM - OPERATIONS MEMORY
-Last updated: 2026-03-09
+Last updated: 2026-03-10
 
 LIVE DOMAIN
 - https://zenix.best
@@ -565,4 +565,13 @@ LATEST ANIME SOURCE RESTORE (2026-03-10, c166)
 
 LOCAL BRUTE RESULT (c166, 2026-03-10)
 - Source: `__tmp_brut_f1_mercredi_matrix_result_local_c166_fix7_2026-03-10.json`
+- Summary: total 8, passed 8, failed 0, `/api/media/*/sheet` 404: 0
+
+LATEST ANIME PANEL PARSING HARDENING (2026-03-10, c167)
+- Anime panel language detection expanded (VF labels like `version fr`, `francais`, `french`).
+- Panel selection now uses inferred panel language (label-based) when path lacks explicit `vf/vostfr`.
+- Episodes parser now accepts `var/let/const` (and bare) `epsN` arrays for multi-hoster capture.
+
+LOCAL BRUTE RESULT (c167, 2026-03-10)
+- Source: `__tmp_brut_f1_mercredi_matrix_result_local_c167_2026-03-10.json`
 - Summary: total 8, passed 8, failed 0, `/api/media/*/sheet` 404: 0
