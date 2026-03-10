@@ -330,3 +330,17 @@ Last update: 2026-03-10
 - Anime playback now keeps only Anime-Sama sources and filters to `VF` / `MULTI` (no VO/VOSTFR).
 - VF panel probing now prioritizes exact `saisonN/vf` before `saisonNhs/vf`.
 - Anime catalogue search scoring now prefers non-year slugs to avoid wrong series variants (e.g., HxH 1999).
+
+## c174 follow-up (2026-03-10)
+- Added `/api/anime-seasons` (Anime-Sama VF) to build seasons/episodes when internal seasons are empty.
+- Frontend `ensureSeasons` falls back to Anime-Sama for anime to avoid 0 episode / no source.
+- Discord webhook recovery: clears message id on 401/403 and bypasses long backoff when stale.
+
+## c175 follow-up (2026-03-10)
+- Anime seasons now load Anime-Sama first to avoid slow internal season fetch on iOS.
+- Webhook now bypasses long backoff if no successful push for a while.
+
+## c176 follow-up (2026-03-10)
+- Anime titles are auto-marked as anime if Anime-Sama seasons resolve, ensuring sources load.
+- Local HXH brute (desktop + iPhone 13 WebKit, 20s): 2/2 passed.
+- HXH brute rerun (2026-03-10): 2/2 passed. Source: `__tmp_brut_hxh_matrix_result_local_c177_2026-03-10.json`.

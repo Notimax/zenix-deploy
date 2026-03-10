@@ -604,3 +604,24 @@ LATEST ANIME VF-ONLY POLICY (2026-03-10, c173)
 - Anime playback now keeps only Anime-Sama sources and filters to `VF` / `MULTI` (no VO/VOSTFR).
 - Anime-Sama VF panel probing order now prioritizes exact `saisonN/vf` before `saisonNhs/vf`.
 - Catalogue search scoring now prefers non-year slugs (fixes Hunter x Hunter 2011 vs 1999 mismatch).
+
+LATEST ANIME SEASONS FALLBACK + WEBHOOK RECOVERY (2026-03-10, c174)
+- Added `/api/anime-seasons` to build season/episode lists from Anime-Sama VF panels when internal seasons are empty.
+- Frontend `ensureSeasons` now falls back to Anime-Sama for anime (fixes 0 episode / lecture impossible cases).
+- Discord webhook recovery hardened: clears message id on 401/403 and bypasses long backoff if no success for a while.
+
+LATEST ANIME FAST-PATH + WEBHOOK FAILSAFE (2026-03-10, c175)
+- Anime seasons now load Anime-Sama first (avoid waiting on slow `/media/{id}/seasons`).
+- Added stale-success bypass so webhook resumes even after long backoff.
+
+LATEST ANIME AUTO-CLASSIFICATION (2026-03-10, c176)
+- If Anime-Sama seasons are found for a TV title, it is auto-marked as anime for playback.
+- Fixes Hunter x Hunter showing 0 sources/episodes when internal seasons fail.
+
+LOCAL BRUTE RESULT (HXH, c176, 2026-03-10)
+- Source: `__tmp_brut_hxh_matrix_result_local_c176_2026-03-10.json`
+- Summary: total 2, passed 2, failed 0
+
+LOCAL BRUTE RESULT (HXH RERUN, 2026-03-10)
+- Source: `__tmp_brut_hxh_matrix_result_local_c177_2026-03-10.json`
+- Summary: total 2, passed 2, failed 0

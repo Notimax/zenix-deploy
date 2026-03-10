@@ -247,7 +247,9 @@ const RENDEZVOUS_STATIC_SOURCES_FILE = path.resolve(
 );
 const proxyCache = new Map();
 const calendarCache = new Map();
+const ANIME_SEASONS_CACHE_MS = 1000 * 60 * 20;
 const animeSibnetCache = new Map();
+const animeSeasonsCache = new Map();
 const pidoovDetailCache = new Map();
 const pidoovLookupCache = new Map();
 const nakiosLookupCache = new Map();
@@ -320,6 +322,7 @@ let discordNextAllowedAt = 0;
 let discordPushInFlight = null;
 let discordRateLimitedStreak = 0;
 let discordWebhookCandidateIndex = 0;
+let discordLastSuccessAt = 0;
 let discordLastResult = {
   at: "",
   reason: "startup",
@@ -1689,8 +1692,15 @@ async function pushDiscordStats(reason = "interval") {
 
   const now = Date.now();
   const forceSend = reason === "startup" || reason === "manual";
-  if (!forceSend && now < discordNextAllowedAt) {
+  const staleWindow = Math.max(120000, DISCORD_PUSH_INTERVAL_MS * 6);
+  const staleTooLong =
+    Number(discordLastSuccessAt || 0) > 0 && now - Number(discordLastSuccessAt || 0) > staleWindow;
+  const canBypassBackoff = staleTooLong && discordNextAllowedAt - now > DISCORD_PUSH_INTERVAL_MS;
+  if (!forceSend && now < discordNextAllowedAt && !canBypassBackoff) {
     return;
+  }
+  if (canBypassBackoff) {
+    discordNextAllowedAt = 0;
   }
   if (!forceSend && now - analyticsLastPushAt < DISCORD_PUSH_INTERVAL_MS - 1000) {
     return;
@@ -1716,6 +1726,7 @@ async function pushDiscordStats(reason = "interval") {
     setDiscordLastResult(reason, "patch", patched);
     if (patched.ok) {
       discordRateLimitedStreak = 0;
+      discordLastSuccessAt = now;
       return;
     }
     if (patched.status === 429) {
@@ -1725,7 +1736,7 @@ async function pushDiscordStats(reason = "interval") {
       discordRateLimitedStreak = 0;
       discordNextAllowedAt = now + Math.max(DISCORD_PUSH_INTERVAL_MS, 30000);
     }
-    if (patched.status === 404 || patched.status === 400) {
+    if (patched.status === 404 || patched.status === 400 || patched.status === 401 || patched.status === 403) {
       discordStatsMessageId = "";
       saveDiscordStatsState();
     }
@@ -1742,6 +1753,7 @@ async function pushDiscordStats(reason = "interval") {
   }
   if (created.ok) {
     discordRateLimitedStreak = 0;
+    discordLastSuccessAt = now;
     const nextId = String(created.body?.id || "").trim();
     if (/^\d{8,30}$/.test(nextId)) {
       discordStatsMessageId = nextId;
@@ -6902,6 +6914,146 @@ async function resolveAnimeSibnetSource(title, season, episode, language = "vost
   return payload;
 }
 
+function extractAnimeSeasonNumbers(panels) {
+  const rows = Array.isArray(panels) ? panels : [];
+  const set = new Set();
+  rows.forEach((entry) => {
+    const match = String(entry?.path || "").match(/saison(\d+)/i);
+    if (!match) {
+      return;
+    }
+    const value = Number(match[1]);
+    if (Number.isFinite(value) && value > 0) {
+      set.add(value);
+    }
+  });
+  const seasons = Array.from(set).sort((a, b) => a - b);
+  return seasons.length > 0 ? seasons : [1];
+}
+
+function getAnimeEpisodeCount(arrays) {
+  const rows = Array.isArray(arrays) ? arrays : [];
+  let max = 0;
+  rows.forEach((entry) => {
+    const count = Array.isArray(entry?.urls) ? entry.urls.length : 0;
+    if (count > max) {
+      max = count;
+    }
+  });
+  return max;
+}
+
+function buildAnimeEpisodeList(count) {
+  const total = Math.max(0, Number(count || 0));
+  const episodes = [];
+  for (let index = 1; index <= total; index += 1) {
+    episodes.push({
+      episode: index,
+      name: `Episode ${index}`,
+      runtime: 0,
+      airDate: "",
+      isSoon: false,
+    });
+  }
+  return episodes;
+}
+
+async function resolveAnimeSeasons(title, language = "vf", options = {}) {
+  const safeTitle = String(title || "").trim();
+  if (!safeTitle) {
+    throw new Error("Missing title");
+  }
+  const safeLanguage = String(language || "vf").toLowerCase() === "vostfr" ? "vostfr" : "vf";
+  const cacheKey = `${safeTitle.toLowerCase()}|${safeLanguage}`;
+  const now = Date.now();
+  const cached = animeSeasonsCache.get(cacheKey);
+  if (cached && Number(cached.expiresAt || 0) > now) {
+    return cached.value;
+  }
+
+  let catalogUrl = sanitizeAnimeSamaCatalogUrl(options?.catalogUrl || "");
+  if (!catalogUrl) {
+    const queries = buildAnimeSearchQueries(safeTitle);
+    for (const query of queries) {
+      const searchResponse = await fetchRemoteForm(ANIME_SAMA_SEARCH_ENDPOINT, {
+        query,
+      });
+      if (searchResponse.status < 200 || searchResponse.status >= 300) {
+        continue;
+      }
+      catalogUrl = extractFirstAnimeCatalogueLink(searchResponse.body, query);
+      if (catalogUrl) {
+        break;
+      }
+    }
+  }
+  if (!catalogUrl) {
+    throw new Error("Anime not found");
+  }
+
+  const catalogResponse = await fetchRemoteText(catalogUrl, "text/html");
+  if (catalogResponse.status < 200 || catalogResponse.status >= 300) {
+    throw new Error("Anime page unavailable");
+  }
+  const panels = extractAnimePanels(catalogResponse.body);
+  const seasonNumbers = extractAnimeSeasonNumbers(panels);
+  const baseCatalogUrl = catalogUrl.endsWith("/") ? catalogUrl : `${catalogUrl}/`;
+  const seasons = [];
+
+  for (const season of seasonNumbers) {
+    const panelPick = chooseAnimePanelPath(panels, season, safeLanguage);
+    let panelPath = panelPick?.path || "";
+    let panelResolution = null;
+    if (safeLanguage === "vf" && panelPick && String(panelPick.language || "") !== "vf") {
+      const vfCandidates = buildAnimeVfCandidatePanels(panels, season);
+      for (const candidate of vfCandidates) {
+        panelResolution = await tryResolveAnimePanelSources(baseCatalogUrl, candidate.path, 1);
+        if (panelResolution) {
+          panelPath = candidate.path;
+          break;
+        }
+      }
+    }
+    if (!panelResolution && panelPath) {
+      panelResolution = await tryResolveAnimePanelSources(baseCatalogUrl, panelPath, 1);
+    }
+    if (!panelResolution) {
+      continue;
+    }
+    const episodeCount = getAnimeEpisodeCount(panelResolution.arrays);
+    if (episodeCount <= 0) {
+      continue;
+    }
+    seasons.push({
+      season,
+      episodes: buildAnimeEpisodeList(episodeCount),
+    });
+  }
+
+  if (seasons.length === 0) {
+    throw new Error("Anime seasons unavailable");
+  }
+
+  const payload = {
+    title: safeTitle,
+    language: safeLanguage,
+    catalogUrl,
+    seasons,
+  };
+  animeSeasonsCache.set(cacheKey, {
+    expiresAt: now + ANIME_SEASONS_CACHE_MS,
+    value: payload,
+  });
+  if (animeSeasonsCache.size > 280) {
+    const oldest = Array.from(animeSeasonsCache.entries()).sort(
+      (left, right) => Number(left?.[1]?.expiresAt || 0) - Number(right?.[1]?.expiresAt || 0)
+    );
+    oldest.slice(0, animeSeasonsCache.size - 280).forEach(([key]) => animeSeasonsCache.delete(key));
+  }
+
+  return payload;
+}
+
 function buildHlsProxyPath(targetUrl) {
   return `/api/hls-proxy?url=${encodeURIComponent(String(targetUrl || "").trim())}`;
 }
@@ -7834,6 +7986,50 @@ async function handleAnimeSibnet(req, res, requestUrl) {
   }
 }
 
+async function handleAnimeSeasons(req, res, requestUrl) {
+  if (requestUrl.pathname !== "/api/anime-seasons") {
+    return false;
+  }
+  if (req.method !== "GET") {
+    sendJson(res, 405, { error: "Method Not Allowed" });
+    return true;
+  }
+
+  const title = String(requestUrl.searchParams.get("title") || "").trim();
+  if (title.length < 2) {
+    sendJson(res, 400, { error: "Missing title" });
+    return true;
+  }
+
+  const language = String(requestUrl.searchParams.get("language") || "vf").toLowerCase() === "vostfr" ? "vostfr" : "vf";
+  const catalogUrlParam = String(
+    requestUrl.searchParams.get("catalogUrl") || requestUrl.searchParams.get("catalog") || ""
+  ).trim();
+
+  try {
+    const data = await resolveAnimeSeasons(title, language, {
+      catalogUrl: catalogUrlParam,
+    });
+    sendJson(res, 200, {
+      apiVersion: "zenix-anime-seasons-v1",
+      type: "success",
+      data: {
+        title,
+        language: data.language,
+        catalogUrl: data.catalogUrl,
+        items: data.seasons,
+      },
+    });
+    return true;
+  } catch (error) {
+    sendJson(res, 502, {
+      error: "Anime seasons unavailable",
+      reason: sanitizeToken(String(error?.message || ""), 120),
+    });
+    return true;
+  }
+}
+
 async function handleNakiosSource(req, res, requestUrl) {
   if (requestUrl.pathname !== "/api/nakios-source") {
     return false;
@@ -8295,6 +8491,12 @@ const server = http.createServer((req, res) => {
     })
     .then((handledHlsProxy) => {
       if (handledHlsProxy) {
+        return true;
+      }
+      return handleAnimeSeasons(req, res, requestUrl);
+    })
+    .then((handledAnimeSeasons) => {
+      if (handledAnimeSeasons) {
         return true;
       }
       return handleAnimeSibnet(req, res, requestUrl);

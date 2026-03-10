@@ -7170,10 +7170,69 @@ async function ensureSeasons(id) {
   }
 
   const task = (async () => {
-    const payload = await fetchJson(`${API_BASE}/media/${id}/seasons`);
+    const item = findItemById(id) || (await buildItemFromDetails(id).catch(() => null));
+    const fetchAnimeSeasons = async () => {
+      if (!item || item.type !== "tv") {
+        return [];
+      }
+      const title = String(item.title || "").trim();
+      if (!title) {
+        return [];
+      }
+      const params = new URLSearchParams({
+        title,
+        language: "vf",
+      });
+      const catalogUrl = getAnimeSamaCatalogUrl(item);
+      if (catalogUrl) {
+        params.set("catalogUrl", catalogUrl);
+      }
+      try {
+        const animePayload = await fetchJson(`${API_BASE}/anime-seasons?${params.toString()}`, {
+          timeoutMs: ANIME_SIBNET_TIMEOUT_MS,
+          retryDelays: [350, 900],
+        });
+        const animeRows = Array.isArray(animePayload?.data?.items) ? animePayload.data.items : [];
+        return animeRows
+          .map((entry) => ({
+            season: Number(entry?.season || 0),
+            episodes: Array.isArray(entry?.episodes)
+              ? entry.episodes
+                  .map((episode) => ({
+                    episode: Number(episode?.episode || 0),
+                    name: String(episode?.name || `Episode ${episode?.episode || "?"}`),
+                    runtime: Number(episode?.runtime || 0),
+                    airDate: String(episode?.airDate || "").trim(),
+                    isSoon: Boolean(episode?.isSoon),
+                  }))
+                  .filter((episode) => episode.episode > 0)
+              : [],
+          }))
+          .filter((entry) => entry.season > 0 && entry.episodes.length > 0)
+          .sort((a, b) => a.season - b.season);
+      } catch {
+        return [];
+      }
+    };
+
+    if (item?.isAnime) {
+      const animeSeasons = await fetchAnimeSeasons();
+      if (animeSeasons.length > 0) {
+        item.isAnime = true;
+        state.seasonsCache.set(id, animeSeasons);
+        return animeSeasons;
+      }
+    }
+
+    let payload = null;
+    try {
+      payload = await fetchJson(`${API_BASE}/media/${id}/seasons`);
+    } catch {
+      payload = null;
+    }
     const rows = Array.isArray(payload?.data?.items) ? payload.data.items : [];
 
-    const seasons = rows
+    let seasons = rows
       .map((entry) => ({
         season: Number(entry?.season || 0),
         episodes: Array.isArray(entry?.episodes)
@@ -7192,6 +7251,14 @@ async function ensureSeasons(id) {
       }))
       .filter((entry) => entry.season > 0 && entry.episodes.length > 0)
       .sort((a, b) => a.season - b.season);
+
+    if (seasons.length === 0 && item) {
+      const animeSeasons = await fetchAnimeSeasons();
+      if (animeSeasons.length > 0) {
+        item.isAnime = true;
+        seasons = animeSeasons;
+      }
+    }
 
     state.seasonsCache.set(id, seasons);
     return seasons;
