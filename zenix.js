@@ -82,6 +82,10 @@ const DASH_MIME = "application/dash+xml";
 const VIDEO_READY_TIMEOUT_MS = 12000;
 const HLS_READY_TIMEOUT_MS = 14000;
 const HLS_MANIFEST_TIMEOUT_MS = 15000;
+const HLS_LANG_PROBE_TIMEOUT_MS = 3800;
+const HLS_LANG_PROBE_CACHE_MS = 18 * 60 * 1000;
+const HLS_LANG_PROBE_EMPTY_CACHE_MS = 4 * 60 * 1000;
+const HLS_LANG_PROBE_MAX = 6;
 const SEGMENT_FALLBACK_MAX_SEGMENTS = 1200;
 const IOS_NATIVE_HLS_BOOT_TIMEOUT_MS = 3600;
 const IOS_DECODED_HLS_BOOT_TIMEOUT_MS = 4200;
@@ -98,6 +102,7 @@ const SEARCH_SIGNALS_KEY = "zenix-search-signals-v1";
 const BROWSE_STATE_KEY = "zenix-browse-state-v1";
 const VIEW_SCROLL_KEY = "zenix-view-scroll-v1";
 const SOURCE_HOST_HEALTH_KEY = "zenix-source-health-v1";
+const hlsLanguageProbeCache = new Map();
 const RECENT_SEARCHES_LIMIT = 8;
 const SCROLL_RESTORE_MAX = 8000;
 const SLOW_NET_TYPES = new Set(["slow-2g", "2g", "3g"]);
@@ -223,6 +228,7 @@ const state = {
   sourceIndex: -1,
   sourceRetryAttempts: new Map(),
   sourceHostHealth: loadSourceHostHealth(),
+  hlsLangProbeToken: 0,
   sourceLoading: false,
   sourceLoadTicket: 0,
   lastPlaybackHardRefreshAt: 0,
@@ -5046,6 +5052,20 @@ function isLikelyAnimeCatalogRow(raw) {
     return true;
   }
 
+  const urlHints = Array.isArray(raw?.urls)
+    ? raw.urls.join(" ")
+    : String(raw?.urls || raw?.url || "");
+  const categoryHints = Array.isArray(raw?.categories)
+    ? raw.categories
+        .map((entry) => (typeof entry === "string" ? entry : entry?.name || ""))
+        .join(" ")
+    : String(raw?.categories || "");
+  const genreHints = Array.isArray(raw?.genres)
+    ? raw.genres
+        .map((entry) => (typeof entry === "string" ? entry : entry?.name || ""))
+        .join(" ")
+    : String(raw?.genres || "");
+
   const hintParts = [
     raw?.type,
     raw?.media_type,
@@ -5062,12 +5082,15 @@ function isLikelyAnimeCatalogRow(raw) {
     raw?.externalLabel,
     raw?.external_source,
     raw?.externalSource,
+    urlHints,
+    categoryHints,
+    genreHints,
   ];
   const hints = hintParts
     .map((value) => String(value || "").trim().toLowerCase())
     .filter(Boolean)
     .join(" ");
-  if (/\banime\b/.test(hints)) {
+  if (/\banime\b|\banimation\b|\bjapanim\b/.test(hints)) {
     return true;
   }
 
@@ -5077,11 +5100,15 @@ function isLikelyAnimeCatalogRow(raw) {
       raw?.source_url ??
       raw?.sourceUrl ??
       raw?.url ??
+      urlHints ??
       ""
   )
     .trim()
     .toLowerCase();
   if (sourceUrl.includes("anime-sama") || sourceUrl.includes("animesama")) {
+    return true;
+  }
+  if (/\/animes?\//i.test(sourceUrl)) {
     return true;
   }
 
@@ -8372,8 +8399,37 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
     const baseMovieSources = extractSources(payload);
     const autoMovieSources = appendAutoZenixRelaySources(baseMovieSources);
     const ownedMovieSources = await appendZenixOwnedSources(selectedItem, 1, 1, autoMovieSources);
-    const nakiosMovieSources = await appendNakiosSources(selectedItem, 1, 1, ownedMovieSources);
+    const nakiosPromise = appendNakiosSources(selectedItem, 1, 1, ownedMovieSources);
+    let warmNakiosSources = [];
+    if (ownedMovieSources.length === 0) {
+      warmNakiosSources = await nakiosPromise.then((sources) => (Array.isArray(sources) ? sources : [])).catch(() => []);
+    } else {
+      warmNakiosSources = await Promise.race([
+        nakiosPromise.then((sources) => (Array.isArray(sources) ? sources : [])).catch(() => []),
+        wait(2200).then(() => []),
+      ]);
+    }
+    const nakiosMovieSources =
+      Array.isArray(warmNakiosSources) && warmNakiosSources.length > 0 ? warmNakiosSources : ownedMovieSources;
     state.sourcePool = filterMovieSourcesForFrench(nakiosMovieSources);
+    nakiosPromise
+      .then((sources) => {
+        if (token !== state.playToken) {
+          return;
+        }
+        const nextSources = Array.isArray(sources) ? sources : [];
+        if (nextSources.length === 0) {
+          return;
+        }
+        const merged = mergeSourceLists(state.allEpisodeSources, nextSources);
+        if (merged.length === state.allEpisodeSources.length) {
+          return;
+        }
+        state.allEpisodeSources = merged;
+        state.sourcePool = filterMovieSourcesForFrench(merged);
+        renderPlayerSourceOptions();
+      })
+      .catch(() => {});
   }
   state.allEpisodeSources = state.sourcePool.slice();
   state.sourceRetryAttempts.clear();
@@ -8382,6 +8438,7 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
   }
   state.sourceIndex = -1;
   renderPlayerSourceOptions();
+  scheduleHlsLanguageProbe(state.allEpisodeSources);
   const allowPremiumRescue = shouldAllowPremiumRescueForMovie(state.sourcePool, refs.playerVideo);
   try {
     await playFromSourcePoolWithRescue(resumeTime, token, {
@@ -8426,8 +8483,37 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
       const refreshedMovieSources = extractSources(refreshedPayload);
       const refreshedAutoMovieSources = appendAutoZenixRelaySources(refreshedMovieSources);
       const refreshedOwnedMovieSources = await appendZenixOwnedSources(selectedItem, 1, 1, refreshedAutoMovieSources);
-      const refreshedNakiosMovieSources = await appendNakiosSources(selectedItem, 1, 1, refreshedOwnedMovieSources);
+      const nakiosPromise = appendNakiosSources(selectedItem, 1, 1, refreshedOwnedMovieSources);
+      let warmNakiosSources = [];
+      if (refreshedOwnedMovieSources.length === 0) {
+        warmNakiosSources = await nakiosPromise.then((sources) => (Array.isArray(sources) ? sources : [])).catch(() => []);
+      } else {
+        warmNakiosSources = await Promise.race([
+          nakiosPromise.then((sources) => (Array.isArray(sources) ? sources : [])).catch(() => []),
+          wait(2200).then(() => []),
+        ]);
+      }
+      const refreshedNakiosMovieSources =
+        Array.isArray(warmNakiosSources) && warmNakiosSources.length > 0 ? warmNakiosSources : refreshedOwnedMovieSources;
       state.sourcePool = filterMovieSourcesForFrench(refreshedNakiosMovieSources);
+      nakiosPromise
+        .then((sources) => {
+          if (token !== state.playToken) {
+            return;
+          }
+          const nextSources = Array.isArray(sources) ? sources : [];
+          if (nextSources.length === 0) {
+            return;
+          }
+          const merged = mergeSourceLists(state.allEpisodeSources, nextSources);
+          if (merged.length === state.allEpisodeSources.length) {
+            return;
+          }
+          state.allEpisodeSources = merged;
+          state.sourcePool = filterMovieSourcesForFrench(merged);
+          renderPlayerSourceOptions();
+        })
+        .catch(() => {});
     }
     state.allEpisodeSources = state.sourcePool.slice();
     state.sourceRetryAttempts.clear();
@@ -8436,6 +8522,7 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
     }
     state.sourceIndex = -1;
     renderPlayerSourceOptions();
+    scheduleHlsLanguageProbe(state.allEpisodeSources);
     await playFromSourcePoolWithRescue(resumeTime, token, {
       startIndex: 0,
       skipPremiumFallback: true,
@@ -8510,6 +8597,7 @@ async function loadEpisodeStream(
       nakiosMergedSources,
       preferredLanguageInput
     );
+    state.allEpisodeSources = preferAnimeSamaSources(selectedItem, state.allEpisodeSources);
     state.availableLanguages = getAvailableLanguages(state.allEpisodeSources);
     let nextLanguage = resolvePreferredLanguage(selectedItem.id, preferredLanguageInput, state.availableLanguages);
     state.sourcePool = filterSourcesByLanguage(state.allEpisodeSources, nextLanguage);
@@ -8533,6 +8621,7 @@ async function loadEpisodeStream(
     }
     state.sourceIndex = -1;
     renderPlayerSourceOptions();
+    scheduleHlsLanguageProbe(state.allEpisodeSources);
     return nextLanguage;
   };
 
@@ -8916,6 +9005,47 @@ async function appendRendezvousSources(item, season, episode, sources) {
   return base;
 }
 
+function isAnimeSamaSourceUrl(value) {
+  const raw = String(value || "").trim().toLowerCase();
+  if (!raw) {
+    return false;
+  }
+  return raw.includes("sibnet.ru") || /anime-sama\.(tv|to)/i.test(raw);
+}
+
+function getAnimeSamaCatalogUrl(item) {
+  if (!item) {
+    return "";
+  }
+  const candidate = String(
+    item?.externalDetailUrl || item?.external_detail_url || item?.url || ""
+  ).trim();
+  if (!candidate) {
+    return "";
+  }
+  try {
+    const absolute = new URL(candidate, "https://anime-sama.to").href;
+    const parsed = new URL(absolute);
+    if (!/anime-sama\.(tv|to)/i.test(parsed.hostname || "")) {
+      return "";
+    }
+    if (!/^\/catalogue\//i.test(parsed.pathname || "")) {
+      return "";
+    }
+    return parsed.href;
+  } catch {
+    return "";
+  }
+}
+
+function preferAnimeSamaSources(item, sources) {
+  const base = Array.isArray(sources) ? sources.slice() : [];
+  if (!item?.isAnime) {
+    return base;
+  }
+  const animeSources = base.filter((entry) => isAnimeSamaSourceUrl(entry?.url));
+  return animeSources;
+}
 async function appendAnimeSibnetSource(item, season, episode, sources, language = "") {
   const base = Array.isArray(sources) ? sources.slice() : [];
   if (!item || !item.isAnime) {
@@ -8940,6 +9070,10 @@ async function appendAnimeSibnetSource(item, season, episode, sources, language 
     episode: String(safeEpisode),
     language: langToken,
   });
+  const catalogUrl = getAnimeSamaCatalogUrl(item);
+  if (catalogUrl) {
+    params.set("catalogUrl", catalogUrl);
+  }
 
   try {
     const payload = await fetchJson(`${API_BASE}/anime-sibnet?${params.toString()}`, {
@@ -8963,7 +9097,7 @@ async function appendAnimeSibnetSource(item, season, episode, sources, language 
       base.length
     );
     if (sibnetEntry && !base.some((entry) => String(entry?.url || "").trim() === sibnetEntry.url)) {
-      base.push(sibnetEntry);
+      base.unshift(sibnetEntry);
     }
   } catch {
     // optional fallback source only
@@ -9161,13 +9295,19 @@ function startPlaybackGuard() {
       !video.paused &&
       stalledForMs > hardStallMs &&
       (readyState <= 2 || networkState === 2 || networkState === 3);
+    const hardFreezeAny =
+      allowAutoRecover &&
+      startedPlayback &&
+      !video.paused &&
+      stalledForMs > hardStallMs + 900 &&
+      currentTime < 8;
     const pausedBufferStall =
       allowAutoRecover &&
       startedPlayback &&
       video.paused &&
       stalledForMs > pausedStallMs &&
       (readyState <= 2 || networkState === 3);
-    const stalledDuringPlayback = hardFreeze || pausedBufferStall;
+    const stalledDuringPlayback = hardFreeze || pausedBufferStall || hardFreezeAny;
     const startupStallWithAlternative =
       hasNextCandidate &&
       allowAutoRecover &&
@@ -9946,6 +10086,87 @@ function renderPlayerSourceOptions() {
   }
 }
 
+function scheduleHlsLanguageProbe(sources) {
+  const rows = Array.isArray(sources) ? sources.filter(Boolean) : [];
+  if (rows.length === 0) {
+    return;
+  }
+  const candidates = rows.filter((entry) => {
+    if (!entry) {
+      return false;
+    }
+    if (isEmbedSource(entry)) {
+      return false;
+    }
+    const format = String(entry?.format || "").trim().toLowerCase();
+    const url = String(entry?.url || "");
+    const looksHls = format === "hls" || /\.m3u8(?:$|\?)/i.test(url);
+    if (!looksHls) {
+      return false;
+    }
+    const lang = String(entry?.language || "").trim().toUpperCase();
+    return !lang || lang === "VOSTFR" || lang === "VO";
+  });
+  if (candidates.length === 0) {
+    return;
+  }
+
+  const token = (state.hlsLangProbeToken += 1);
+  const picked = candidates.slice(0, HLS_LANG_PROBE_MAX);
+  Promise.resolve()
+    .then(async () => {
+      let updated = false;
+      for (const entry of picked) {
+        if (token !== state.hlsLangProbeToken) {
+          return;
+        }
+        const inferred = await probeHlsSourceLanguage(entry);
+        if (!inferred || inferred === entry.language) {
+          continue;
+        }
+        const poolIndex = state.sourcePool.indexOf(entry);
+        entry.language = inferred;
+        entry.score = getSourceScore(
+          String(entry?.format || ""),
+          String(entry?.quality || ""),
+          inferred,
+          poolIndex >= 0 ? poolIndex : 0,
+          String(entry?.host || "")
+        );
+        updated = true;
+      }
+
+      if (!updated || token !== state.hlsLangProbeToken) {
+        return;
+      }
+      state.availableLanguages = getAvailableLanguages(state.allEpisodeSources);
+      const currentSelection = String(refs.playerLanguageSelect?.value || "")
+        .trim()
+        .toUpperCase();
+      const safeSelection = state.availableLanguages.includes(currentSelection) ? currentSelection : "";
+      if (refs.playerLanguageSelect) {
+        populateLanguageSelect(refs.playerLanguageSelect, state.availableLanguages, safeSelection);
+        refs.playerLanguageSelect.disabled = state.availableLanguages.length <= 1;
+      }
+      if (safeSelection) {
+        setPlayerPill(refs.playerLanguagePill, safeSelection);
+      }
+      renderPlayerSourceOptions();
+      if (refs.playerSourceMeta && state.sourceIndex >= 0) {
+        const active = state.sourcePool[state.sourceIndex];
+        if (active) {
+          refs.playerSourceMeta.textContent = formatSourceLabel(active, state.sourceIndex, state.sourcePool.length || 1);
+          if (active.language) {
+            setPlayerPill(refs.playerLanguagePill, active.language);
+          }
+        }
+      }
+    })
+    .catch(() => {
+      // best effort language probe
+    });
+}
+
 async function switchPlayerSource(index) {
   const safeIndex = Number(index);
   if (!Number.isInteger(safeIndex) || safeIndex < 0 || safeIndex >= state.sourcePool.length) {
@@ -10488,6 +10709,122 @@ async function fetchDecodedHlsPlaylistText(url) {
   }
   const body = await response.text();
   return decodeNumericPlaylistText(body);
+}
+
+async function fetchDecodedHlsPlaylistTextWithTimeout(url, timeoutMs = HLS_LANG_PROBE_TIMEOUT_MS) {
+  const requestUrl = toHlsProxyUrl(url) || toAbsoluteUrl(url);
+  if (!requestUrl) {
+    throw new Error("Missing HLS url");
+  }
+  const controller = new AbortController();
+  const timeout = Math.max(1200, Number(timeoutMs || HLS_LANG_PROBE_TIMEOUT_MS));
+  const timer = setTimeout(() => controller.abort(), timeout);
+  try {
+    const response = await fetch(requestUrl, { cache: "no-store", signal: controller.signal });
+    if (!response.ok) {
+      throw new Error(`Playlist request failed (${response.status})`);
+    }
+    const body = await response.text();
+    return decodeNumericPlaylistText(body);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function parseHlsAttributeLine(line) {
+  const attrs = {};
+  const raw = String(line || "");
+  const regex = /([A-Z0-9-]+)=("([^"]*)"|[^,]*)/gi;
+  let match;
+  while ((match = regex.exec(raw)) !== null) {
+    const key = String(match[1] || "").toUpperCase();
+    if (!key) {
+      continue;
+    }
+    const value = String(match[3] || match[2] || "")
+      .replace(/^\"|\"$/g, "")
+      .trim();
+    attrs[key] = value;
+  }
+  return attrs;
+}
+
+function inferLanguageFromHlsManifest(manifestText) {
+  const lines = String(manifestText || "").split(/\r?\n/);
+  let hasFrench = false;
+  let hasOther = false;
+  for (const rawLine of lines) {
+    const line = String(rawLine || "").trim();
+    if (!line.startsWith("#EXT-X-MEDIA") || !/TYPE=AUDIO/i.test(line)) {
+      continue;
+    }
+    const attrs = parseHlsAttributeLine(line);
+    const samples = [attrs.LANGUAGE, attrs.NAME, attrs["GROUP-ID"]]
+      .map((value) => String(value || "").toLowerCase())
+      .filter(Boolean);
+    samples.forEach((sample) => {
+      if (/\bfr\b|french|fran[c\u00e7]ais/.test(sample)) {
+        hasFrench = true;
+      } else if (sample.trim().length > 0) {
+        hasOther = true;
+      }
+    });
+  }
+  if (hasFrench && hasOther) {
+    return "MULTI";
+  }
+  if (hasFrench) {
+    return "VF";
+  }
+  if (hasOther) {
+    return "VO";
+  }
+  return "";
+}
+
+function getHlsLanguageCacheKey(url) {
+  const direct = extractProxyTargetUrl(url) || url;
+  return String(direct || "").trim();
+}
+
+async function probeHlsSourceLanguage(source) {
+  if (!source || isEmbedSource(source)) {
+    return "";
+  }
+  const format = String(source?.format || "").trim().toLowerCase();
+  if (format !== "hls" && !/\.m3u8(?:$|\?)/i.test(String(source?.url || ""))) {
+    return "";
+  }
+  const cacheKey = getHlsLanguageCacheKey(source?.url || "");
+  if (!cacheKey) {
+    return "";
+  }
+  const now = Date.now();
+  const cached = hlsLanguageProbeCache.get(cacheKey);
+  if (cached && Number(cached.expiresAt || 0) > now) {
+    return String(cached.value || "");
+  }
+
+  let inferred = "";
+  try {
+    const manifest = await fetchDecodedHlsPlaylistTextWithTimeout(cacheKey, HLS_LANG_PROBE_TIMEOUT_MS);
+    inferred = inferLanguageFromHlsManifest(manifest);
+  } catch {
+    inferred = "";
+  }
+
+  const ttl = inferred ? HLS_LANG_PROBE_CACHE_MS : HLS_LANG_PROBE_EMPTY_CACHE_MS;
+  hlsLanguageProbeCache.set(cacheKey, {
+    value: inferred,
+    expiresAt: now + ttl,
+  });
+  if (hlsLanguageProbeCache.size > 240) {
+    const oldest = Array.from(hlsLanguageProbeCache.entries()).sort(
+      (left, right) => Number(left?.[1]?.expiresAt || 0) - Number(right?.[1]?.expiresAt || 0)
+    );
+    oldest.slice(0, hlsLanguageProbeCache.size - 240).forEach(([key]) => hlsLanguageProbeCache.delete(key));
+  }
+  return inferred;
 }
 
 async function buildDecodedHlsBlobUrl(streamUrl) {

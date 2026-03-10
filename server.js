@@ -567,6 +567,20 @@ function resolveDiscordWebhookUrl() {
   return decodeBase64Utf8(DISCORD_WEBHOOK_FALLBACK_B64);
 }
 
+function readDiscordStatsMessageIdFromEnv() {
+  const direct = String(
+    process.env.DISCORD_STATS_MESSAGE_ID || process.env.DISCORD_STATS_MESSAGE || ""
+  ).trim();
+  if (/^\d{8,30}$/.test(direct)) {
+    return direct;
+  }
+  const b64 = decodeBase64Utf8(process.env.DISCORD_STATS_MESSAGE_ID_B64 || "");
+  if (/^\d{8,30}$/.test(b64)) {
+    return String(b64 || "").trim();
+  }
+  return "";
+}
+
 function buildDiscordWebhookCandidates(webhookUrl) {
   const base = String(webhookUrl || "").trim();
   if (!base) {
@@ -1322,6 +1336,11 @@ function buildAnalyticsSnapshot() {
 }
 
 function loadDiscordStatsState() {
+  const envId = readDiscordStatsMessageIdFromEnv();
+  if (envId) {
+    discordStatsMessageId = envId;
+    return;
+  }
   try {
     const raw = fs.readFileSync(DISCORD_STATS_STATE_FILE, "utf8");
     const parsed = JSON.parse(raw);
@@ -6274,9 +6293,37 @@ function normalizeSibnetUrl(value) {
   return url;
 }
 
-function extractFirstAnimeCatalogueLink(searchHtml) {
+
+function normalizeAnimeSearchTitle(value) {
+  const raw = String(value || "").trim().replace(/\u00d7/g, "x");
+  if (!raw) {
+    return "";
+  }
+  const cleaned = raw
+    .replace(/\([^)]*\)/g, " ")
+    .replace(/\[[^\]]*\]/g, " ")
+    .replace(/\{[^}]*\}/g, " ")
+    .replace(/\b(19|20)\d{2}\b/g, " ")
+    .replace(/\b(saison|season|part|episode|ep|cour|arc|version|ver|s\d+|e\d+)\b/gi, " ")
+    .replace(/[^a-z0-9]+/gi, " ")
+    .trim();
+  return cleaned;
+}
+
+function buildAnimeSearchQueries(title) {
+  const direct = String(title || "").trim();
+  const normalized = normalizeAnimeSearchTitle(direct);
+  const fallback = normalizeAnimeSearchTitle(direct.replace(/\bthe\b/gi, " "));
+  const queries = [direct, normalized, fallback]
+    .map((value) => String(value || "").trim())
+    .filter((value) => value.length >= 2);
+  return Array.from(new Set(queries));
+}
+
+function extractAnimeCatalogueLinks(searchHtml) {
   const text = String(searchHtml || "");
   const matches = text.matchAll(/href="([^"]+)"/gi);
+  const links = [];
   for (const match of matches) {
     const raw = String(match?.[1] || "").trim();
     if (!raw) {
@@ -6286,13 +6333,70 @@ function extractFirstAnimeCatalogueLink(searchHtml) {
       const absolute = new URL(raw, ANIME_SAMA_BASE).href;
       const parsed = new URL(absolute);
       if (/^\/catalogue\//i.test(parsed.pathname)) {
-        return absolute;
+        links.push(absolute);
       }
     } catch {
-      // ignore malformed links
+      // ignore malformed links.
     }
   }
-  return "";
+  return Array.from(new Set(links));
+}
+
+function scoreAnimeCatalogueCandidate(url, titleKey) {
+  const safeTitleKey = normalizeTitleKey(titleKey || "");
+  if (!safeTitleKey) {
+    return 0;
+  }
+  try {
+    const parsed = new URL(url);
+    const slug = String(parsed.pathname || "")
+      .replace(/^\/+/, "")
+      .replace(/^catalogue\//i, "")
+      .replace(/\/+$/, "");
+    const slugKey = normalizeTitleKey(slug.replace(/\b(19|20)\d{2}\b/g, " "));
+    if (!slugKey) {
+      return 0;
+    }
+    if (slugKey === safeTitleKey) {
+      return 1000;
+    }
+    const slugTokens = slugKey.split(" ").filter((token) => token.length >= 3);
+    const titleTokens = safeTitleKey.split(" ").filter((token) => token.length >= 3);
+    if (slugTokens.length === 0 || titleTokens.length === 0) {
+      return 0;
+    }
+    const slugSet = new Set(slugTokens);
+    let shared = 0;
+    titleTokens.forEach((token) => {
+      if (slugSet.has(token)) {
+        shared += 1;
+      }
+    });
+    return shared * 10 - Math.abs(slugTokens.length - titleTokens.length);
+  } catch {
+    return 0;
+  }
+}
+
+function extractFirstAnimeCatalogueLink(searchHtml, targetTitle = "") {
+  const links = extractAnimeCatalogueLinks(searchHtml);
+  if (links.length === 0) {
+    return "";
+  }
+  const titleKey = normalizeTitleKey(normalizeAnimeSearchTitle(targetTitle || ""));
+  if (!titleKey) {
+    return links[0];
+  }
+  let best = links[0];
+  let bestScore = -1;
+  links.forEach((link) => {
+    const score = scoreAnimeCatalogueCandidate(link, titleKey);
+    if (score > bestScore) {
+      bestScore = score;
+      best = link;
+    }
+  });
+  return bestScore > 0 ? best : links[0];
 }
 
 function extractAnimePanels(catalogHtml) {
@@ -6440,7 +6544,28 @@ function pickSibnetEpisodeUrl(episodeArrays, episode = 1) {
   return ranked[0] || { name: "", sibnetCount: 0, candidate: "" };
 }
 
-async function resolveAnimeSibnetSource(title, season, episode, language = "vostfr") {
+
+function sanitizeAnimeSamaCatalogUrl(value) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return "";
+  }
+  try {
+    const absolute = new URL(raw, ANIME_SAMA_BASE).href;
+    const parsed = new URL(absolute);
+    if (!/anime-sama\.(tv|to)/i.test(parsed.hostname || "")) {
+      return "";
+    }
+    if (!/^\/catalogue\//i.test(parsed.pathname || "")) {
+      return "";
+    }
+    return parsed.href;
+  } catch {
+    return "";
+  }
+}
+
+async function resolveAnimeSibnetSource(title, season, episode, language = "vostfr", options = {}) {
   const safeTitle = String(title || "").trim();
   if (!safeTitle) {
     throw new Error("Missing title");
@@ -6456,14 +6581,22 @@ async function resolveAnimeSibnetSource(title, season, episode, language = "vost
     return cached.value;
   }
 
-  const searchResponse = await fetchRemoteForm(ANIME_SAMA_SEARCH_ENDPOINT, {
-    query: safeTitle,
-  });
-  if (searchResponse.status < 200 || searchResponse.status >= 300) {
-    throw new Error("Anime search unavailable");
+  let catalogUrl = sanitizeAnimeSamaCatalogUrl(options?.catalogUrl || "");
+  if (!catalogUrl) {
+    const queries = buildAnimeSearchQueries(safeTitle);
+    for (const query of queries) {
+      const searchResponse = await fetchRemoteForm(ANIME_SAMA_SEARCH_ENDPOINT, {
+        query,
+      });
+      if (searchResponse.status < 200 || searchResponse.status >= 300) {
+        continue;
+      }
+      catalogUrl = extractFirstAnimeCatalogueLink(searchResponse.body, query);
+      if (catalogUrl) {
+        break;
+      }
+    }
   }
-
-  const catalogUrl = extractFirstAnimeCatalogueLink(searchResponse.body);
   if (!catalogUrl) {
     throw new Error("Anime not found");
   }
@@ -7438,9 +7571,14 @@ async function handleAnimeSibnet(req, res, requestUrl) {
   const season = toInt(requestUrl.searchParams.get("season"), 1, 1, 200);
   const episode = toInt(requestUrl.searchParams.get("episode"), 1, 1, 20000);
   const language = String(requestUrl.searchParams.get("language") || "vostfr").toLowerCase() === "vf" ? "vf" : "vostfr";
+  const catalogUrlParam = String(
+    requestUrl.searchParams.get("catalogUrl") || requestUrl.searchParams.get("catalog") || ""
+  ).trim();
 
   try {
-    const data = await resolveAnimeSibnetSource(title, season, episode, language);
+    const data = await resolveAnimeSibnetSource(title, season, episode, language, {
+      catalogUrl: catalogUrlParam,
+    });
     sendJson(res, 200, {
       apiVersion: "zenix-anime-sibnet-v1",
       type: "success",

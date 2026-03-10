@@ -538,3 +538,20 @@ LATEST CALENDAR/CATALOG CONSISTENCY (2026-03-09, c164)
 - Added loose semantic dedupe to merge near-duplicate external rows while keeping stronger playable entries.
 - Internal-provider candidate matching now supports tolerant title compatibility (subtitle/locale variants).
 - Backend Nakios supplemental feed now drops likely anime TV rows to preserve Anime-Sama ownership of anime inventory.
+
+LATEST ANIME + SOURCE STARTUP TUNING (2026-03-10, c165)
+- Anime sources now strictly filtered to Anime-Sama; non-Anime-Sama anime sources are dropped.
+- Added Anime-Sama Sibnet probe with catalog URL hint; `appendAnimeSibnetSource` injects Sibnet first when missing.
+- HLS manifest language probing (cached) updates source labels when audio tracks indicate VF/MULTI.
+- Movie source startup now uses Nakios in parallel to avoid blocking initial playback; late Nakios sources merge in background.
+- Playback guard now detects early hard stalls even when readyState stays high.
+- Webhook: support `DISCORD_STATS_MESSAGE_ID` env to pin a single Discord message and stop duplicate logs after restarts.
+- Added Playwright dependency for local brute tests.
+
+LATEST BRUTE RESULT (LOCAL, 2026-03-10)
+- Source: `__tmp_brut_f1_mercredi_matrix_result_local_c165.json`
+- Summary: total 8, passed 8, failed 0, `/api/media/*/sheet` 404: 0
+
+ANIME SIBNET PROBE (LOCAL, 2026-03-10)
+- Source: `__tmp_anime_sibnet_hxh_probe_local_c165.json`
+- Summary: Hunter x Hunter S1E1 resolves to Anime-Sama Sibnet VOSTFR.

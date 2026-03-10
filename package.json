@@ -1,9 +1,12 @@
-﻿{
+{
   "name": "zenix-stream",
   "private": true,
   "version": "1.0.0",
   "description": "Zenix streaming frontend (free and direct playback)",
   "scripts": {
     "start": "node server.js"
+  },
+  "dependencies": {
+    "playwright": "^1.58.2"
   }
 }

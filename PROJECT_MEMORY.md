@@ -281,3 +281,14 @@ Last update: 2026-03-09
 - Phone calendar cards now render in 2-column layout inside `#calendarSection`.
 - Catalog scroll synchronization now uses visible-gain batching (`+30` target) to reduce perceived incremental refresh.
 - Added loose semantic dedupe and tolerant provider title compatibility checks to reduce duplicate/mis-matched fallback swaps.
+
+## c165 follow-up (2026-03-10)
+- Anime sources are now strictly Anime-Sama only at playback merge (non Anime-Sama anime sources are dropped).
+- Anime-Sama Sibnet probe accepts catalog URL hints; Sibnet source is injected first when missing.
+- Added HLS manifest language probing (cached) to correct mislabeled `VOSTFR` -> `VF/MULTI` when audio metadata indicates French.
+- Movie playback startup no longer blocks on Nakios; owned sources start immediately and Nakios merges in background.
+- Playback guard now detects early hard stalls even if `readyState` stays high.
+- Discord stats message can be pinned via `DISCORD_STATS_MESSAGE_ID` to prevent duplicate logs on restarts.
+- Added Playwright dependency for local brute tests.
+- Local brute matrix (F1 + Mercredi, 2026-03-10): total 8, passed 8, failed 0.
+- Anime Sibnet probe (Hunter x Hunter S1E1) resolved to Anime-Sama Sibnet VOSTFR.
