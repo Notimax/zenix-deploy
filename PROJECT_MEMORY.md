@@ -450,3 +450,4 @@ Last update: 2026-03-11
 ## c196 follow-up (2026-03-11)
 - Branded Nakios-facing labels as Zenix in API responses/UI (no provider names exposed in payload labels).
 - Added pinned Nakios titles to supplemental catalog: Go Karts + Minions (2015, Rise of Gru) + Moi, Moche et Mechant (1-4).
+- Player now pre-issues the gate token before playback to avoid first-load source misses.

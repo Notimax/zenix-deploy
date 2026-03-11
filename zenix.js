@@ -1108,7 +1108,7 @@ async function init() {
   pruneProgressEntries();
   applyUiPrefs({ syncControls: true });
   if (refs.footerVersion) {
-    refs.footerVersion.textContent = "c197";
+    refs.footerVersion.textContent = "c198";
   }
   updateNetworkBadge();
   startOnlineCountPolling();
@@ -9099,6 +9099,11 @@ async function openPlayer(id, options = {}) {
   if (!item) {
     throw new Error("Item not found");
   }
+  if (!state.gateReady && !state.adblockDetected) {
+    await refreshGateToken({ force: true }).catch(() => {
+      // handled later if still blocked
+    });
+  }
   ensureDetails(id).catch(() => null);
 
   const token = ++state.playToken;
@@ -9515,6 +9520,11 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
     }
     clearManualSourceLock();
     state.sourcePool = resolved.sources;
+    if (state.sourcePool.length === 0) {
+      setPlayerStatus("Lecture indisponible pour ce titre.", true);
+      showMessage("Lecture indisponible pour ce titre.", true);
+      return;
+    }
   } else {
     const isSeriesFallbackMode = selectedItem.type === "tv";
     setPlayerStatus(isSeriesFallbackMode ? "Connexion au flux serie..." : "Connexion au flux film...");
@@ -10127,12 +10137,22 @@ async function appendNakiosSources(item, season, episode, sources) {
     params.set("year", String(year));
   }
 
-  try {
-    const payload = await fetchJson(`${API_BASE}/nakios-source?${params.toString()}`, {
+  const runFetch = async () =>
+    fetchJson(`${API_BASE}/nakios-source?${params.toString()}`, {
       timeoutMs: NAKIOS_SOURCE_TIMEOUT_MS,
       retryDelays: [400, 1000],
     });
-    const raw = Array.isArray(payload?.data?.sources) ? payload.data.sources : [];
+
+  try {
+    let payload = await runFetch();
+    let raw = Array.isArray(payload?.data?.sources) ? payload.data.sources : [];
+    if (raw.length === 0 && !state.adblockDetected) {
+      const gateOk = await refreshGateToken({ force: true }).catch(() => false);
+      if (gateOk) {
+        payload = await runFetch();
+        raw = Array.isArray(payload?.data?.sources) ? payload.data.sources : [];
+      }
+    }
     if (raw.length === 0) {
       return base;
     }
@@ -10143,7 +10163,7 @@ async function appendNakiosSources(item, season, episode, sources) {
         normalizeSourceEntry(
           {
             ...entry,
-            source_name: String(entry?.source_name || entry?.name || "NAKIOS").trim() || "NAKIOS",
+            source_name: String(entry?.source_name || entry?.name || "Zenix").trim() || "Zenix",
           },
           index
         )

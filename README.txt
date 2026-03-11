@@ -252,6 +252,7 @@ LATEST FIX LOG (2026-03-11)
 - Gate bootstrap now retries on first 403 and uses a neutral proof script path to avoid false positives.
 - Nakios-facing labels are now branded as Zenix in API responses and UI (no provider names exposed).
 - Pinned Nakios titles added: Go Karts, Minions (2015, Rise of Gru) + Moi, Moche et Mechant (1-4).
+- Player now pre-issues the gate token before playback to avoid first-load source misses.
 - Auto-switch now accepts premium fallback candidates on mobile when needed (instead of stopping on free-only dead-end).
 - Bootstrap stall detection now fails fast on true `readyState=0` source stalls so next source can be attempted.
 - Added explicit guard rule: if `Fallback iOS actif...` stays blocked too long, force switch to the next source.
