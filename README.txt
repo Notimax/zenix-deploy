@@ -245,6 +245,7 @@ LATEST FIX LOG (2026-03-11)
 - Resume picks per-episode time when switching season/episode; auto-next forces start at 0.
 - Theme filter panel stacking fixed (panel above backdrop, checkboxes clickable).
 - Nakios supplemental catalog now deepens pages on demand to surface more titles.
+- Added adaptive performance tuning (device/network) for catalog batches, image budgets, and supplemental page size.
 - Auto-switch now accepts premium fallback candidates on mobile when needed (instead of stopping on free-only dead-end).
 - Bootstrap stall detection now fails fast on true `readyState=0` source stalls so next source can be attempted.
 - Added explicit guard rule: if `Fallback iOS actif...` stays blocked too long, force switch to the next source.

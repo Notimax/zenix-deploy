@@ -330,6 +330,7 @@ const state = {
   pendingCatalogUpdate: false,
   userInteractingUntil: 0,
   pendingRenderTimer: 0,
+  perfTier: "mid",
   analyticsClientId: "",
   analyticsDisabled: false,
   analyticsInFlight: false,
@@ -1096,10 +1097,11 @@ init();
 async function init() {
   const splashStartedAt = startStartupSplash();
   applyRuntimeBrowserHints();
+  initPerfTierMonitor();
   pruneProgressEntries();
   applyUiPrefs({ syncControls: true });
   if (refs.footerVersion) {
-    refs.footerVersion.textContent = "c190";
+    refs.footerVersion.textContent = "c192";
   }
   updateNetworkBadge();
   startOnlineCountPolling();
@@ -2557,20 +2559,22 @@ function getCatalogSyncProfile(view = resolveCatalogViewForSearch()) {
     : { initialPages: 5, activeBatch: 7, manualBatch: 11, scrollBatch: 9 };
 
   if (view === "movie" || view === "tv" || view === "anime") {
-    return tune(
+    return scaleCatalogProfile(
+      tune(
       compact
       ? { initialPages: 8, activeBatch: 10, manualBatch: 14, scrollBatch: 12 }
       : { initialPages: 7, activeBatch: 9, manualBatch: 13, scrollBatch: 11 }
-    );
+    ));
   }
   if (view === "latest" || view === "popular") {
-    return tune(
+    return scaleCatalogProfile(
+      tune(
       compact
       ? { initialPages: 7, activeBatch: 9, manualBatch: 13, scrollBatch: 11 }
       : { initialPages: 6, activeBatch: 8, manualBatch: 12, scrollBatch: 10 }
-    );
+    ));
   }
-  return tune(defaults);
+  return scaleCatalogProfile(tune(defaults));
 }
 
 function getLoadedCatalogPage() {
@@ -2598,6 +2602,91 @@ function isSlowConnection() {
   }
   const effectiveType = String(connection.effectiveType || "").toLowerCase();
   return SLOW_NET_TYPES.has(effectiveType);
+}
+
+function clampIntRange(value, min, max) {
+  const safe = Number(value);
+  if (!Number.isFinite(safe)) {
+    return min;
+  }
+  if (safe < min) {
+    return min;
+  }
+  if (safe > max) {
+    return max;
+  }
+  return Math.round(safe);
+}
+
+function resolvePerfTier() {
+  if (isSlowConnection()) {
+    return "low";
+  }
+  const memory = Number(navigator.deviceMemory || 0);
+  const cores = Number(navigator.hardwareConcurrency || 0);
+  if ((memory > 0 && memory <= 4) || (cores > 0 && cores <= 4)) {
+    return "low";
+  }
+  if ((memory >= 12 && cores >= 8) || (memory >= 16 || cores >= 12)) {
+    return "high";
+  }
+  if (memory >= 8 && cores >= 8) {
+    return "high";
+  }
+  return "mid";
+}
+
+function updatePerfTier() {
+  state.perfTier = resolvePerfTier();
+}
+
+function getPerfScale() {
+  const tier = state.perfTier || resolvePerfTier();
+  if (tier === "high") {
+    return 1.15;
+  }
+  if (tier === "low") {
+    return 0.78;
+  }
+  return 1;
+}
+
+function scaleCatalogProfile(profile) {
+  if (!profile || typeof profile !== "object") {
+    return profile;
+  }
+  const scale = getPerfScale();
+  if (scale === 1) {
+    return profile;
+  }
+  return {
+    initialPages: clampIntRange(Math.round(Number(profile.initialPages || 2) * scale), 2, 16),
+    activeBatch: clampIntRange(Math.round(Number(profile.activeBatch || 2) * scale), 2, 24),
+    manualBatch: clampIntRange(Math.round(Number(profile.manualBatch || 3) * scale), 3, 30),
+    scrollBatch: clampIntRange(Math.round(Number(profile.scrollBatch || 2) * scale), 2, 26),
+  };
+}
+
+function scaleImageProfile(profile) {
+  if (!profile || typeof profile !== "object") {
+    return profile;
+  }
+  const scale = getPerfScale();
+  if (scale === 1) {
+    return profile;
+  }
+  return {
+    eagerLimit: clampIntRange(Math.round(Number(profile.eagerLimit || 0) * scale), 48, 900),
+    highPriorityLimit: clampIntRange(Math.round(Number(profile.highPriorityLimit || 0) * scale), 24, 520),
+  };
+}
+
+function getSupplementalPerPage() {
+  const compact = isCompactViewport();
+  const base = compact ? 84 : 96;
+  const scale = getPerfScale();
+  const scaled = scale >= 1 ? base * Math.min(1.2, scale) : base * Math.max(0.82, scale);
+  return clampIntRange(Math.round(scaled), 60, 140);
 }
 
 function isAutoNextEnabled() {
@@ -2647,6 +2736,14 @@ function applyUiPrefs(options = {}) {
 
   if (options.syncControls !== false) {
     syncUiToggleButtons();
+  }
+}
+
+function initPerfTierMonitor() {
+  updatePerfTier();
+  const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+  if (connection && typeof connection.addEventListener === "function") {
+    connection.addEventListener("change", updatePerfTier);
   }
 }
 
@@ -3232,34 +3329,34 @@ function getCardImageProfile() {
     if (boosted) {
       const eagerLimit = inAppBrowser ? 520 : slow ? 160 : 360;
       const highPriorityLimit = inAppBrowser ? 260 : slow ? 68 : 180;
-      return {
+      return scaleImageProfile({
         eagerLimit,
         highPriorityLimit,
-      };
+      });
     }
     const eagerBase = boosted ? Math.max(220, MOBILE_EAGER_IMAGE_LIMIT) : MOBILE_EAGER_IMAGE_LIMIT;
     const priorityBase = boosted ? Math.max(120, MOBILE_HIGH_PRIORITY_IMAGE_LIMIT) : MOBILE_HIGH_PRIORITY_IMAGE_LIMIT;
     const inAppEager = Math.max(eagerBase, 320);
     const inAppPriority = Math.max(priorityBase, 220);
-    return {
+    return scaleImageProfile({
       eagerLimit: inAppBrowser ? inAppEager : slow ? Math.max(72, Math.floor(eagerBase * 0.62)) : eagerBase,
       highPriorityLimit: inAppBrowser ? inAppPriority : slow ? Math.max(30, Math.floor(priorityBase * 0.64)) : priorityBase,
-    };
+    });
   }
   const eagerBase = boosted ? Math.max(220, DESKTOP_EAGER_IMAGE_LIMIT) : DESKTOP_EAGER_IMAGE_LIMIT;
   const priorityBase = boosted ? Math.max(96, DESKTOP_HIGH_PRIORITY_IMAGE_LIMIT) : DESKTOP_HIGH_PRIORITY_IMAGE_LIMIT;
   if (boosted) {
-    return {
+    return scaleImageProfile({
       eagerLimit: inAppBrowser ? 620 : slow ? 220 : 420,
       highPriorityLimit: inAppBrowser ? 320 : slow ? 96 : 200,
-    };
+    });
   }
   const inAppEager = Math.max(eagerBase, 240);
   const inAppPriority = Math.max(priorityBase, 120);
-  return {
+  return scaleImageProfile({
     eagerLimit: inAppBrowser ? inAppEager : slow ? Math.max(58, Math.floor(eagerBase * 0.6)) : eagerBase,
     highPriorityLimit: inAppBrowser ? inAppPriority : slow ? Math.max(24, Math.floor(priorityBase * 0.62)) : priorityBase,
-  };
+  });
 }
 
 function bumpInteractionWindow(ms = LIVE_RENDER_INTERACTION_GRACE_MS) {
@@ -5524,10 +5621,11 @@ async function fetchCatalogPage(page, options = {}) {
   const includeSupplemental = options.includeSupplemental !== false;
   const shouldFetchSupplemental =
     includeSupplemental && Number(page || 1) <= Number(state.supplementalLastPage || Number.POSITIVE_INFINITY);
+  const supplementalPerPage = getSupplementalPerPage();
   const [payload, supplementalPayload] = await Promise.all([
     fetchJson(`${API_BASE}/catalog/movies?page=${page}`),
     shouldFetchSupplemental
-      ? fetchJson(`${API_BASE}/catalog/supplemental?page=${page}&perPage=84`, {
+      ? fetchJson(`${API_BASE}/catalog/supplemental?page=${page}&perPage=${supplementalPerPage}`, {
           timeoutMs: SUPPLEMENTAL_CATALOG_TIMEOUT_MS,
           retryDelays: [400, 950],
         }).catch(() => null)
@@ -5927,11 +6025,17 @@ function renderAll() {
         renderHomeInterest();
       }
     }
-    const warmLimit = shouldBoostCoverLoading()
+    const warmBase = shouldBoostCoverLoading()
       ? isCompactViewport()
         ? 900
         : 700
       : 620;
+    const warmScale = getPerfScale();
+    const warmLimit = clampIntRange(
+      Math.round(warmBase * (warmScale >= 1 ? Math.min(1.2, warmScale) : warmScale)),
+      220,
+      1200
+    );
     warmImageCacheFromPool(visible, warmLimit);
   }
 
@@ -7037,11 +7141,16 @@ function renderCatalog(items) {
     CATALOG_RENDER_CHUNK_MIN,
     Math.min(CATALOG_RENDER_CHUNK_MAX, Math.ceil(total / 9))
   );
+  const perfScale = getPerfScale();
+  const scaledBase = Math.max(
+    CATALOG_RENDER_CHUNK_MIN,
+    Math.min(CATALOG_RENDER_CHUNK_MAX, Math.round(baseChunk * perfScale))
+  );
   const chunkSize = renderAllAtOnce
     ? total
     : compact
-      ? Math.max(baseChunk, MOBILE_CATALOG_CHUNK_MIN)
-      : baseChunk;
+      ? Math.max(scaledBase, MOBILE_CATALOG_CHUNK_MIN)
+      : scaledBase;
   const firstPaintCount = Math.min(
     total,
     renderAllAtOnce

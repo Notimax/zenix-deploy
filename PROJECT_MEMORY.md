@@ -431,3 +431,7 @@ Last update: 2026-03-11
 ## c191 follow-up (2026-03-11)
 - Nakios supplemental catalog now deepens pages on demand to surface more titles as users scroll.
 - Added dynamic page expansion up to `NAKIOS_CATALOG_MAX_PAGES_PER_FEED` with a dedupe cushion.
+
+## c192 follow-up (2026-03-11)
+- Adaptive performance tuning uses device/network tiering to scale catalog batch sizes and image budgets.
+- Supplemental catalog per-page size now scales with device performance to show more titles on fast devices.
