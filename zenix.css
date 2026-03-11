@@ -1141,7 +1141,7 @@ body.nav-fit-stack .search-input {
   gap: 12px;
   margin: 8px 0 14px;
   position: relative;
-  z-index: 12;
+  z-index: 28;
 }
 
 .theme-filter-panel {
@@ -1154,7 +1154,7 @@ body.nav-fit-stack .search-input {
   border-radius: 16px;
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
   padding: 14px;
-  z-index: 22;
+  z-index: 30;
   backdrop-filter: blur(14px);
 }
 
@@ -1240,7 +1240,7 @@ body.nav-fit-stack .search-input {
   inset: 0;
   background: rgba(4, 6, 12, 0.45);
   backdrop-filter: blur(1px);
-  z-index: 18;
+  z-index: 20;
 }
 
 @media (max-width: 720px) {

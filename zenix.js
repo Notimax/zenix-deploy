@@ -1099,7 +1099,7 @@ async function init() {
   pruneProgressEntries();
   applyUiPrefs({ syncControls: true });
   if (refs.footerVersion) {
-    refs.footerVersion.textContent = "c189";
+    refs.footerVersion.textContent = "c190";
   }
   updateNetworkBadge();
   startOnlineCountPolling();
