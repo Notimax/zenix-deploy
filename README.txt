@@ -250,6 +250,8 @@ LATEST FIX LOG (2026-03-11)
 - Adblock enforcement is now server-side gated: protected API calls require a short-lived gate token.
 - Direct upstream API calls removed from frontend (proxy only) to reduce exposed provider names in DevTools.
 - Gate bootstrap now retries on first 403 and uses a neutral proof script path to avoid false positives.
+- Nakios-facing labels are now branded as Zenix in API responses and UI (no provider names exposed).
+- Pinned Nakios titles added: Go Karts + Minions (2015, Rise of Gru) for guaranteed catalog presence.
 - Auto-switch now accepts premium fallback candidates on mobile when needed (instead of stopping on free-only dead-end).
 - Bootstrap stall detection now fails fast on true `readyState=0` source stalls so next source can be attempted.
 - Added explicit guard rule: if `Fallback iOS actif...` stays blocked too long, force switch to the next source.

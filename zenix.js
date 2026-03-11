@@ -1108,7 +1108,7 @@ async function init() {
   pruneProgressEntries();
   applyUiPrefs({ syncControls: true });
   if (refs.footerVersion) {
-    refs.footerVersion.textContent = "c195";
+    refs.footerVersion.textContent = "c196";
   }
   updateNetworkBadge();
   startOnlineCountPolling();
@@ -5885,10 +5885,10 @@ function normalizeCatalogItem(raw) {
   const externalProvider = String(raw?.external_provider || raw?.externalProvider || "")
     .trim()
     .toLowerCase();
-  if (externalProvider && externalProvider !== "nakios") {
+  if (externalProvider && externalProvider !== "nakios" && externalProvider !== "zenix") {
     return null;
   }
-  if (externalProvider === "nakios" && isAnime) {
+  if ((externalProvider === "nakios" || externalProvider === "zenix") && isAnime) {
     // Nakios anime rows are intentionally excluded.
     return null;
   }

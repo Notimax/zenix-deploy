@@ -446,3 +446,7 @@ Last update: 2026-03-11
   - adblock overlay removal via DevTools no longer bypasses playback/API access.
 - Removed direct upstream API calls from the frontend (proxy-only) to reduce exposed provider names.
 - Gate bootstrap now retries on first 403 and uses a neutral proof script path to reduce false positives.
+
+## c196 follow-up (2026-03-11)
+- Branded Nakios-facing labels as Zenix in API responses/UI (no provider names exposed in payload labels).
+- Added pinned Nakios titles to supplemental catalog: Go Karts + Minions (2015, Rise of Gru).

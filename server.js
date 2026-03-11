@@ -201,6 +201,8 @@ const DISCORD_CREATE_BACKOFF_MS = Math.max(
   30000,
   Number(process.env.DISCORD_CREATE_BACKOFF_MS || 3 * 60 * 1000)
 );
+const ZENIX_BRAND_LABEL = "Zenix";
+const ZENIX_EXTERNAL_PROVIDER = "zenix";
 const GATE_COOKIE_NAME = "zenix_gate";
 const GATE_CHALLENGE_TTL_MS = Math.max(15000, Number(process.env.GATE_CHALLENGE_TTL_MS || 90 * 1000));
 const GATE_TOKEN_TTL_MS = Math.max(2 * 60 * 1000, Number(process.env.GATE_TOKEN_TTL_MS || 20 * 60 * 1000));
@@ -209,6 +211,16 @@ const GATE_SECRET =
   String(process.env.ZENIX_GATE_SECRET || "").trim() || crypto.randomBytes(32).toString("hex");
 const GATE_ADSCRIPT_PATH = "/_gate/zenix-proof.js";
 const gateChallenges = new Map();
+const NAKIOS_PINNED_TITLES = [
+  { title: "Go Karts", mediaType: "movie", year: 2019 },
+  { title: "Minions", mediaType: "movie", year: 2015 },
+  { title: "Minions: The Rise of Gru", mediaType: "movie", year: 2022 },
+];
+const NAKIOS_PINNED_CACHE_MS = Math.max(
+  15 * 60 * 1000,
+  Number(process.env.NAKIOS_PINNED_CACHE_MS || 45 * 60 * 1000)
+);
+const nakiosPinnedCache = { entries: [], loadedAt: 0, inFlight: null };
 const FORWARD_CLIENT_IP_TO_UPSTREAM =
   String(process.env.FORWARD_CLIENT_IP_TO_UPSTREAM || "").trim() === "1";
 const ANALYTICS_RETENTION_MS = 24 * 60 * 60 * 1000;
@@ -5348,15 +5360,15 @@ function buildNakiosCatalogRow(entry, mediaType, fallbackIdSet) {
     small_poster_path: poster,
     large_poster_path: poster,
     wallpaper_poster_path: backdrop || poster,
-    external_provider: "nakios",
+    external_provider: ZENIX_EXTERNAL_PROVIDER,
     external_key: rawKey,
     external_tmdb_id: tmdbId,
     external_year: year,
     external_season: 0,
     external_episode: 0,
     external_language: "VF",
-    external_detail_url: `${NAKIOS_BASE}/catalogue?q=${encodeURIComponent(title)}`,
-    external_label: "NAKIOS",
+    external_detail_url: "",
+    external_label: ZENIX_BRAND_LABEL,
     external_status: availabilityStatus,
     availability_status: availabilityStatus,
     is_pending_upload: availabilityStatus === "pending",
@@ -5499,7 +5511,8 @@ async function loadNakiosCatalogEntries(force = false, options = {}) {
       });
     });
 
-    nakiosCatalogCache.entries = rows;
+    const pinned = await fetchNakiosPinnedEntries(rows);
+    nakiosCatalogCache.entries = rows.concat(pinned);
     nakiosCatalogCache.loadedAt = Date.now();
     nakiosCatalogCache.pagesPerFeed = targetPages;
     return nakiosCatalogCache.entries;
@@ -5511,6 +5524,78 @@ async function loadNakiosCatalogEntries(force = false, options = {}) {
   } finally {
     nakiosCatalogCache.inFlight = null;
   }
+}
+
+async function fetchNakiosPinnedEntries(existingRows) {
+  const now = Date.now();
+  if (
+    !Array.isArray(NAKIOS_PINNED_TITLES) ||
+    NAKIOS_PINNED_TITLES.length === 0
+  ) {
+    return [];
+  }
+  if (!existingRows) {
+    existingRows = [];
+  }
+  if (nakiosPinnedCache.inFlight) {
+    return nakiosPinnedCache.inFlight;
+  }
+  if (nakiosPinnedCache.loadedAt && now - nakiosPinnedCache.loadedAt < NAKIOS_PINNED_CACHE_MS) {
+    return nakiosPinnedCache.entries || [];
+  }
+
+  const task = (async () => {
+    const fallbackIds = new Set(existingRows.map((row) => Number(row?.id || 0)).filter((id) => id > 0));
+    const existingKeys = new Set(existingRows.map((row) => buildNakiosSemanticKey(row)).filter(Boolean));
+    const existingTmdb = new Set(
+      existingRows.map((row) => Number(row?.external_tmdb_id || 0)).filter((id) => id > 0)
+    );
+    const results = [];
+
+    for (const pin of NAKIOS_PINNED_TITLES) {
+      const title = String(pin?.title || "").trim();
+      if (!title) {
+        continue;
+      }
+      const mediaType = String(pin?.mediaType || "movie").toLowerCase() === "tv" ? "tv" : "movie";
+      const year = toInt(pin?.year, 0, 0, 2099);
+      try {
+        const entry = await resolveNakiosSearchEntry(title, mediaType, year);
+        if (!entry) {
+          continue;
+        }
+        const tmdbId = toInt(entry?.id, 0, 0, 999999999);
+        if (tmdbId > 0 && existingTmdb.has(tmdbId)) {
+          continue;
+        }
+        const row = buildNakiosCatalogRow(entry, mediaType, fallbackIds);
+        if (!row) {
+          continue;
+        }
+        const key = buildNakiosSemanticKey(row);
+        if (key && existingKeys.has(key)) {
+          continue;
+        }
+        if (key) {
+          existingKeys.add(key);
+        }
+        if (tmdbId > 0) {
+          existingTmdb.add(tmdbId);
+        }
+        results.push(row);
+      } catch {
+        // best effort only
+      }
+    }
+
+    nakiosPinnedCache.entries = results;
+    nakiosPinnedCache.loadedAt = Date.now();
+    nakiosPinnedCache.inFlight = null;
+    return results;
+  })();
+
+  nakiosPinnedCache.inFlight = task;
+  return task;
 }
 
 async function resolveNakiosTmdbIdBySearch(title, mediaType, year = 0) {
@@ -5589,6 +5674,68 @@ async function resolveNakiosTmdbIdBySearch(title, mediaType, year = 0) {
   return tmdbId;
 }
 
+function scoreNakiosSearchEntry(entry, queryTitleKey, normalizedType, safeYear) {
+  if (!entry) {
+    return -Infinity;
+  }
+  const rowTitle = String(entry?.title || entry?.name || "").trim();
+  const rowTitleKey = normalizeTitleKey(rowTitle);
+  const rowYearRaw =
+    normalizedType === "tv"
+      ? String(entry?.first_air_date || "").trim()
+      : String(entry?.release_date || "").trim();
+  const rowYear = toInt(parseYearFromText(rowYearRaw), 0, 0, 2099);
+  let score = 0;
+  if (rowTitleKey === queryTitleKey) {
+    score += 140;
+  } else if (rowTitleKey.includes(queryTitleKey) || queryTitleKey.includes(rowTitleKey)) {
+    score += 80;
+  } else if (rowTitleKey && queryTitleKey && rowTitleKey[0] === queryTitleKey[0]) {
+    score += 35;
+  }
+  if (safeYear > 0 && rowYear > 0) {
+    score += rowYear === safeYear ? 60 : Math.max(0, 45 - Math.abs(rowYear - safeYear) * 4);
+  }
+  if (entry?.poster_path) {
+    score += 15;
+  }
+  return score;
+}
+
+async function resolveNakiosSearchEntry(title, mediaType, year = 0) {
+  const safeTitle = String(title || "").trim();
+  if (safeTitle.length < 2) {
+    return null;
+  }
+  const normalizedType = String(mediaType || "").toLowerCase() === "tv" ? "tv" : "movie";
+  const safeYear = toInt(year, 0, 0, 2099);
+  const queryTitleKey = normalizeTitleKey(safeTitle);
+  const target = `${NAKIOS_API_BASE}/api/search/multi?query=${encodeURIComponent(safeTitle)}`;
+  const response = await fetchRemote(target, NAKIOS_FETCH_HEADERS);
+  if (response.status < 200 || response.status >= 300) {
+    return null;
+  }
+  const payload = parseJsonSafe(response.body);
+  const rows = Array.isArray(payload?.results) ? payload.results : [];
+  const filtered = rows.filter((entry) => {
+    const type = String(entry?.media_type || "").toLowerCase();
+    return type === normalizedType;
+  });
+  if (filtered.length === 0) {
+    return null;
+  }
+  let best = null;
+  let bestScore = -Infinity;
+  filtered.forEach((entry) => {
+    const score = scoreNakiosSearchEntry(entry, queryTitleKey, normalizedType, safeYear);
+    if (score > bestScore) {
+      bestScore = score;
+      best = entry;
+    }
+  });
+  return best;
+}
+
 function normalizeNakiosSourceUrl(rawUrl) {
   const value = String(rawUrl || "").trim();
   if (!value) {
@@ -5653,13 +5800,11 @@ async function resolveNakiosSourcesByTmdbId(mediaType, tmdbId, season = 1, episo
     }
     dedupe.add(streamUrl);
     const language = normalizePidoovLanguage(sourceRow?.lang || sourceRow?.language || sourceRow?.name || "") || "VF";
-    const sourceName = sanitizeToken(
-      String(sourceRow?.name || sourceRow?.provider || sourceRow?.original_player || "NAKIOS").trim(),
-      80
-    );
+    const rawName = String(sourceRow?.name || sourceRow?.provider || sourceRow?.original_player || "").trim();
+    const brandedName = /premium/i.test(rawName) ? `${ZENIX_BRAND_LABEL} Premium` : ZENIX_BRAND_LABEL;
     out.push({
       stream_url: streamUrl,
-      source_name: sourceName || "NAKIOS",
+      source_name: brandedName,
       quality: sanitizeToken(String(sourceRow?.quality || "HD"), 24) || "HD",
       language,
       format: guessNakiosSourceFormat(sourceRow, streamUrl),
@@ -8501,7 +8646,7 @@ async function handleNakiosSource(req, res, requestUrl) {
 
   if (tmdbId <= 0) {
     sendJson(res, 200, {
-      apiVersion: "zenix-nakios-source-v1",
+      apiVersion: "zenix-source-v1",
       type: "success",
       data: {
         title,
@@ -8520,7 +8665,7 @@ async function handleNakiosSource(req, res, requestUrl) {
   try {
     const sources = await resolveNakiosSourcesByTmdbId(mediaType, tmdbId, season, episode);
     sendJson(res, 200, {
-      apiVersion: "zenix-nakios-source-v1",
+      apiVersion: "zenix-source-v1",
       type: "success",
       data: {
         title,
