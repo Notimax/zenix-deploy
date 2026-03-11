@@ -439,3 +439,9 @@ Last update: 2026-03-11
 ## c193 follow-up (2026-03-11)
 - Added preconnect to ad host and early native banner warmup for faster sponsor rendering.
 - Sponsor slot shows a lightweight loading placeholder that fades when the iframe initializes.
+
+## c194 follow-up (2026-03-11)
+- Added a server-side adblock gate token flow (challenge + proof + short-lived cookie).
+  - protected `/api/*` calls now require a valid gate token.
+  - adblock overlay removal via DevTools no longer bypasses playback/API access.
+- Removed direct upstream API calls from the frontend (proxy-only) to reduce exposed provider names.

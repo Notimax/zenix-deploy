@@ -201,6 +201,14 @@ const DISCORD_CREATE_BACKOFF_MS = Math.max(
   30000,
   Number(process.env.DISCORD_CREATE_BACKOFF_MS || 3 * 60 * 1000)
 );
+const GATE_COOKIE_NAME = "zenix_gate";
+const GATE_CHALLENGE_TTL_MS = Math.max(15000, Number(process.env.GATE_CHALLENGE_TTL_MS || 90 * 1000));
+const GATE_TOKEN_TTL_MS = Math.max(2 * 60 * 1000, Number(process.env.GATE_TOKEN_TTL_MS || 20 * 60 * 1000));
+const GATE_CHALLENGE_MAX = Math.max(50, toInt(process.env.GATE_CHALLENGE_MAX, 420, 50, 1200));
+const GATE_SECRET =
+  String(process.env.ZENIX_GATE_SECRET || "").trim() || crypto.randomBytes(32).toString("hex");
+const GATE_ADSCRIPT_PATH = "/ads/zenix-ads.js";
+const gateChallenges = new Map();
 const FORWARD_CLIENT_IP_TO_UPSTREAM =
   String(process.env.FORWARD_CLIENT_IP_TO_UPSTREAM || "").trim() === "1";
 const ANALYTICS_RETENTION_MS = 24 * 60 * 60 * 1000;
@@ -1061,6 +1069,150 @@ function readJsonBody(req, maxBytes = 8192) {
     });
     req.on("error", (error) => reject(error));
   });
+}
+
+function toBase64Url(input) {
+  return Buffer.from(input)
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
+}
+
+function fromBase64Url(input) {
+  const normalized = String(input || "").replace(/-/g, "+").replace(/_/g, "/");
+  const padLength = normalized.length % 4 ? 4 - (normalized.length % 4) : 0;
+  const padded = normalized + "=".repeat(padLength);
+  return Buffer.from(padded, "base64").toString("utf8");
+}
+
+function safeTimingEqual(left, right) {
+  const leftBuf = Buffer.from(String(left || ""));
+  const rightBuf = Buffer.from(String(right || ""));
+  if (leftBuf.length !== rightBuf.length) {
+    return false;
+  }
+  return crypto.timingSafeEqual(leftBuf, rightBuf);
+}
+
+function parseCookies(req) {
+  const header = String(req.headers.cookie || "");
+  if (!header) {
+    return {};
+  }
+  return header.split(";").reduce((acc, part) => {
+    const trimmed = part.trim();
+    if (!trimmed) {
+      return acc;
+    }
+    const eqIndex = trimmed.indexOf("=");
+    if (eqIndex <= 0) {
+      return acc;
+    }
+    const key = trimmed.slice(0, eqIndex).trim();
+    const value = trimmed.slice(eqIndex + 1).trim();
+    if (!key) {
+      return acc;
+    }
+    acc[key] = decodeURIComponent(value);
+    return acc;
+  }, {});
+}
+
+function hashSha256(value) {
+  return crypto.createHash("sha256").update(String(value || "")).digest("hex");
+}
+
+function buildGateFingerprint(req) {
+  const ip = getRemoteAddress(req);
+  const ua = String(req.headers["user-agent"] || "").slice(0, 180);
+  return hashSha256(`${ip}|${ua}`).slice(0, 48);
+}
+
+function pruneGateChallenges(now = Date.now()) {
+  for (const [nonce, entry] of gateChallenges.entries()) {
+    if (!entry || Number(entry.expiresAt || 0) <= now) {
+      gateChallenges.delete(nonce);
+    }
+  }
+  if (gateChallenges.size > GATE_CHALLENGE_MAX) {
+    const overflow = gateChallenges.size - GATE_CHALLENGE_MAX;
+    let removed = 0;
+    for (const nonce of gateChallenges.keys()) {
+      gateChallenges.delete(nonce);
+      removed += 1;
+      if (removed >= overflow) {
+        break;
+      }
+    }
+  }
+}
+
+function buildGateProof(nonce, fingerprint) {
+  return toBase64Url(
+    crypto.createHmac("sha256", GATE_SECRET).update(`proof:${nonce}:${fingerprint}`).digest()
+  );
+}
+
+function buildGateToken(fingerprint, ttlMs) {
+  const payload = {
+    fp: fingerprint,
+    iat: Date.now(),
+    exp: Date.now() + ttlMs,
+  };
+  const body = toBase64Url(JSON.stringify(payload));
+  const signature = toBase64Url(crypto.createHmac("sha256", GATE_SECRET).update(body).digest());
+  return `${body}.${signature}`;
+}
+
+function verifyGateToken(token, req) {
+  const raw = String(token || "");
+  const [body, signature] = raw.split(".");
+  if (!body || !signature) {
+    return null;
+  }
+  const expected = toBase64Url(crypto.createHmac("sha256", GATE_SECRET).update(body).digest());
+  if (!safeTimingEqual(signature, expected)) {
+    return null;
+  }
+  let payload;
+  try {
+    payload = JSON.parse(fromBase64Url(body));
+  } catch {
+    return null;
+  }
+  if (!payload || Number(payload.exp || 0) <= Date.now()) {
+    return null;
+  }
+  const fingerprint = buildGateFingerprint(req);
+  if (payload.fp && payload.fp !== fingerprint) {
+    return null;
+  }
+  return payload;
+}
+
+function shouldUseSecureCookies() {
+  return CANONICAL_SCHEME === "https";
+}
+
+function setGateCookie(res, token, ttlMs) {
+  const maxAge = Math.max(60, Math.floor(ttlMs / 1000));
+  const parts = [
+    `${GATE_COOKIE_NAME}=${encodeURIComponent(token)}`,
+    "Path=/",
+    `Max-Age=${maxAge}`,
+    "HttpOnly",
+    "SameSite=Lax",
+  ];
+  if (shouldUseSecureCookies()) {
+    parts.push("Secure");
+  }
+  res.setHeader("Set-Cookie", parts.join("; "));
+}
+
+function getGateCookie(req) {
+  const cookies = parseCookies(req);
+  return cookies[GATE_COOKIE_NAME] || "";
 }
 
 function pruneAnalytics(now = Date.now()) {
@@ -5947,6 +6099,9 @@ function getProxyTTL(pathname) {
   if (/^\/catalog\/movies$/i.test(pathname)) {
     return 60 * 1000;
   }
+  if (/^\/calendar\//i.test(pathname)) {
+    return 90 * 1000;
+  }
   if (/^\/search-bar\//i.test(pathname)) {
     return 45 * 1000;
   }
@@ -5959,6 +6114,7 @@ function getProxyTTL(pathname) {
 function isAllowedProxyPath(pathname) {
   return (
     /^\/catalog\//i.test(pathname) ||
+    /^\/calendar\//i.test(pathname) ||
     /^\/search-bar\//i.test(pathname) ||
     /^\/media\//i.test(pathname) ||
     /^\/stream\//i.test(pathname)
@@ -7448,6 +7604,139 @@ async function fetchHlsUpstreamWithFallback(target, range, signal, method = "GET
   return lastResponse;
 }
 
+function sendGateDenied(res) {
+  res.writeHead(403, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Cache-Control": "no-store",
+    "X-Zenix-Gate": "required",
+  });
+  res.end(JSON.stringify({ error: "adblock_required" }));
+}
+
+function isGateProtectedPath(pathname) {
+  if (!pathname.startsWith("/api/")) {
+    return false;
+  }
+  if (/^\/api\/analytics\//i.test(pathname)) {
+    return false;
+  }
+  if (pathname === "/api/suggestions") {
+    return false;
+  }
+  if (/^\/api\/gate\//i.test(pathname)) {
+    return false;
+  }
+  return true;
+}
+
+async function handleGateGuard(req, res, requestUrl) {
+  if (!isGateProtectedPath(requestUrl.pathname)) {
+    return false;
+  }
+  if (String(req.method || "").toUpperCase() === "OPTIONS") {
+    return false;
+  }
+  const token = getGateCookie(req);
+  if (token && verifyGateToken(token, req)) {
+    return false;
+  }
+  sendGateDenied(res);
+  return true;
+}
+
+async function handleGateChallenge(req, res, requestUrl) {
+  if (requestUrl.pathname !== "/api/gate/challenge") {
+    return false;
+  }
+  if (req.method !== "GET") {
+    sendJson(res, 405, { error: "Method Not Allowed" });
+    return true;
+  }
+  pruneGateChallenges();
+  const nonce = crypto.randomBytes(16).toString("hex");
+  const fingerprint = buildGateFingerprint(req);
+  gateChallenges.set(nonce, { fingerprint, expiresAt: Date.now() + GATE_CHALLENGE_TTL_MS });
+  sendJson(res, 200, {
+    nonce,
+    script: `${GATE_ADSCRIPT_PATH}?nonce=${encodeURIComponent(nonce)}`,
+    expiresInMs: GATE_CHALLENGE_TTL_MS,
+  });
+  return true;
+}
+
+async function handleGateIssue(req, res, requestUrl) {
+  if (requestUrl.pathname !== "/api/gate/issue") {
+    return false;
+  }
+  if (req.method !== "POST") {
+    sendJson(res, 405, { error: "Method Not Allowed" });
+    return true;
+  }
+  pruneGateChallenges();
+  let payload;
+  try {
+    payload = await readJsonBody(req, 4096);
+  } catch {
+    sendJson(res, 400, { error: "Invalid request body" });
+    return true;
+  }
+  const nonce = sanitizeToken(payload?.nonce, 120);
+  const proof = sanitizeToken(payload?.proof, 256);
+  const entry = gateChallenges.get(nonce);
+  if (!entry || Number(entry.expiresAt || 0) <= Date.now()) {
+    sendGateDenied(res);
+    return true;
+  }
+  const fingerprint = buildGateFingerprint(req);
+  if (entry.fingerprint !== fingerprint) {
+    sendGateDenied(res);
+    return true;
+  }
+  const expected = buildGateProof(nonce, entry.fingerprint);
+  if (!safeTimingEqual(expected, proof)) {
+    sendGateDenied(res);
+    return true;
+  }
+  gateChallenges.delete(nonce);
+  const token = buildGateToken(entry.fingerprint, GATE_TOKEN_TTL_MS);
+  setGateCookie(res, token, GATE_TOKEN_TTL_MS);
+  sendJson(res, 200, { ok: true, expiresInMs: GATE_TOKEN_TTL_MS });
+  return true;
+}
+
+async function handleGateScript(req, res, requestUrl) {
+  if (requestUrl.pathname !== GATE_ADSCRIPT_PATH) {
+    return false;
+  }
+  if (req.method !== "GET") {
+    sendJson(res, 405, { error: "Method Not Allowed" });
+    return true;
+  }
+  const nonce = sanitizeToken(requestUrl.searchParams.get("nonce"), 120);
+  const entry = gateChallenges.get(nonce);
+  if (!entry || Number(entry.expiresAt || 0) <= Date.now()) {
+    res.writeHead(404, {
+      "Content-Type": "text/plain; charset=utf-8",
+      "Cache-Control": "no-store",
+      "X-Content-Type-Options": "nosniff",
+    });
+    res.end("Not Found");
+    return true;
+  }
+  const proof = buildGateProof(nonce, entry.fingerprint);
+  res.writeHead(200, {
+    "Content-Type": "application/javascript; charset=utf-8",
+    "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+    "X-Content-Type-Options": "nosniff",
+  });
+  res.end(
+    `window.__zenixAdNonce=${JSON.stringify(nonce)};window.__zenixAdProof=${JSON.stringify(
+      proof
+    )};`
+  );
+  return true;
+}
+
 async function handleHlsProxy(req, res, requestUrl) {
   if (requestUrl.pathname !== "/api/hls-proxy") {
     return false;
@@ -8610,7 +8899,31 @@ const server = http.createServer((req, res) => {
   }
   let pathname = requestUrl.pathname;
 
-  handleAnalyticsHeartbeat(req, res, requestUrl)
+  handleGateChallenge(req, res, requestUrl)
+    .then((handledGateChallenge) => {
+      if (handledGateChallenge) {
+        return true;
+      }
+      return handleGateIssue(req, res, requestUrl);
+    })
+    .then((handledGateIssue) => {
+      if (handledGateIssue) {
+        return true;
+      }
+      return handleGateScript(req, res, requestUrl);
+    })
+    .then((handledGateScript) => {
+      if (handledGateScript) {
+        return true;
+      }
+      return handleGateGuard(req, res, requestUrl);
+    })
+    .then((handledGateGuard) => {
+      if (handledGateGuard) {
+        return true;
+      }
+      return handleAnalyticsHeartbeat(req, res, requestUrl);
+    })
     .then((handledAnalytics) => {
       if (handledAnalytics) {
         return true;

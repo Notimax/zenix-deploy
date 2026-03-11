@@ -1,5 +1,4 @@
 const API_BASE = "/api";
-const STREAM_API_BASE = "https://api.purstream.co/api/v1";
 const STORAGE_KEY = "zenix-progress-v4";
 const FAVORITES_KEY = "zenix-favorites-v1";
 const FAVORITES_BACKUP_KEY = "zenix-favorites-backup-v1";
@@ -160,6 +159,10 @@ const NATIVE_AD_FRAME_CLASS = "native-banner-frame";
 const NATIVE_AD_FRAME_SANDBOX = "allow-scripts allow-same-origin";
 const ADBLOCK_MONITOR_INTERVAL_MS = 8500;
 const ADBLOCK_BOOT_DELAY_MS = 950;
+const GATE_CHALLENGE_PATH = "/api/gate/challenge";
+const GATE_ISSUE_PATH = "/api/gate/issue";
+const GATE_PROOF_TIMEOUT_MS = 1900;
+const GATE_REFRESH_COOLDOWN_MS = 6 * 60 * 1000;
 const UI_THEME_ORDER = ["cine", "minimal", "neon"];
 const runtimeEnv = detectRuntimeEnvironment();
 
@@ -365,6 +368,9 @@ const state = {
   adblockDetected: false,
   adblockCheckTimer: 0,
   adblockProbeInFlight: false,
+  gateReady: false,
+  gateIssueInFlight: false,
+  gateLastIssuedAt: 0,
   themeFilters: {
     movie: new Set(),
     tv: new Set(),
@@ -1102,7 +1108,7 @@ async function init() {
   pruneProgressEntries();
   applyUiPrefs({ syncControls: true });
   if (refs.footerVersion) {
-    refs.footerVersion.textContent = "c193";
+    refs.footerVersion.textContent = "c194";
   }
   updateNetworkBadge();
   startOnlineCountPolling();
@@ -3266,6 +3272,9 @@ function applyAdblockDetectionState(blocked, options = {}) {
   if (wasBlocked && options.manual === true) {
     showToast("Merci. Acces restaure.");
   }
+  refreshGateToken({ manual: options.manual === true }).catch(() => {
+    // best effort only
+  });
   maybeShowDiscordGate({ delayMs: 240 });
 }
 
@@ -3311,6 +3320,114 @@ function initAdblockGuard() {
       // best effort only
     });
   }, ADBLOCK_MONITOR_INTERVAL_MS);
+}
+
+function loadGateProofScript(scriptUrl, nonce) {
+  return new Promise((resolve) => {
+    if (!scriptUrl || !nonce || !document.head) {
+      resolve(null);
+      return;
+    }
+    const script = document.createElement("script");
+    const cleanup = () => {
+      script.onload = null;
+      script.onerror = null;
+      if (script.parentNode) {
+        script.parentNode.removeChild(script);
+      }
+    };
+    const timer = window.setTimeout(() => {
+      cleanup();
+      resolve(null);
+    }, GATE_PROOF_TIMEOUT_MS);
+    script.async = true;
+    script.src = scriptUrl;
+    script.onload = () => {
+      clearTimeout(timer);
+      const proof =
+        window.__zenixAdNonce === nonce && typeof window.__zenixAdProof === "string"
+          ? window.__zenixAdProof
+          : null;
+      try {
+        delete window.__zenixAdNonce;
+        delete window.__zenixAdProof;
+      } catch {
+        // ignore cleanup errors
+      }
+      cleanup();
+      resolve(proof);
+    };
+    script.onerror = () => {
+      clearTimeout(timer);
+      cleanup();
+      resolve(null);
+    };
+    document.head.appendChild(script);
+  });
+}
+
+async function refreshGateToken(options = {}) {
+  if (state.adblockDetected) {
+    return false;
+  }
+  const force = Boolean(options.force);
+  const now = Date.now();
+  if (!force && state.gateLastIssuedAt && now - state.gateLastIssuedAt < GATE_REFRESH_COOLDOWN_MS) {
+    return state.gateReady;
+  }
+  if (state.gateIssueInFlight) {
+    return state.gateReady;
+  }
+  state.gateIssueInFlight = true;
+  try {
+    const challenge = await fetchJson(GATE_CHALLENGE_PATH, {
+      timeoutMs: 4500,
+      retryDelays: [],
+      noCache: true,
+    });
+    const nonce = String(challenge?.nonce || "");
+    const scriptUrl = String(challenge?.script || "");
+    if (!nonce || !scriptUrl) {
+      throw new Error("Gate challenge invalide");
+    }
+    const proof = await loadGateProofScript(scriptUrl, nonce);
+    if (!proof) {
+      applyAdblockDetectionState(true, { manual: Boolean(options.manual) });
+      setAdblockGateStatus(
+        "Bloqueur de pub detecte. Desactive-le puis clique sur 'Verifier de nouveau'.",
+        false
+      );
+      return false;
+    }
+    const response = await fetch(GATE_ISSUE_PATH, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        "Content-Type": "application/json; charset=utf-8",
+      },
+      body: JSON.stringify({ nonce, proof }),
+    });
+    if (!response.ok) {
+      if (response.status === 403) {
+        applyAdblockDetectionState(true, { manual: Boolean(options.manual) });
+        setAdblockGateStatus(
+          "Bloqueur de pub detecte. Desactive-le puis clique sur 'Verifier de nouveau'.",
+          false
+        );
+      }
+      return false;
+    }
+    state.gateReady = true;
+    state.gateLastIssuedAt = Date.now();
+    return true;
+  } catch (error) {
+    if (options.manual) {
+      setAdblockGateStatus("Verification pub impossible pour le moment. Reessaie.", true);
+    }
+    return false;
+  } finally {
+    state.gateIssueInFlight = false;
+  }
 }
 
 function isCompactViewport() {
@@ -4048,7 +4165,7 @@ async function ensureCalendarData(force = false) {
 
     try {
       const direct = await fetchJson(
-        `${STREAM_API_BASE}/calendar/${state.calendarMonth}/${state.calendarYear}/days`,
+        `${API_BASE}/calendar/${state.calendarMonth}/${state.calendarYear}/days`,
         {
           force,
           timeoutMs: 4800,
@@ -4189,10 +4306,6 @@ function buildCalendarFallbackFromDirect(payload, month, year) {
       count: 0,
       days: [],
       items: [],
-    },
-    sourceLinks: {
-      purstream: "https://purstream.co/calendar",
-      animeSama: "https://anime-sama.tv/planning/",
     },
     providerStatus: {
       catalog: merged.length > 0,
@@ -15278,29 +15391,17 @@ async function fetchStreamJson(path, options = {}) {
     return state.streamInFlight.get(safePath);
   }
 
-  const directUrl = `${STREAM_API_BASE}${safePath}`;
   const proxyUrl = `${API_BASE}${safePath}`;
   const proxyOptions = {
     ...requestOptions,
     timeoutMs: prefetch ? STREAM_PROXY_PREFETCH_TIMEOUT_MS : STREAM_PROXY_TIMEOUT_MS,
     retryDelays: [],
   };
-  const directOptions = {
-    ...requestOptions,
-    timeoutMs: prefetch ? STREAM_DIRECT_PREFETCH_TIMEOUT_MS : STREAM_DIRECT_TIMEOUT_MS,
-    retryDelays: [],
-  };
 
   const task = (async () => {
-    try {
-      const direct = await fetchJson(directUrl, directOptions);
-      writeStreamPayloadCache(safePath, direct);
-      return direct;
-    } catch {
-      const proxy = await fetchJson(proxyUrl, proxyOptions);
-      writeStreamPayloadCache(safePath, proxy);
-      return proxy;
-    }
+    const proxy = await fetchJson(proxyUrl, proxyOptions);
+    writeStreamPayloadCache(safePath, proxy);
+    return proxy;
   })();
 
   if (!force) {
@@ -15316,12 +15417,23 @@ async function fetchStreamJson(path, options = {}) {
   }
 }
 
+function isSameOriginUrl(url) {
+  try {
+    const parsed = new URL(String(url || ""), window.location.origin);
+    return parsed.origin === window.location.origin;
+  } catch {
+    return false;
+  }
+}
+
 async function fetchJson(url, options = {}) {
   const force = Boolean(options.force);
+  const skipCache = Boolean(options.noCache || options.skipCache);
   const signal = options.signal;
   const retryDelays = Array.isArray(options.retryDelays) ? options.retryDelays : RETRY_DELAYS_MS;
   const timeoutMs = Number(options.timeoutMs || 0) > 0 ? Number(options.timeoutMs) : REQUEST_TIMEOUT_MS;
-  const canCache = isCacheableApiUrl(url);
+  const method = String(options.method || "GET").toUpperCase();
+  const canCache = isCacheableApiUrl(url) && method === "GET" && !skipCache;
   if (canCache && !force) {
     const cached = readApiCache(url);
     if (cached) {
@@ -15344,16 +15456,26 @@ async function fetchJson(url, options = {}) {
 
     try {
       const response = await fetch(url, {
-        method: "GET",
+        method,
         mode: "cors",
-        credentials: "omit",
+        credentials: options.credentials || (isSameOriginUrl(url) ? "same-origin" : "omit"),
         signal: controller.signal,
         headers: {
           Accept: "application/json",
+          ...(options.headers || {}),
         },
+        ...(options.cache ? { cache: options.cache } : {}),
+        ...(method !== "GET" && options.body !== undefined ? { body: options.body } : {}),
       });
 
       if (!response.ok) {
+        if (response.status === 403 && response.headers.get("x-zenix-gate") === "required") {
+          applyAdblockDetectionState(true, { manual: false });
+          setAdblockGateStatus(
+            "Bloqueur de pub detecte. Desactive-le puis clique sur 'Verifier de nouveau'.",
+            false
+          );
+        }
         const retryable = RETRYABLE_STATUS.has(response.status);
         if (retryable && attempt < retryDelays.length) {
           await wait(retryDelays[attempt]);

@@ -247,6 +247,8 @@ LATEST FIX LOG (2026-03-11)
 - Nakios supplemental catalog now deepens pages on demand to surface more titles.
 - Added adaptive performance tuning (device/network) for catalog batches, image budgets, and supplemental page size.
 - Ads now preconnect to the ad host and warm the native banner earlier; sponsor slot shows a fast-loading placeholder.
+- Adblock enforcement is now server-side gated: protected API calls require a short-lived gate token.
+- Direct upstream API calls removed from frontend (proxy only) to reduce exposed provider names in DevTools.
 - Auto-switch now accepts premium fallback candidates on mobile when needed (instead of stopping on free-only dead-end).
 - Bootstrap stall detection now fails fast on true `readyState=0` source stalls so next source can be attempted.
 - Added explicit guard rule: if `Fallback iOS actif...` stays blocked too long, force switch to the next source.
