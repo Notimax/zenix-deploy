@@ -427,3 +427,7 @@ Last update: 2026-03-11
 
 ## c190 follow-up (2026-03-11)
 - Theme filter panel stacking fixed so the backdrop no longer blocks checkbox clicks.
+
+## c191 follow-up (2026-03-11)
+- Nakios supplemental catalog now deepens pages on demand to surface more titles as users scroll.
+- Added dynamic page expansion up to `NAKIOS_CATALOG_MAX_PAGES_PER_FEED` with a dedupe cushion.

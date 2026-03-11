@@ -21,7 +21,15 @@ const DEFAULT_BROWSER_UA =
 const DEFAULT_ACCEPT_LANGUAGE = "fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7";
 const NAKIOS_CATALOG_PAGES_PER_FEED = Math.max(
   1,
-  toInt(process.env.NAKIOS_CATALOG_PAGES_PER_FEED, 3, 1, 6)
+  toInt(process.env.NAKIOS_CATALOG_PAGES_PER_FEED, 3, 1, 12)
+);
+const NAKIOS_CATALOG_MAX_PAGES_PER_FEED = Math.max(
+  NAKIOS_CATALOG_PAGES_PER_FEED,
+  toInt(process.env.NAKIOS_CATALOG_MAX_PAGES_PER_FEED, 12, 3, 30)
+);
+const NAKIOS_FEED_PAGE_SIZE_ESTIMATE = Math.max(
+  10,
+  toInt(process.env.NAKIOS_FEED_PAGE_SIZE_ESTIMATE, 20, 10, 50)
 );
 const NAKIOS_LOOKUP_CACHE_MS = Math.max(
   60 * 1000,
@@ -308,6 +316,7 @@ const nakiosCatalogCache = {
   loadedAt: 0,
   entries: [],
   inFlight: null,
+  pagesPerFeed: 0,
 };
 const nakiosAvailabilityCache = new Map();
 const nakiosAvailabilityInFlight = new Map();
@@ -5266,14 +5275,20 @@ async function fetchNakiosFeedPage(feed, page) {
   return rows.map((entry) => ({ mediaType, entry }));
 }
 
-async function loadNakiosCatalogEntries(force = false) {
+async function loadNakiosCatalogEntries(force = false, options = {}) {
   const now = Date.now();
+  const minPages = Math.max(1, toInt(options?.minPages, 0, 1, NAKIOS_CATALOG_MAX_PAGES_PER_FEED));
+  const targetPages = Math.min(
+    NAKIOS_CATALOG_MAX_PAGES_PER_FEED,
+    Math.max(NAKIOS_CATALOG_PAGES_PER_FEED, minPages)
+  );
   if (
     !force &&
     nakiosCatalogCache.loadedAt > 0 &&
     now - nakiosCatalogCache.loadedAt < SUPPLEMENTAL_CATALOG_CACHE_MS &&
     Array.isArray(nakiosCatalogCache.entries) &&
-    nakiosCatalogCache.entries.length > 0
+    nakiosCatalogCache.entries.length > 0 &&
+    Number(nakiosCatalogCache.pagesPerFeed || 0) >= targetPages
   ) {
     return nakiosCatalogCache.entries;
   }
@@ -5284,7 +5299,7 @@ async function loadNakiosCatalogEntries(force = false) {
   const task = (async () => {
     const jobs = [];
     NAKIOS_CATALOG_FEEDS.forEach((feed) => {
-      for (let page = 1; page <= NAKIOS_CATALOG_PAGES_PER_FEED; page += 1) {
+      for (let page = 1; page <= targetPages; page += 1) {
         jobs.push({ feed, page });
       }
     });
@@ -5334,6 +5349,7 @@ async function loadNakiosCatalogEntries(force = false) {
 
     nakiosCatalogCache.entries = rows;
     nakiosCatalogCache.loadedAt = Date.now();
+    nakiosCatalogCache.pagesPerFeed = targetPages;
     return nakiosCatalogCache.entries;
   })();
 
@@ -5501,8 +5517,8 @@ async function resolveNakiosSourcesByTmdbId(mediaType, tmdbId, season = 1, episo
   return out;
 }
 
-async function loadSupplementalCatalogEntries(force = false) {
-  const rows = await loadNakiosCatalogEntries(force);
+async function loadSupplementalCatalogEntries(force = false, options = {}) {
+  const rows = await loadNakiosCatalogEntries(force, options);
   supplementalCatalogCache.entries = Array.isArray(rows) ? rows : [];
   supplementalCatalogCache.loadedAt = Date.now();
   supplementalCatalogCache.inFlight = null;
@@ -8025,7 +8041,25 @@ async function handleCatalogSupplemental(req, res, requestUrl) {
   );
 
   try {
-    const entries = await loadSupplementalCatalogEntries(false);
+    const desiredCount = Math.max(1, page * perPage);
+    let entries = await loadSupplementalCatalogEntries(false);
+    if (
+      entries.length < desiredCount &&
+      NAKIOS_CATALOG_MAX_PAGES_PER_FEED > NAKIOS_CATALOG_PAGES_PER_FEED &&
+      NAKIOS_CATALOG_FEEDS.length > 0
+    ) {
+      const approxPerPage = Math.max(1, NAKIOS_CATALOG_FEEDS.length * NAKIOS_FEED_PAGE_SIZE_ESTIMATE);
+      const pagesNeeded = Math.min(
+        NAKIOS_CATALOG_MAX_PAGES_PER_FEED,
+        Math.max(
+          NAKIOS_CATALOG_PAGES_PER_FEED,
+          Math.ceil((desiredCount * 1.35) / approxPerPage)
+        )
+      );
+      if (pagesNeeded > Number(nakiosCatalogCache.pagesPerFeed || 0)) {
+        entries = await loadSupplementalCatalogEntries(false, { minPages: pagesNeeded });
+      }
+    }
     const pageData = buildSupplementalCatalogPage(entries, page, perPage);
     if (Array.isArray(pageData.data) && pageData.data.length > 0) {
       await hydrateSupplementalRowCovers(
