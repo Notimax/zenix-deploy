@@ -21,7 +21,7 @@ const DEFAULT_BROWSER_UA =
 const DEFAULT_ACCEPT_LANGUAGE = "fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7";
 const NAKIOS_CATALOG_PAGES_PER_FEED = Math.max(
   1,
-  toInt(process.env.NAKIOS_CATALOG_PAGES_PER_FEED, 2, 1, 6)
+  toInt(process.env.NAKIOS_CATALOG_PAGES_PER_FEED, 3, 1, 6)
 );
 const NAKIOS_LOOKUP_CACHE_MS = Math.max(
   60 * 1000,
@@ -35,10 +35,12 @@ const NAKIOS_FETCH_HEADERS = {
 const NAKIOS_CATALOG_FEEDS = [
   { mediaType: "movie", path: "/api/movies/popular" },
   { mediaType: "movie", path: "/api/movies/trending" },
+  { mediaType: "movie", path: "/api/movies/discover" },
   { mediaType: "movie", path: "/api/movies/upcoming" },
   { mediaType: "movie", path: "/api/movies/top-rated" },
   { mediaType: "tv", path: "/api/series/popular" },
   { mediaType: "tv", path: "/api/series/trending" },
+  { mediaType: "tv", path: "/api/series/discover" },
   { mediaType: "tv", path: "/api/series/top-rated" },
 ];
 const PIDOOV_BASE = "https://pidoov.com";

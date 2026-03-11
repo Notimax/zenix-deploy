@@ -710,3 +710,7 @@ LATEST THEME FILTERS + CATALOG BOOST (2026-03-11, c186)
 - Provider fallback hardening:
   - anime sources now prefer Anime-Sama when present, but can fallback to other sources if Anime-Sama is absent.
   - external series seasons can reuse internal provider seasons (fixes missing episodes on titles like The Rookie).
+
+LATEST NAKIOS DISCOVER FEED (2026-03-11, c187)
+- Added Nakios `discover` feeds for movies + series.
+- Default Nakios pages per feed raised to 3 (surfaces titles missing from popular/trending/upcoming/top-rated).

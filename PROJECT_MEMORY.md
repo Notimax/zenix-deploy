@@ -409,3 +409,8 @@ Last update: 2026-03-11
 - Provider fallback hardening:
   - anime playback prefers Anime-Sama sources but falls back to existing sources if Anime-Sama is missing.
   - external series seasons can reuse internal provider seasons (fixes missing episode lists on titles like The Rookie).
+
+## c187 follow-up (2026-03-11)
+- Supplemental catalog now pulls Nakios `discover` feeds for movies and series.
+- Default `NAKIOS_CATALOG_PAGES_PER_FEED` raised to 3 to surface more titles
+  (ex: Nakios movie id `1629382` now appears via `movies/discover` page 3).
