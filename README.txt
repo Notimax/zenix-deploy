@@ -680,3 +680,7 @@ LATEST EPISODE SOON + NEXT BUTTON (2026-03-11, c182)
   It resolves the next playable episode (including next season when needed) and launches it.
 - Next-episode button auto-updates on season/episode/language changes and after playback load,
   and disables itself cleanly when no next episode exists.
+
+LATEST WEBHOOK FALLBACK PATCH (2026-03-11, c183)
+- Discord webhook now patches the pinned fallback message ID in addition to the active message ID.
+- This prevents stale/zero stats when the pinned message differs from the current message ID.

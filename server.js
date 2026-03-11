@@ -1723,6 +1723,11 @@ async function pushDiscordStats(reason = "interval") {
   if (!discordStatsMessageId) {
     loadDiscordStatsState();
   }
+  const fallbackMessageId = String(DISCORD_STATS_MESSAGE_ID_FALLBACK || "").trim();
+  const hasFallbackMessageId = /^\d{8,30}$/.test(fallbackMessageId);
+  if (!discordStatsMessageId && hasFallbackMessageId) {
+    discordStatsMessageId = fallbackMessageId;
+  }
 
   if (discordStatsMessageId) {
     const patched = await sendDiscordWebhookWithRetry("PATCH", payload, {
@@ -1746,6 +1751,17 @@ async function pushDiscordStats(reason = "interval") {
       discordStatsMessageId = "";
       saveDiscordStatsState();
     }
+  }
+  if (hasFallbackMessageId && fallbackMessageId !== discordStatsMessageId) {
+    sendDiscordWebhook("PATCH", payload, { messageId: fallbackMessageId, wait: false })
+      .then((result) => {
+        if (!result?.ok && result?.status && result.status !== 429) {
+          console.warn(`[discord] Fallback stats patch failed (${result.status}).`);
+        }
+      })
+      .catch(() => {
+        // best effort only
+      });
   }
 
   const created = await sendDiscordWebhookWithRetry("POST", payload, { wait: true });
