@@ -74,6 +74,7 @@ const NAKIOS_SOURCE_TIMEOUT_MS = 14000;
 const SUPPLEMENTAL_CATALOG_TIMEOUT_MS = 14000;
 const EPISODE_SOON_VERIFY_TTL_MS = 3 * 60 * 1000;
 const EPISODE_SOON_VERIFY_LIMIT = 40;
+const EPISODE_NAME_REFRESH_TTL_MS = 10 * 60 * 1000;
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
 const HLS_JS_URL = "https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js";
 const HLS_JS_FALLBACK_URLS = ["/hls.min.js", HLS_JS_URL, "https://unpkg.com/hls.js@1.5.17/dist/hls.min.js"];
@@ -254,6 +255,7 @@ const state = {
   streamPrefetchAt: new Map(),
   episodePlayableCache: new Map(),
   episodePlayableInFlight: new Map(),
+  seasonNameRefreshAt: new Map(),
   coverPreloadInFlight: new Map(),
   detailsInFlight: new Map(),
   trailersInFlight: new Map(),
@@ -455,6 +457,7 @@ const refs = {
   playerSeasonSelect: document.getElementById("playerSeasonSelect"),
   playerEpisodeSelect: document.getElementById("playerEpisodeSelect"),
   playerLanguageSelect: document.getElementById("playerLanguageSelect"),
+  playerNextEpisodeBtn: document.getElementById("playerNextEpisodeBtn"),
   playerStatus: document.getElementById("playerStatus"),
   playerSourceMeta: document.getElementById("playerSourceMeta"),
   playerLoadingIndicator: document.getElementById("playerLoadingIndicator"),
@@ -1879,6 +1882,7 @@ function bindEvents() {
     const episode = getFirstPlayableEpisode(episodes);
     populateEpisodeSelect(refs.playerEpisodeSelect, episodes, episode);
     const language = String(refs.playerLanguageSelect?.value || "").trim();
+    updatePlayerNextEpisodeButton();
     verifySoonEpisodesForSeason(mediaId, season, episodes)
       .then((changed) => {
         if (!changed || Number(state.nowPlaying?.id || 0) !== mediaId) {
@@ -1889,6 +1893,7 @@ function bindEvents() {
         }
         const currentEpisode = Number(refs.playerEpisodeSelect.value || episode);
         populateEpisodeSelect(refs.playerEpisodeSelect, episodes, currentEpisode);
+        updatePlayerNextEpisodeButton();
       })
       .catch(() => {
         // no-op
@@ -1908,6 +1913,7 @@ function bindEvents() {
     switchPlayerEpisode(season, episode, { language }).catch(() => {
       showMessage("Impossible de charger cet episode.", true);
     });
+    updatePlayerNextEpisodeButton();
   });
 
   refs.playerLanguageSelect?.addEventListener("change", () => {
@@ -1926,7 +1932,52 @@ function bindEvents() {
     switchPlayerEpisode(season, episode, { language }).catch(() => {
       showMessage("Impossible de charger cet episode.", true);
     });
+    updatePlayerNextEpisodeButton();
   });
+
+  if (refs.playerNextEpisodeBtn) {
+    bindFastPress(refs.playerNextEpisodeBtn, () => {
+      if (!state.nowPlaying || state.nowPlaying.type !== "tv") {
+        return;
+      }
+      const mediaId = Number(state.nowPlaying.id || 0);
+      const seasons = state.seasonsCache.get(mediaId) || [];
+      const currentSeason = Number(refs.playerSeasonSelect?.value || state.nowPlaying.season || 1);
+      const currentEpisode = Number(refs.playerEpisodeSelect?.value || state.nowPlaying.episode || 1);
+      const next = resolveNextPlayableEpisode(seasons, currentSeason, currentEpisode);
+      if (!next) {
+        showToast("Prochain episode pas encore disponible.", false);
+        updatePlayerNextEpisodeButton();
+        return;
+      }
+      if (refs.playerSeasonSelect) {
+        refs.playerSeasonSelect.value = String(next.season);
+      }
+      const episodes = getEpisodesForSeason(seasons, next.season);
+      if (refs.playerEpisodeSelect) {
+        populateEpisodeSelect(refs.playerEpisodeSelect, episodes, next.episode);
+      }
+      verifySoonEpisodesForSeason(mediaId, next.season, episodes)
+        .then((changed) => {
+          if (!changed || Number(state.nowPlaying?.id || 0) !== mediaId) {
+            return;
+          }
+          if (Number(refs.playerSeasonSelect?.value || "0") !== next.season) {
+            return;
+          }
+          const current = Number(refs.playerEpisodeSelect?.value || next.episode);
+          populateEpisodeSelect(refs.playerEpisodeSelect, episodes, current);
+        })
+        .catch(() => {
+          // no-op
+        });
+      const language = String(refs.playerLanguageSelect?.value || state.nowPlaying.language || "");
+      switchPlayerEpisode(next.season, next.episode, { language }).catch(() => {
+        showMessage("Impossible de charger cet episode.", true);
+      });
+      updatePlayerNextEpisodeButton();
+    });
+  }
 
   refs.playerSourceSelect?.addEventListener("change", () => {
     const index = Number(refs.playerSourceSelect.value || "-1");
@@ -7462,6 +7513,38 @@ function resolveSeasonEpisodeForPlayback(seasons, preferredSeason, preferredEpis
   return { season, episode, episodes, episodeMeta };
 }
 
+function resolveNextPlayableEpisode(seasons, currentSeason, currentEpisode) {
+  const rows = Array.isArray(seasons) ? seasons.slice() : [];
+  if (rows.length === 0) {
+    return null;
+  }
+  rows.sort((left, right) => Number(left?.season || 0) - Number(right?.season || 0));
+
+  const safeSeason = Number(currentSeason || rows[0]?.season || 1);
+  const safeEpisode = Math.max(0, Number(currentEpisode || 0));
+
+  for (const seasonRow of rows) {
+    const seasonNumber = Number(seasonRow?.season || 0);
+    if (!seasonNumber || seasonNumber < safeSeason) {
+      continue;
+    }
+    const episodes = Array.isArray(seasonRow?.episodes) ? seasonRow.episodes.slice() : [];
+    if (episodes.length === 0) {
+      continue;
+    }
+    episodes.sort((left, right) => Number(left?.episode || 0) - Number(right?.episode || 0));
+
+    const candidate =
+      seasonNumber === safeSeason
+        ? episodes.find((entry) => Number(entry?.episode || 0) > safeEpisode && !entry?.isSoon)
+        : episodes.find((entry) => !entry?.isSoon);
+    if (candidate) {
+      return { season: seasonNumber, episode: Number(candidate.episode || 1) };
+    }
+  }
+  return null;
+}
+
 function populateSeasonSelect(select, seasons, selectedSeason) {
   select.innerHTML = "";
   seasons.forEach((entry) => {
@@ -7479,7 +7562,7 @@ function populateEpisodeSelect(select, episodes, selectedEpisode) {
     const option = document.createElement("option");
     option.value = String(entry.episode);
     const genericPlaceholder = isGenericEpisodePlaceholderName(entry?.name, entry?.episode);
-    const showSoon = Boolean(entry?.isSoon || genericPlaceholder);
+    const showSoon = Boolean(entry?.isSoon);
     const soonSuffix = showSoon ? " | soon" : "";
     if (genericPlaceholder) {
       option.textContent = `EO${Number(entry.episode || 0)} - Episode ${Number(entry.episode || 0)}${soonSuffix}`;
@@ -7495,6 +7578,51 @@ function populateEpisodeSelect(select, episodes, selectedEpisode) {
     const fallback = getFirstPlayableEpisode(episodes);
     select.value = String(fallback);
   }
+}
+
+function updatePlayerNextEpisodeButton() {
+  const button = refs.playerNextEpisodeBtn;
+  if (!button) {
+    return;
+  }
+  const label = button.querySelector(".btn-label");
+  if (!state.nowPlaying || state.nowPlaying.type !== "tv") {
+    button.hidden = true;
+    button.disabled = true;
+    button.removeAttribute("data-next-season");
+    button.removeAttribute("data-next-episode");
+    if (label) {
+      label.textContent = "Episode suivant";
+    }
+    button.title = "";
+    return;
+  }
+
+  const mediaId = Number(state.nowPlaying.id || 0);
+  const seasons = state.seasonsCache.get(mediaId) || [];
+  const currentSeason = Number(refs.playerSeasonSelect?.value || state.nowPlaying.season || 1);
+  const currentEpisode = Number(refs.playerEpisodeSelect?.value || state.nowPlaying.episode || 1);
+  const next = resolveNextPlayableEpisode(seasons, currentSeason, currentEpisode);
+
+  button.hidden = false;
+  if (!next) {
+    button.disabled = true;
+    button.removeAttribute("data-next-season");
+    button.removeAttribute("data-next-episode");
+    if (label) {
+      label.textContent = "Fin de saison";
+    }
+    button.title = "Aucun episode suivant disponible";
+    return;
+  }
+
+  button.disabled = false;
+  button.dataset.nextSeason = String(next.season);
+  button.dataset.nextEpisode = String(next.episode);
+  if (label) {
+    label.textContent = "Episode suivant";
+  }
+  button.title = `Episode suivant: S${next.season}E${String(next.episode).padStart(2, "0")}`;
 }
 
 function buildEpisodePlayableKey(id, season, episode) {
@@ -7563,23 +7691,80 @@ async function isEpisodePlayableByStream(id, season, episode) {
   }
 }
 
+async function refreshEpisodeTitlesFromApi(id, season, episodes) {
+  if (!Number.isInteger(Number(id)) || !Number.isInteger(Number(season)) || !Array.isArray(episodes)) {
+    return false;
+  }
+  const key = `${Number(id || 0)}:${Number(season || 0)}`;
+  const last = Number(state.seasonNameRefreshAt.get(key) || 0);
+  if (last && Date.now() - last < EPISODE_NAME_REFRESH_TTL_MS) {
+    return false;
+  }
+  state.seasonNameRefreshAt.set(key, Date.now());
+
+  let payload = null;
+  try {
+    payload = await fetchJson(`${API_BASE}/media/${id}/seasons`, { timeoutMs: 8000 });
+  } catch {
+    return false;
+  }
+  const rows = Array.isArray(payload?.data?.items) ? payload.data.items : [];
+  const seasonRow = rows.find((entry) => Number(entry?.season || 0) === Number(season || 0));
+  if (!seasonRow) {
+    return false;
+  }
+  const episodeRows = Array.isArray(seasonRow?.episodes) ? seasonRow.episodes : [];
+  if (episodeRows.length === 0) {
+    return false;
+  }
+
+  let changed = false;
+  episodes.forEach((entry) => {
+    const episodeNumber = Number(entry?.episode || 0);
+    if (!episodeNumber) {
+      return;
+    }
+    const match = episodeRows.find((row) => Number(row?.episode || 0) === episodeNumber);
+    if (!match) {
+      return;
+    }
+    const candidateName = String(match?.name || match?.formattedName || match?.title || "").trim();
+    if (candidateName && !isGenericEpisodePlaceholderName(candidateName, episodeNumber)) {
+      entry.name = candidateName;
+      changed = true;
+    }
+  });
+
+  return changed;
+}
+
 async function verifySoonEpisodesForSeason(id, season, episodes) {
   if (!Number.isInteger(Number(id)) || !Number.isInteger(Number(season)) || !Array.isArray(episodes)) {
     return false;
   }
 
   const candidates = episodes
-    .filter((entry) => Boolean(entry?.isSoon) && isGenericEpisodePlaceholderName(entry?.name, entry?.episode))
+    .filter((entry) => Boolean(entry?.isSoon))
     .slice(0, EPISODE_SOON_VERIFY_LIMIT);
   if (candidates.length === 0) {
     return false;
   }
 
   let changed = false;
+  let needsTitleRefresh = false;
   for (const entry of candidates) {
     const playable = await isEpisodePlayableByStream(id, season, Number(entry.episode || 0));
     if (playable && entry.isSoon) {
       entry.isSoon = false;
+      changed = true;
+      if (isGenericEpisodePlaceholderName(entry?.name, entry?.episode)) {
+        needsTitleRefresh = true;
+      }
+    }
+  }
+  if (needsTitleRefresh) {
+    const refreshed = await refreshEpisodeTitlesFromApi(id, season, episodes);
+    if (refreshed) {
       changed = true;
     }
   }
@@ -8132,6 +8317,7 @@ async function openPlayer(id, options = {}) {
 
       populateSeasonSelect(refs.playerSeasonSelect, seasons, season);
       populateEpisodeSelect(refs.playerEpisodeSelect, episodes, episode);
+      updatePlayerNextEpisodeButton();
       verifySoonEpisodesForSeason(id, season, episodes)
         .then((changed) => {
           if (!changed || token !== state.playToken) {
@@ -8142,6 +8328,7 @@ async function openPlayer(id, options = {}) {
           }
           const currentEpisode = Number(refs.playerEpisodeSelect.value || episode);
           populateEpisodeSelect(refs.playerEpisodeSelect, episodes, currentEpisode);
+          updatePlayerNextEpisodeButton();
         })
         .catch(() => {
           // no-op
@@ -8631,6 +8818,7 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
   if (syncRoute) {
     setAppRoute({ watch: selectedItem.id }, { replace: true });
   }
+  updatePlayerNextEpisodeButton();
 }
 
 async function loadEpisodeStream(
@@ -8817,6 +9005,7 @@ async function loadEpisodeStream(
     setAppRoute({ watch: selectedItem.id, season: safeSeason, episode: safeEpisode }, { replace: true });
   }
   setPlayerStatus(`Lecture S${safeSeason}E${safeEpisode}${language ? ` (${language})` : ""}`);
+  updatePlayerNextEpisodeButton();
 }
 
 async function switchPlayerEpisode(season, episode, options = {}) {
@@ -12072,6 +12261,7 @@ function closePlayer(options = {}) {
   state.allEpisodeSources = [];
   state.availableLanguages = [];
   state.nowPlaying = null;
+  updatePlayerNextEpisodeButton();
   renderPlayerSourceOptions();
   populateLanguageSelect(refs.playerLanguageSelect, [], "");
   refs.playerLanguageSelect.disabled = true;

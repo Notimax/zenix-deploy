@@ -371,3 +371,11 @@ Last update: 2026-03-10
 
 ## Webhook pin fallback (2026-03-11)
 - Added a fallback Discord stats message ID in server config to force PATCH updates if state file is missing.
+
+## c182 follow-up (2026-03-11)
+- Episodes marked "soon" are revalidated for series/anime; if playable, the soon flag is cleared and titles
+  are refreshed from `/api/media/{id}/seasons`.
+- Added a dedicated "Episode suivant" button in the player (desktop + mobile).
+  It resolves the next playable episode (including next-season progression), updates selects, and launches playback.
+- Next-episode button auto-updates on season/episode/language changes and after playback load,
+  and disables itself when no next episode exists.

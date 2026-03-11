@@ -672,3 +672,11 @@ LATEST WEBHOOK RATE LIMIT FIX (2026-03-10, c181)
 LATEST WEBHOOK PIN FALLBACK (2026-03-11)
 - Added a fallback Discord stats message ID in server config to force PATCH updates.
 - Prevents repeated create calls (and 429s) when the state file is missing.
+
+LATEST EPISODE SOON + NEXT BUTTON (2026-03-11, c182)
+- Episodes marked "soon" are now revalidated across series/anime; if playable, the soon flag is cleared
+  and episode titles are refreshed from `/api/media/{id}/seasons`.
+- Player now includes a dedicated "Episode suivant" button (desktop + mobile).
+  It resolves the next playable episode (including next season when needed) and launches it.
+- Next-episode button auto-updates on season/episode/language changes and after playback load,
+  and disables itself cleanly when no next episode exists.

@@ -2649,6 +2649,36 @@ body.in-app-browser .catalog-grid {
   gap: 10px;
 }
 
+.series-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.series-actions .btn {
+  width: 100%;
+  justify-content: center;
+  gap: 8px;
+}
+
+.series-actions .btn-icon {
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.series-actions .btn-icon svg {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
+
+.series-actions .btn-label {
+  line-height: 1;
+}
+
 .field {
   display: grid;
   gap: 4px;
