@@ -251,7 +251,7 @@ LATEST FIX LOG (2026-03-11)
 - Direct upstream API calls removed from frontend (proxy only) to reduce exposed provider names in DevTools.
 - Gate bootstrap now retries on first 403 and uses a neutral proof script path to avoid false positives.
 - Nakios-facing labels are now branded as Zenix in API responses and UI (no provider names exposed).
-- Pinned Nakios titles added: Go Karts + Minions (2015, Rise of Gru) for guaranteed catalog presence.
+- Pinned Nakios titles added: Go Karts, Minions (2015, Rise of Gru) + Moi, Moche et Mechant (1-4).
 - Auto-switch now accepts premium fallback candidates on mobile when needed (instead of stopping on free-only dead-end).
 - Bootstrap stall detection now fails fast on true `readyState=0` source stalls so next source can be attempted.
 - Added explicit guard rule: if `Fallback iOS actif...` stays blocked too long, force switch to the next source.

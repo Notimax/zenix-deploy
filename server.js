@@ -215,6 +215,10 @@ const NAKIOS_PINNED_TITLES = [
   { title: "Go Karts", mediaType: "movie", year: 2019 },
   { title: "Minions", mediaType: "movie", year: 2015 },
   { title: "Minions: The Rise of Gru", mediaType: "movie", year: 2022 },
+  { title: "Despicable Me", mediaType: "movie", year: 2010 },
+  { title: "Despicable Me 2", mediaType: "movie", year: 2013 },
+  { title: "Despicable Me 3", mediaType: "movie", year: 2017 },
+  { title: "Despicable Me 4", mediaType: "movie", year: 2024 },
 ];
 const NAKIOS_PINNED_CACHE_MS = Math.max(
   15 * 60 * 1000,
