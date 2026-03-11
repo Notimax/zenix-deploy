@@ -7217,6 +7217,89 @@ async function ensureTrailers(id) {
   }
 }
 
+function extractSeasonEpisodeFromUrl(rawUrl) {
+  const text = String(rawUrl || "").trim();
+  if (!text) {
+    return null;
+  }
+  let match =
+    text.match(/S(?:aison)?\s*0*(\d{1,3})[\\/_\-.]+E(?:p(?:isode)?)?\s*0*(\d{1,4})/i) ||
+    text.match(/S\s*0*(\d{1,3})\s*E\s*0*(\d{1,4})/i) ||
+    text.match(/S(\d{1,3})E(\d{1,4})/i);
+  if (!match) {
+    const seasonMatch =
+      text.match(/(?:^|[\\/._-])S(?:aison)?\s*0*(\d{1,3})(?:[\\/._-]|$)/i) ||
+      text.match(/season\s*0*(\d{1,3})/i);
+    const episodeMatch =
+      text.match(/(?:^|[\\/._-])E(?:p(?:isode)?)?\s*0*(\d{1,4})(?:[\\/._-]|$)/i) ||
+      text.match(/episode\s*0*(\d{1,4})/i);
+    if (seasonMatch && episodeMatch) {
+      match = [null, seasonMatch[1], episodeMatch[1]];
+    }
+  }
+  if (!match) {
+    return null;
+  }
+  const season = Number(match[1]);
+  const episode = Number(match[2]);
+  if (!Number.isFinite(season) || !Number.isFinite(episode)) {
+    return null;
+  }
+  if (season <= 0 || episode <= 0 || season > 200 || episode > 10000) {
+    return null;
+  }
+  return { season, episode };
+}
+
+function buildSeasonsFromDetailUrls(details) {
+  const urls = Array.isArray(details?.urls) ? details.urls : [];
+  if (urls.length === 0) {
+    return [];
+  }
+  const seasonMap = new Map();
+  urls.forEach((entry) => {
+    const rawUrl = String(
+      entry?.url ||
+        entry?.stream_url ||
+        entry?.file ||
+        entry?.src ||
+        ""
+    ).trim();
+    if (!rawUrl) {
+      return;
+    }
+    const parsed = extractSeasonEpisodeFromUrl(rawUrl);
+    if (!parsed) {
+      return;
+    }
+    const { season, episode } = parsed;
+    if (!seasonMap.has(season)) {
+      seasonMap.set(season, new Map());
+    }
+    const episodeMap = seasonMap.get(season);
+    if (episodeMap.has(episode)) {
+      return;
+    }
+    episodeMap.set(episode, {
+      episode,
+      name: `Episode ${episode}`,
+      runtime: 0,
+      airDate: "",
+      isSoon: false,
+    });
+  });
+  const seasons = [];
+  const seasonNumbers = Array.from(seasonMap.keys()).sort((a, b) => a - b);
+  seasonNumbers.forEach((season) => {
+    const episodeMap = seasonMap.get(season);
+    const episodes = Array.from(episodeMap.values()).sort((a, b) => a.episode - b.episode);
+    if (episodes.length > 0) {
+      seasons.push({ season, episodes });
+    }
+  });
+  return seasons;
+}
+
 async function ensureSeasons(id) {
   if (state.seasonsCache.has(id)) {
     const cached = state.seasonsCache.get(id);
@@ -7230,6 +7313,26 @@ async function ensureSeasons(id) {
 
   const task = (async () => {
     const item = findItemById(id) || (await buildItemFromDetails(id).catch(() => null));
+    let details = null;
+    if (item && item.type === "tv" && !item.isAnime) {
+      details = state.detailsCache.get(Number(id)) || null;
+      if (!details) {
+        try {
+          details = await ensureDetails(id);
+        } catch {
+          details = null;
+        }
+      }
+    }
+    const detailSeasons = details ? buildSeasonsFromDetailUrls(details) : [];
+    const detailFastPath =
+      detailSeasons.length > 0 &&
+      ((Array.isArray(details?.urls) && details.urls.length > 1200) || Number(details?.episodes || 0) > 380);
+    if (detailFastPath) {
+      state.seasonsCache.set(id, detailSeasons);
+      return detailSeasons;
+    }
+
     const fetchAnimeSeasons = async () => {
       if (!item || item.type !== "tv") {
         return [];
@@ -7317,6 +7420,10 @@ async function ensureSeasons(id) {
         item.isAnime = true;
         seasons = animeSeasons;
       }
+    }
+
+    if (seasons.length === 0 && detailSeasons.length > 0) {
+      seasons = detailSeasons;
     }
 
     if (seasons.length > 0) {

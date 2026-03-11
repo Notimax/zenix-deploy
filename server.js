@@ -6511,6 +6511,9 @@ function inferAnimePanelLanguage(panel) {
   if (/(^|\/|\s)vostfr($|\/|\s)/i.test(probe)) {
     return "vostfr";
   }
+  if (/(^|\/|\s)multi($|\/|\s)/i.test(probe)) {
+    return "multi";
+  }
   if (/(^|\/|\s)(vf|vffr|version\s+fr|version\s+fran[cç]aise|fran[cç]ais|french)($|\/|\s)/i.test(probe)) {
     return "vf";
   }
@@ -6534,6 +6537,9 @@ function chooseAnimePanelPath(panels, season = 1, language = "vostfr") {
     }
     const inferred = inferAnimePanelLanguage(entry);
     if (inferred && inferred === safeLang) {
+      return true;
+    }
+    if (safeLang === "vf" && inferred === "multi") {
       return true;
     }
     const value = String(entry.path || "").toLowerCase();
@@ -6869,7 +6875,7 @@ async function resolveAnimeSibnetSource(title, season, episode, language = "vost
 
   const baseCatalogUrl = catalogUrl.endsWith("/") ? catalogUrl : `${catalogUrl}/`;
   let panelResolution = null;
-  if (safeLanguage === "vf" && resolvedLanguage !== "vf") {
+  if (safeLanguage === "vf" && resolvedLanguage !== "vf" && resolvedLanguage !== "multi") {
     const vfCandidates = buildAnimeVfCandidatePanels(panels, safeSeason);
     for (const candidate of vfCandidates) {
       panelResolution = await tryResolveAnimePanelSources(baseCatalogUrl, candidate.path, safeEpisode);
@@ -7026,7 +7032,7 @@ async function resolveAnimeSeasons(title, language = "vf", options = {}) {
     const panelPick = chooseAnimePanelPath(panels, season, safeLanguage);
     let panelPath = panelPick?.path || "";
     let panelResolution = null;
-    if (safeLanguage === "vf" && panelPick && String(panelPick.language || "") !== "vf") {
+    if (safeLanguage === "vf" && panelPick && !["vf", "multi"].includes(String(panelPick.language || ""))) {
       const vfCandidates = buildAnimeVfCandidatePanels(panels, season);
       for (const candidate of vfCandidates) {
         panelResolution = await tryResolveAnimePanelSources(baseCatalogUrl, candidate.path, 1);

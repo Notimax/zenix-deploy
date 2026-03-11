@@ -1,6 +1,6 @@
 # Zenix Project Memory
 
-Last update: 2026-03-10
+Last update: 2026-03-11
 
 ## Core product constraints
 - Domain: `https://zenix.best`
@@ -383,3 +383,10 @@ Last update: 2026-03-10
 ## c183 follow-up (2026-03-11)
 - Discord webhook now patches the pinned fallback message ID in addition to the active message ID.
 - This prevents stale/zero stats when the pinned message differs from the current message ID.
+
+## c184 follow-up (2026-03-11)
+- TV season loading now fast-paths from detail url lists for huge catalogs (ex: Les Simpson),
+  avoiding `/media/{id}/seasons` timeouts and restoring episode lists.
+- If `/media/{id}/seasons` is empty, frontend builds seasons from `/media/{id}/sheet` urls as fallback.
+- Anime-Sama panel detection treats `multi` as VF-compatible, so VF requests keep Multi panels
+  and expose more VF/MULTI readers in anime playback.

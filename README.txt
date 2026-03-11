@@ -1,5 +1,5 @@
 ZENIX STREAM - OPERATIONS MEMORY
-Last updated: 2026-03-10
+Last updated: 2026-03-11
 
 LIVE DOMAIN
 - https://zenix.best
@@ -684,3 +684,10 @@ LATEST EPISODE SOON + NEXT BUTTON (2026-03-11, c182)
 LATEST WEBHOOK FALLBACK PATCH (2026-03-11, c183)
 - Discord webhook now patches the pinned fallback message ID in addition to the active message ID.
 - This prevents stale/zero stats when the pinned message differs from the current message ID.
+
+LATEST SIMPSONS SEASONS FALLBACK + ANIME MULTI PANELS (2026-03-11, c184)
+- TV seasons now fast-path from `/media/{id}/sheet` url lists when the catalog is huge
+  (fixes Les Simpson opening when `/media/{id}/seasons` is slow/empty).
+- If `/media/{id}/seasons` returns empty, we now build seasons from detail urls as a fallback.
+- Anime-Sama panel language detection now treats `multi` as VF-compatible,
+  so VF requests can keep multi panels and expose more VF/MULTI readers.
