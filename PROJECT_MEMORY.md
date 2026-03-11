@@ -368,3 +368,6 @@ Last update: 2026-03-10
 
 ## c181 follow-up (2026-03-10)
 - Discord webhook interval raised to 30s (min 15s) to reduce rate-limit 429s.
+
+## Webhook pin fallback (2026-03-11)
+- Added a fallback Discord stats message ID in server config to force PATCH updates if state file is missing.

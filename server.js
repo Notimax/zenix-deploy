@@ -182,6 +182,7 @@ const ZENIX_OWNED_SOURCES_CACHE_MS = 5000;
 const WEBHOOK_TIMEOUT_MS = 10000;
 const DISCORD_WEBHOOK_FALLBACK_B64 =
   "aHR0cHM6Ly9kaXNjb3JkLmNvbS9hcGkvd2ViaG9va3MvMTQ3OTI2OTg4ODM3OTA2MDMxNi9ISGRVbTVYZkhpeENPXy0yRUhXYXJ1SjJDcHIweXl1eWdHNkRWLVp4Y0JLQWg4N0RNRzNvNnYzbTQzd29VMmZwenpBUw==";
+const DISCORD_STATS_MESSAGE_ID_FALLBACK = "1481081267830395010";
 const DISCORD_WEBHOOK_URL = resolveDiscordWebhookUrl();
 const DISCORD_WEBHOOK_CANDIDATES = buildDiscordWebhookCandidates(DISCORD_WEBHOOK_URL);
 const DISCORD_PUSH_INTERVAL_MS = Math.max(15000, Number(process.env.DISCORD_PUSH_INTERVAL_MS || 30 * 1000));
@@ -1354,6 +1355,11 @@ function loadDiscordStatsState() {
     }
   } catch {
     // no persisted state
+  }
+  const fallbackId = String(DISCORD_STATS_MESSAGE_ID_FALLBACK || "").trim();
+  if (/^\d{8,30}$/.test(fallbackId)) {
+    discordStatsMessageId = fallbackId;
+    return;
   }
   discordStatsMessageId = "";
 }

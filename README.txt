@@ -668,3 +668,7 @@ LIVE BRUTE RESULT (HXH, c180, 2026-03-10)
 LATEST WEBHOOK RATE LIMIT FIX (2026-03-10, c181)
 - Discord webhook push interval raised to 30s (min 15s) to avoid 429 spam blocks.
 - Goal: stabilize message creation so a permanent message ID can be pinned.
+
+LATEST WEBHOOK PIN FALLBACK (2026-03-11)
+- Added a fallback Discord stats message ID in server config to force PATCH updates.
+- Prevents repeated create calls (and 429s) when the state file is missing.
