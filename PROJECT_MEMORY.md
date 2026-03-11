@@ -445,3 +445,4 @@ Last update: 2026-03-11
   - protected `/api/*` calls now require a valid gate token.
   - adblock overlay removal via DevTools no longer bypasses playback/API access.
 - Removed direct upstream API calls from the frontend (proxy-only) to reduce exposed provider names.
+- Gate bootstrap now retries on first 403 and uses a neutral proof script path to reduce false positives.

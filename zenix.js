@@ -1108,7 +1108,7 @@ async function init() {
   pruneProgressEntries();
   applyUiPrefs({ syncControls: true });
   if (refs.footerVersion) {
-    refs.footerVersion.textContent = "c194";
+    refs.footerVersion.textContent = "c195";
   }
   updateNetworkBadge();
   startOnlineCountPolling();
@@ -3367,7 +3367,7 @@ function loadGateProofScript(scriptUrl, nonce) {
 }
 
 async function refreshGateToken(options = {}) {
-  if (state.adblockDetected) {
+  if (state.adblockDetected && !options.force) {
     return false;
   }
   const force = Boolean(options.force);
@@ -15426,12 +15426,43 @@ function isSameOriginUrl(url) {
   }
 }
 
+function isGateProtectedUrl(url) {
+  try {
+    const parsed = new URL(String(url || ""), window.location.origin);
+    if (parsed.origin !== window.location.origin) {
+      return false;
+    }
+    const pathname = parsed.pathname || "";
+    if (!pathname.startsWith("/api/")) {
+      return false;
+    }
+    if (pathname.startsWith("/api/analytics/")) {
+      return false;
+    }
+    if (pathname === "/api/suggestions") {
+      return false;
+    }
+    if (pathname.startsWith("/api/gate/")) {
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function fetchJson(url, options = {}) {
   const force = Boolean(options.force);
   const skipCache = Boolean(options.noCache || options.skipCache);
   const signal = options.signal;
   const retryDelays = Array.isArray(options.retryDelays) ? options.retryDelays : RETRY_DELAYS_MS;
   const timeoutMs = Number(options.timeoutMs || 0) > 0 ? Number(options.timeoutMs) : REQUEST_TIMEOUT_MS;
+  const gateRetried = Boolean(options.gateRetried);
+  if (isGateProtectedUrl(url) && !state.gateReady) {
+    await refreshGateToken({ force: true }).catch(() => {
+      // handled below on 403
+    });
+  }
   const method = String(options.method || "GET").toUpperCase();
   const canCache = isCacheableApiUrl(url) && method === "GET" && !skipCache;
   if (canCache && !force) {
@@ -15470,6 +15501,16 @@ async function fetchJson(url, options = {}) {
 
       if (!response.ok) {
         if (response.status === 403 && response.headers.get("x-zenix-gate") === "required") {
+          if (!gateRetried) {
+            const gateOk = await refreshGateToken({ force: true }).catch(() => false);
+            if (gateOk) {
+              return fetchJson(url, {
+                ...options,
+                gateRetried: true,
+                noCache: true,
+              });
+            }
+          }
           applyAdblockDetectionState(true, { manual: false });
           setAdblockGateStatus(
             "Bloqueur de pub detecte. Desactive-le puis clique sur 'Verifier de nouveau'.",

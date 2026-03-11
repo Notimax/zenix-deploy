@@ -207,7 +207,7 @@ const GATE_TOKEN_TTL_MS = Math.max(2 * 60 * 1000, Number(process.env.GATE_TOKEN_
 const GATE_CHALLENGE_MAX = Math.max(50, toInt(process.env.GATE_CHALLENGE_MAX, 420, 50, 1200));
 const GATE_SECRET =
   String(process.env.ZENIX_GATE_SECRET || "").trim() || crypto.randomBytes(32).toString("hex");
-const GATE_ADSCRIPT_PATH = "/ads/zenix-ads.js";
+const GATE_ADSCRIPT_PATH = "/_gate/zenix-proof.js";
 const gateChallenges = new Map();
 const FORWARD_CLIENT_IP_TO_UPSTREAM =
   String(process.env.FORWARD_CLIENT_IP_TO_UPSTREAM || "").trim() === "1";
