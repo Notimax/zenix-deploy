@@ -1099,7 +1099,7 @@ async function init() {
   pruneProgressEntries();
   applyUiPrefs({ syncControls: true });
   if (refs.footerVersion) {
-    refs.footerVersion.textContent = "c188";
+    refs.footerVersion.textContent = "c189";
   }
   updateNetworkBadge();
   startOnlineCountPolling();
@@ -8864,6 +8864,7 @@ async function openPlayer(id, options = {}) {
 
   const token = ++state.playToken;
   const resume = state.progress[id] || null;
+  const explicitResumeTime = getExplicitResumeTime(options);
   const cachedDetails = state.detailsCache.get(id) || null;
   const playerBackdrop = normalizeImageUrl(
     cachedDetails?.posters?.wallpaper ||
@@ -8909,7 +8910,7 @@ async function openPlayer(id, options = {}) {
         refs.playerSeriesControls.hidden = true;
         await loadMovieStream(
           item,
-          Number(options.resumeTime || resume?.time || 0),
+          resolveMovieResumeTime(resume, explicitResumeTime),
           token,
           options.syncRoute !== false
         );
@@ -8961,11 +8962,12 @@ async function openPlayer(id, options = {}) {
         });
       refs.playerSeriesControls.hidden = false;
 
+      const resumeTime = resolveEpisodeResumeTime(resume, season, episode, explicitResumeTime);
       await loadEpisodeStream(
         item,
         season,
         episode,
-        Number(options.resumeTime || resume?.time || 0),
+        resumeTime,
         token,
         String(options.language || resume?.language || ""),
         options.syncRoute !== false
@@ -8976,7 +8978,7 @@ async function openPlayer(id, options = {}) {
     refs.playerSeriesControls.hidden = true;
     await loadMovieStream(
       item,
-      Number(options.resumeTime || resume?.time || 0),
+      resolveMovieResumeTime(resume, explicitResumeTime),
       token,
       options.syncRoute !== false
     );
@@ -9645,11 +9647,14 @@ async function switchPlayerEpisode(season, episode, options = {}) {
   }
 
   const token = ++state.playToken;
+  const explicitResumeTime = getExplicitResumeTime(options);
+  const progress = state.progress[item.id] || null;
+  const resumeTime = resolveEpisodeResumeTime(progress, season, episode, explicitResumeTime);
   await loadEpisodeStream(
     item,
     season,
     episode,
-    0,
+    resumeTime,
     token,
     String(options.language || state.nowPlaying.language || "")
   );
@@ -12912,6 +12917,83 @@ function closePlayer(options = {}) {
   flushDeferredDesktopMainNavFit(30);
 }
 
+function getExplicitResumeTime(options) {
+  if (!options || typeof options !== "object") {
+    return null;
+  }
+  if (!Object.prototype.hasOwnProperty.call(options, "resumeTime")) {
+    return null;
+  }
+  const raw = Number(options.resumeTime || 0);
+  if (!Number.isFinite(raw)) {
+    return 0;
+  }
+  return Math.max(0, raw);
+}
+
+function getEpisodeProgressKey(season, episode) {
+  const safeSeason = Number(season || 0);
+  const safeEpisode = Number(episode || 0);
+  if (!Number.isFinite(safeSeason) || !Number.isFinite(safeEpisode)) {
+    return "";
+  }
+  return `S${Math.max(1, Math.round(safeSeason))}E${Math.max(1, Math.round(safeEpisode))}`;
+}
+
+function normalizeEpisodeProgressMap(value) {
+  const safe = {};
+  if (!value || typeof value !== "object") {
+    return safe;
+  }
+  Object.entries(value).forEach(([key, entry]) => {
+    if (!/^S\d+E\d+$/i.test(String(key || ""))) {
+      return;
+    }
+    const time = Number(entry?.time || 0);
+    const duration = Number(entry?.duration || 0);
+    const lastPlayed = Number(entry?.lastPlayed || 0);
+    safe[key] = {
+      time: Number.isFinite(time) ? Math.max(0, time) : 0,
+      duration: Number.isFinite(duration) ? Math.max(0, duration) : 0,
+      lastPlayed: Number.isFinite(lastPlayed) ? Math.max(0, lastPlayed) : 0,
+    };
+  });
+  return safe;
+}
+
+function resolveEpisodeResumeTime(progress, season, episode, explicitResume) {
+  if (Number.isFinite(explicitResume)) {
+    return Math.max(0, explicitResume);
+  }
+  if (!progress) {
+    return 0;
+  }
+  const key = getEpisodeProgressKey(season, episode);
+  if (key) {
+    const episodes = normalizeEpisodeProgressMap(progress.episodes);
+    const row = episodes[key];
+    const time = Number(row?.time || 0);
+    if (Number.isFinite(time) && time > 0) {
+      return time;
+    }
+  }
+  if (Number(progress.season || 0) === Number(season || 0) && Number(progress.episode || 0) === Number(episode || 0)) {
+    const time = Number(progress.time || 0);
+    if (Number.isFinite(time) && time > 0) {
+      return time;
+    }
+  }
+  return 0;
+}
+
+function resolveMovieResumeTime(progress, explicitResume) {
+  if (Number.isFinite(explicitResume)) {
+    return Math.max(0, explicitResume);
+  }
+  const time = Number(progress?.time || 0);
+  return Number.isFinite(time) ? Math.max(0, time) : 0;
+}
+
 function saveNowPlayingProgress(options = {}) {
   if (!state.nowPlaying) {
     return false;
@@ -12924,7 +13006,27 @@ function saveNowPlayingProgress(options = {}) {
 
   const currentTime = Number(refs.playerVideo.currentTime || 0);
   const duration = Number(refs.playerVideo.duration || 0);
-  state.progress[state.nowPlaying.id] = {
+  const hasTimeSignal = Number.isFinite(currentTime) && currentTime > 0.2;
+  const hasDurationSignal = Number.isFinite(duration) && duration > 0;
+  const previous = state.progress[state.nowPlaying.id] || null;
+  const nextTime = hasTimeSignal ? Math.max(0, currentTime) : Number(previous?.time || 0);
+  const nextDuration = hasDurationSignal ? Math.max(0, duration) : Number(previous?.duration || 0);
+  const isSeries = state.nowPlaying.type === "tv";
+  const episodes = isSeries ? normalizeEpisodeProgressMap(previous?.episodes) : null;
+  const episodeKey = isSeries ? getEpisodeProgressKey(state.nowPlaying.season || 1, state.nowPlaying.episode || 1) : "";
+
+  if (isSeries && episodeKey) {
+    const prevEpisode = episodes?.[episodeKey] || null;
+    const episodeTime = hasTimeSignal ? Math.max(0, currentTime) : Number(prevEpisode?.time || 0);
+    const episodeDuration = hasDurationSignal ? Math.max(0, duration) : Number(prevEpisode?.duration || 0);
+    episodes[episodeKey] = {
+      time: Number.isFinite(episodeTime) ? Math.max(0, episodeTime) : 0,
+      duration: Number.isFinite(episodeDuration) ? Math.max(0, episodeDuration) : 0,
+      lastPlayed: now,
+    };
+  }
+
+  const nextEntry = {
     id: state.nowPlaying.id,
     type: state.nowPlaying.type,
     title: state.nowPlaying.title,
@@ -12933,10 +13035,14 @@ function saveNowPlayingProgress(options = {}) {
     language: String(state.nowPlaying.language || ""),
     season: state.nowPlaying.season || 1,
     episode: state.nowPlaying.episode || 1,
-    time: Number.isFinite(currentTime) ? Math.max(0, currentTime) : 0,
-    duration: Number.isFinite(duration) ? Math.max(0, duration) : 0,
+    time: Number.isFinite(nextTime) ? Math.max(0, nextTime) : 0,
+    duration: Number.isFinite(nextDuration) ? Math.max(0, nextDuration) : 0,
     lastPlayed: now,
   };
+  if (isSeries) {
+    nextEntry.episodes = episodes || {};
+  }
+  state.progress[state.nowPlaying.id] = nextEntry;
   saveProgress(state.progress);
   lastProgressSave = now;
   return true;
@@ -12967,8 +13073,22 @@ function onPlayerEnded() {
   const ended = { ...state.nowPlaying };
   const current = state.progress[state.nowPlaying.id];
   if (current) {
+    const now = Date.now();
     current.time = 0;
-    current.lastPlayed = Date.now();
+    current.lastPlayed = now;
+    if (ended.type === "tv") {
+      const episodes = normalizeEpisodeProgressMap(current.episodes);
+      const key = getEpisodeProgressKey(ended.season, ended.episode);
+      if (key) {
+        const prevEpisode = episodes[key] || {};
+        episodes[key] = {
+          time: 0,
+          duration: Number(prevEpisode.duration || 0),
+          lastPlayed: now,
+        };
+        current.episodes = episodes;
+      }
+    }
     saveProgress(state.progress);
   }
 
@@ -13010,6 +13130,7 @@ async function autoAdvanceEpisode(ended) {
 
   await switchPlayerEpisode(ended.season, nextEpisode, {
     language: String(ended.language || ""),
+    resumeTime: 0,
   });
   showToast(`Episode suivant lance: S${ended.season}E${nextEpisode}.`);
 }

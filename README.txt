@@ -238,6 +238,11 @@ LATEST CALENDAR/STATUS FIX (2026-03-09)
 
 LATEST IOS AUTO-SWITCH FIX (2026-03-09)
 - Playback guard now stays active during iOS segment fallback (no early guard skip).
+
+LATEST FIX LOG (2026-03-11)
+- Episode progress now stores per-episode time (SxEy) for series/anime when available.
+- Progress saving no longer overwrites saved time with 0 when the player doesn't expose playback time.
+- Resume picks per-episode time when switching season/episode; auto-next forces start at 0.
 - Auto-switch now accepts premium fallback candidates on mobile when needed (instead of stopping on free-only dead-end).
 - Bootstrap stall detection now fails fast on true `readyState=0` source stalls so next source can be attempted.
 - Added explicit guard rule: if `Fallback iOS actif...` stays blocked too long, force switch to the next source.

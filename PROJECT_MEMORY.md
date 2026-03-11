@@ -419,3 +419,8 @@ Last update: 2026-03-11
 - Theme filter UI switched to a single "Filtre" button that opens a checkbox panel.
 - Filter list regrouped (Famille/Jeunesse, Super-heros, etc) and auto-hides empty filters per view.
 - Panel is responsive (desktop dropdown, mobile bottom sheet) with clear/apply actions.
+
+## c189 follow-up (2026-03-11)
+- Per-episode progress now stores time/duration for series/anime when available (SxEy map).
+- Progress saving avoids overwriting saved times with 0 when the player does not expose time.
+- Episode resume uses per-episode time when switching season/episode; auto-next starts at 0.
