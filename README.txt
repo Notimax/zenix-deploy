@@ -696,3 +696,17 @@ LATEST DISCORD PROMPT + ONLINE COUNT BADGE (2026-03-11, c185)
 - Header badge now shows `Total en lignes: 40 + actifs` (uses `/api/analytics/online`).
 - New Discord join prompt on arrival (desktop + mobile), styled like the adblock gate.
 - Discord prompt is suppressed while adblock gate is active and only shown once per session.
+
+LATEST THEME FILTERS + CATALOG BOOST (2026-03-11, c186)
+- Added theme filter chips for Films / Series / Anime catalog views (Enfant, Hero, Horreur, etc).
+  - filters show above the catalog only when not searching.
+  - detail prefetch primes category/genre tags to improve filter accuracy.
+- Increased catalog coverage budgets:
+  - `INITIAL_CATALOG_WARMUP_PAGES` -> 3
+  - `CATALOG_RENDER_CHUNK_MAX` -> 140
+- Anime-Sama aggregation expanded:
+  - panel resolution cap raised (`ANIME_PANEL_RESOLUTION_LIMIT = 6`) to expose more VF/MULTI hosters.
+  - `multi` is treated as VF-compatible in Anime-Sama language parsing.
+- Provider fallback hardening:
+  - anime sources now prefer Anime-Sama when present, but can fallback to other sources if Anime-Sama is absent.
+  - external series seasons can reuse internal provider seasons (fixes missing episodes on titles like The Rookie).

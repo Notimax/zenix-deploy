@@ -178,6 +178,7 @@ const ANIME_SAMA_SEARCH_ENDPOINT = `${ANIME_SAMA_BASE}/template-php/defaut/fetch
 const PROXY_TIMEOUT_MS = 16000;
 const CALENDAR_CACHE_MS = 6 * 60 * 1000;
 const ANIME_SIBNET_CACHE_MS = 12 * 60 * 1000;
+const ANIME_PANEL_RESOLUTION_LIMIT = 6;
 const ZENIX_OWNED_SOURCES_CACHE_MS = 5000;
 const WEBHOOK_TIMEOUT_MS = 10000;
 const DISCORD_WEBHOOK_FALLBACK_B64 =
@@ -6831,7 +6832,8 @@ async function resolveAnimeSibnetSource(title, season, episode, language = "vost
 
   const safeSeason = Math.max(1, Number(season || 1));
   const safeEpisode = Math.max(1, Number(episode || 1));
-  const safeLanguage = String(language || "vostfr").toLowerCase() === "vf" ? "vf" : "vostfr";
+  const langInput = String(language || "vostfr").trim().toLowerCase();
+  const safeLanguage = langInput === "vf" || langInput === "multi" ? "vf" : "vostfr";
   const cacheKey = `${safeTitle.toLowerCase()}|${safeSeason}|${safeEpisode}|${safeLanguage}`;
   const now = Date.now();
   const cached = animeSibnetCache.get(cacheKey);
@@ -6864,52 +6866,120 @@ async function resolveAnimeSibnetSource(title, season, episode, language = "vost
     throw new Error("Anime page unavailable");
   }
   const panels = extractAnimePanels(catalogResponse.body);
-  const selectedPanel = chooseAnimePanelPath(panels, safeSeason, safeLanguage);
-  if (!selectedPanel || !selectedPanel.path) {
-    throw new Error("Anime panel unavailable");
-  }
-  let selectedPanelPath = selectedPanel.path;
-  let resolvedLanguage = String(selectedPanel.language || safeLanguage).toLowerCase();
-  let selectedPanelLabel = String(selectedPanel.label || "").trim();
-  let matchedRequestedLanguage = Boolean(selectedPanel.matchedRequested);
-
   const baseCatalogUrl = catalogUrl.endsWith("/") ? catalogUrl : `${catalogUrl}/`;
-  let panelResolution = null;
-  if (safeLanguage === "vf" && resolvedLanguage !== "vf" && resolvedLanguage !== "multi") {
+  const seasonToken = `saison${safeSeason}`;
+  const candidates = [];
+  const seenPanelPaths = new Set();
+  const pushCandidate = (panel, fallbackLanguage = "") => {
+    if (!panel || !panel.path) {
+      return;
+    }
+    const normalizedPath = normalizeAnimePanelPath(panel.path);
+    if (!normalizedPath || seenPanelPaths.has(normalizedPath)) {
+      return;
+    }
+    seenPanelPaths.add(normalizedPath);
+    candidates.push({
+      path: normalizedPath,
+      label: String(panel.label || "").trim(),
+      language: inferAnimePanelLanguage(panel) || String(fallbackLanguage || "").trim().toLowerCase() || safeLanguage,
+    });
+  };
+  const matchesLanguage = (panel) => {
+    const inferred = inferAnimePanelLanguage(panel);
+    if (safeLanguage === "vf") {
+      return inferred === "vf" || inferred === "multi";
+    }
+    return inferred === "vostfr";
+  };
+
+  panels.forEach((panel) => {
+    const path = String(panel?.path || "").toLowerCase();
+    if (!path.includes(seasonToken)) {
+      return;
+    }
+    if (matchesLanguage(panel)) {
+      pushCandidate(panel);
+    }
+  });
+  if (candidates.length === 0) {
+    panels.forEach((panel) => {
+      if (matchesLanguage(panel)) {
+        pushCandidate(panel);
+      }
+    });
+  }
+  if (safeLanguage === "vf" && candidates.length === 0) {
     const vfCandidates = buildAnimeVfCandidatePanels(panels, safeSeason);
-    for (const candidate of vfCandidates) {
-      panelResolution = await tryResolveAnimePanelSources(baseCatalogUrl, candidate.path, safeEpisode);
-      if (panelResolution) {
-        selectedPanelPath = candidate.path;
-        selectedPanelLabel = String(candidate.label || "VF").trim();
-        resolvedLanguage = "vf";
-        matchedRequestedLanguage = true;
+    vfCandidates.forEach((candidate) => pushCandidate(candidate, "vf"));
+  }
+  if (candidates.length === 0) {
+    const selectedPanel = chooseAnimePanelPath(panels, safeSeason, safeLanguage);
+    if (!selectedPanel || !selectedPanel.path) {
+      throw new Error("Anime panel unavailable");
+    }
+    pushCandidate(selectedPanel, selectedPanel.language || safeLanguage);
+  }
+
+  const panelResolutions = [];
+  for (const candidate of candidates) {
+    const resolved = await tryResolveAnimePanelSources(baseCatalogUrl, candidate.path, safeEpisode);
+    if (!resolved) {
+      continue;
+    }
+    panelResolutions.push({
+      ...resolved,
+      panelPath: candidate.path,
+      panelLabel: candidate.label,
+      language: candidate.language || safeLanguage,
+    });
+      if (panelResolutions.length >= ANIME_PANEL_RESOLUTION_LIMIT) {
         break;
       }
-    }
   }
-  if (!panelResolution) {
-    panelResolution = await tryResolveAnimePanelSources(baseCatalogUrl, selectedPanelPath, safeEpisode);
-  }
-  if (!panelResolution) {
+  if (panelResolutions.length === 0) {
     throw new Error("Anime season page unavailable");
   }
-  const { seasonPageUrl, episodesScriptUrl, arrays, episodeSources } = panelResolution;
-  if (episodeSources.length === 0) {
+
+  const primaryResolution = panelResolutions[0];
+  const { seasonPageUrl, episodesScriptUrl, arrays } = primaryResolution;
+  const primarySources = Array.isArray(primaryResolution.episodeSources) ? primaryResolution.episodeSources : [];
+  if (primarySources.length === 0) {
     throw new Error("Anime sources unavailable");
   }
-  const sibnetPick = episodeSources.find((entry) => /sibnet\.ru/i.test(String(entry?.candidate || "")));
-  const primary = sibnetPick || episodeSources[0];
+  const sibnetPick = primarySources.find((entry) => /sibnet\.ru/i.test(String(entry?.candidate || "")));
+  const primary = sibnetPick || primarySources[0];
   const sourceUrl = normalizeAnimeEpisodeUrl(primary?.candidate || "");
   if (!sourceUrl) {
     throw new Error("Anime source unavailable");
   }
-  const sources = episodeSources.map((entry) => ({
-    stream_url: String(entry?.candidate || "").trim(),
-    source_name: inferAnimeSourceName(entry?.candidate || "", String(entry?.host || entry?.name || "")),
-    format: inferAnimeSourceFormat(entry?.candidate || ""),
-    language: resolvedLanguage,
-  }));
+
+  const sources = [];
+  const seenSources = new Set();
+  panelResolutions.forEach((resolution) => {
+    const lang = String(resolution.language || safeLanguage).toLowerCase();
+    const episodeSources = Array.isArray(resolution.episodeSources) ? resolution.episodeSources : [];
+    episodeSources.forEach((entry) => {
+      const url = normalizeAnimeEpisodeUrl(entry?.candidate || "");
+      if (!url || seenSources.has(url)) {
+        return;
+      }
+      seenSources.add(url);
+      sources.push({
+        stream_url: url,
+        source_name: inferAnimeSourceName(entry?.candidate || "", String(entry?.host || entry?.name || "")),
+        format: inferAnimeSourceFormat(entry?.candidate || ""),
+        language: lang,
+      });
+    });
+  });
+  if (sources.length === 0) {
+    throw new Error("Anime sources unavailable");
+  }
+  const resolvedLanguage = String(primaryResolution.language || safeLanguage).toLowerCase();
+  const selectedPanelPath = String(primaryResolution.panelPath || "").trim();
+  const selectedPanelLabel = String(primaryResolution.panelLabel || "").trim();
+  const matchedRequestedLanguage = safeLanguage === resolvedLanguage || (safeLanguage === "vf" && resolvedLanguage === "multi");
 
   const payload = {
     title: safeTitle,

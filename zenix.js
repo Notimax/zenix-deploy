@@ -25,35 +25,35 @@ const STARTUP_SPLASH_SOUND_VOLUME = 0.06;
 const STARTUP_SPLASH_SOUND_COOLDOWN_MS = 1100;
 const IMAGE_WARMUP_BATCH = 28;
 const IMAGE_WARMUP_DELAY_MS = 12;
-const INITIAL_IMAGE_WARMUP_LIMIT = 260;
+const INITIAL_IMAGE_WARMUP_LIMIT = 320;
 const CALENDAR_YEAR_RANGE = 3;
 const CALENDAR_CACHE_KEY = "zenix-calendar-cache-v2";
 const CALENDAR_CACHE_MAX_ENTRIES = 8;
 const CALENDAR_RENDER_LIMIT = 420;
 const CALENDAR_TYPE_KEYS = ["film", "serie", "anime"];
-const INITIAL_CATALOG_WARMUP_PAGES = 2;
+const INITIAL_CATALOG_WARMUP_PAGES = 3;
 const BACKGROUND_CATALOG_DELAY_MS = 8;
 const BACKGROUND_CATALOG_RENDER_EVERY = 8;
-const CATALOG_MIN_VISIBLE_APPEND = 30;
+const CATALOG_MIN_VISIBLE_APPEND = 45;
 const CATALOG_VISIBLE_APPEND_BATCH_PAGES = 1;
 const CATALOG_VISIBLE_APPEND_MAX_STEPS_SCROLL = 6;
 const CATALOG_VISIBLE_APPEND_MAX_STEPS_MANUAL = 6;
 const CATALOG_RENDER_CHUNK_MIN = 40;
-const CATALOG_RENDER_CHUNK_MAX = 104;
+const CATALOG_RENDER_CHUNK_MAX = 140;
 const MOBILE_VIEWPORT_MAX_WIDTH = 740;
-const MOBILE_CATALOG_FIRST_PAINT = 120;
-const MOBILE_CATALOG_CHUNK_MIN = 88;
-const MOBILE_EAGER_IMAGE_LIMIT = 260;
-const MOBILE_HIGH_PRIORITY_IMAGE_LIMIT = 120;
-const DESKTOP_EAGER_IMAGE_LIMIT = 220;
-const DESKTOP_HIGH_PRIORITY_IMAGE_LIMIT = 96;
-const CRITICAL_COVER_PRIME_MOBILE = 240;
-const CRITICAL_COVER_PRIME_DESKTOP = 180;
+const MOBILE_CATALOG_FIRST_PAINT = 160;
+const MOBILE_CATALOG_CHUNK_MIN = 120;
+const MOBILE_EAGER_IMAGE_LIMIT = 320;
+const MOBILE_HIGH_PRIORITY_IMAGE_LIMIT = 160;
+const DESKTOP_EAGER_IMAGE_LIMIT = 300;
+const DESKTOP_HIGH_PRIORITY_IMAGE_LIMIT = 140;
+const CRITICAL_COVER_PRIME_MOBILE = 320;
+const CRITICAL_COVER_PRIME_DESKTOP = 240;
 const CRITICAL_COVER_PRIME_WAIT_MS = 900;
 const DETAIL_COVER_HYDRATE_CONCURRENCY_MOBILE = 10;
 const DETAIL_COVER_HYDRATE_CONCURRENCY_DESKTOP = 14;
-const DETAIL_COVER_HYDRATE_LIMIT_CATEGORY_MOBILE = 340;
-const DETAIL_COVER_HYDRATE_LIMIT_CATEGORY_DESKTOP = 260;
+const DETAIL_COVER_HYDRATE_LIMIT_CATEGORY_MOBILE = 420;
+const DETAIL_COVER_HYDRATE_LIMIT_CATEGORY_DESKTOP = 340;
 const DETAIL_COVER_HYDRATE_LIMIT_DEFAULT_MOBILE = 120;
 const DETAIL_COVER_HYDRATE_LIMIT_DEFAULT_DESKTOP = 84;
 const LIVE_RENDER_INTERACTION_GRACE_MS = 1200;
@@ -146,6 +146,9 @@ const SKIP_RECAP_SECONDS = 45;
 const INTEREST_QUERY_MAX = 40;
 const INTEREST_SEED_MAX = 40;
 const INTEREST_HOME_LIMIT = 10;
+const THEME_PREFETCH_LIMIT_IDLE = 120;
+const THEME_PREFETCH_LIMIT_ACTIVE = 240;
+const THEME_PREFETCH_BATCH = 8;
 const SEARCH_SIGNAL_MAX = 220;
 const SEARCH_SIGNAL_MAX_AGE_MS = 180 * 24 * 60 * 60 * 1000;
 const LOCK_VISIBLE_ROOT_URL = true;
@@ -159,6 +162,32 @@ const ADBLOCK_MONITOR_INTERVAL_MS = 8500;
 const ADBLOCK_BOOT_DELAY_MS = 950;
 const UI_THEME_ORDER = ["cine", "minimal", "neon"];
 const runtimeEnv = detectRuntimeEnvironment();
+
+const THEME_FILTERS = [
+  { id: "enfant", label: "Enfant", tokens: ["enfant", "kids", "jeunesse"] },
+  { id: "familial", label: "Familial", tokens: ["familial", "family"] },
+  { id: "hero", label: "Hero", tokens: ["hero", "super hero", "superhero", "marvel", "dc"] },
+  { id: "action", label: "Action", tokens: ["action"] },
+  { id: "aventure", label: "Aventure", tokens: ["aventure", "adventure"] },
+  { id: "comedie", label: "Comedie", tokens: ["comedie", "comedy", "humour"] },
+  { id: "drame", label: "Drame", tokens: ["drame", "drama"] },
+  { id: "thriller", label: "Thriller", tokens: ["thriller", "suspense"] },
+  { id: "horreur", label: "Horreur", tokens: ["horreur", "horror", "epouvante", "gore"] },
+  { id: "sf", label: "Science-fiction", tokens: ["science fiction", "science-fiction", "sci fi", "sci-fi", "sf"] },
+  { id: "fantastique", label: "Fantastique", tokens: ["fantastique", "fantasy"] },
+  { id: "romance", label: "Romance", tokens: ["romance", "romantique", "love"] },
+  { id: "mystere", label: "Mystere", tokens: ["mystere", "mystery"] },
+  { id: "crime", label: "Crime", tokens: ["crime", "policier", "gangster"] },
+  { id: "animation", label: "Animation", tokens: ["animation", "dessin anime", "anime", "japanimation"] },
+  { id: "musical", label: "Musical", tokens: ["musical", "musique", "music"] },
+  { id: "sport", label: "Sport", tokens: ["sport"] },
+  { id: "historique", label: "Historique", tokens: ["historique", "history", "epoque"] },
+  { id: "guerre", label: "Guerre", tokens: ["guerre", "war"] },
+  { id: "western", label: "Western", tokens: ["western"] },
+  { id: "documentaire", label: "Documentaire", tokens: ["documentaire", "documentary"] },
+  { id: "biopic", label: "Biopic", tokens: ["biopic", "biographie", "biographical"] },
+];
+const THEME_FILTER_INDEX = new Map(THEME_FILTERS.map((entry) => [entry.id, entry]));
 
 function detectRuntimeEnvironment() {
   const ua = String(navigator.userAgent || "").toLowerCase();
@@ -320,6 +349,13 @@ const state = {
   adblockDetected: false,
   adblockCheckTimer: 0,
   adblockProbeInFlight: false,
+  themeFilters: {
+    movie: new Set(),
+    tv: new Set(),
+    anime: new Set(),
+  },
+  themePrefetchAt: 0,
+  themePrefetchInFlight: false,
   discordPromptReady: false,
   discordGateVisible: false,
 };
@@ -426,6 +462,8 @@ const refs = {
   catalogSection: document.getElementById("catalogSection"),
   catalogTitle: document.getElementById("catalogTitle"),
   catalogSubtitle: document.getElementById("catalogSubtitle"),
+  themeFilterBar: document.getElementById("themeFilterBar"),
+  themeFilterRow: document.getElementById("themeFilterRow"),
   catalogGrid: document.getElementById("catalogGrid"),
   loadMoreBtn: document.getElementById("loadMoreBtn"),
   emptyStateWrap: document.getElementById("emptyStateWrap"),
@@ -1041,7 +1079,7 @@ async function init() {
   pruneProgressEntries();
   applyUiPrefs({ syncControls: true });
   if (refs.footerVersion) {
-    refs.footerVersion.textContent = "c185";
+    refs.footerVersion.textContent = "c186";
   }
   updateNetworkBadge();
   startOnlineCountPolling();
@@ -4693,6 +4731,142 @@ function renderFilterChips() {
   }
 }
 
+function getActiveThemeBucket(view = resolveCatalogViewForSearch()) {
+  if (view === "movie") {
+    return "movie";
+  }
+  if (view === "tv") {
+    return "tv";
+  }
+  if (view === "anime") {
+    return "anime";
+  }
+  return "";
+}
+
+function getActiveThemeFilterSet(view = resolveCatalogViewForSearch()) {
+  const bucket = getActiveThemeBucket(view);
+  if (!bucket) {
+    return null;
+  }
+  return state.themeFilters?.[bucket] || null;
+}
+
+function renderThemeFilters() {
+  if (!refs.themeFilterBar || !refs.themeFilterRow) {
+    return;
+  }
+  const activeView = resolveCatalogViewForSearch();
+  const bucket = getActiveThemeBucket(activeView);
+  const hasQuery = String(state.query || "").trim().length > 0;
+  const shouldShow = Boolean(bucket) && !hasQuery;
+  setHidden(refs.themeFilterBar, !shouldShow);
+  if (!shouldShow) {
+    refs.themeFilterRow.innerHTML = "";
+    return;
+  }
+
+  const activeSet = getActiveThemeFilterSet(activeView) || new Set();
+  refs.themeFilterRow.innerHTML = "";
+
+  const buildChip = (label, isActive, onClick) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `theme-chip${isActive ? " active" : ""}`;
+    button.textContent = label;
+    bindFastPress(button, onClick);
+    return button;
+  };
+
+  const hasActive = activeSet.size > 0;
+  refs.themeFilterRow.appendChild(
+    buildChip("Tous", !hasActive, () => {
+      if (activeSet.size === 0) {
+        return;
+      }
+      activeSet.clear();
+      renderThemeFilters();
+      renderAll();
+    })
+  );
+
+  THEME_FILTERS.forEach((filter) => {
+    refs.themeFilterRow.appendChild(
+      buildChip(filter.label, activeSet.has(filter.id), () => {
+        if (activeSet.has(filter.id)) {
+          activeSet.delete(filter.id);
+        } else {
+          activeSet.add(filter.id);
+        }
+        renderThemeFilters();
+        renderAll();
+      })
+    );
+  });
+}
+
+function matchesThemeFilter(item, activeSet) {
+  if (!activeSet || activeSet.size === 0) {
+    return true;
+  }
+  const tokens = getItemThemeTokens(item);
+  if (!tokens || tokens.size === 0) {
+    return false;
+  }
+  for (const key of activeSet) {
+    const filter = THEME_FILTER_INDEX.get(key);
+    if (!filter) {
+      continue;
+    }
+    if (tokens.has(key)) {
+      return true;
+    }
+    const match = filter.tokens.some((token) => tokens.has(normalizeThemeToken(token)));
+    if (match) {
+      return true;
+    }
+  }
+  return false;
+}
+
+async function primeThemeDetailsForView(items, activeSet) {
+  if (!Array.isArray(items) || items.length === 0) {
+    return;
+  }
+  if (state.themePrefetchInFlight) {
+    return;
+  }
+  const now = Date.now();
+  if (state.themePrefetchAt && now - state.themePrefetchAt < 7000) {
+    return;
+  }
+  const limit = activeSet && activeSet.size > 0 ? THEME_PREFETCH_LIMIT_ACTIVE : THEME_PREFETCH_LIMIT_IDLE;
+  const targets = items
+    .filter((item) => item && Number(item.id || 0) > 0)
+    .filter((item) => !item.isExternal)
+    .filter((item) => !state.detailsCache.has(item.id) && !state.detailsMissing.has(item.id))
+    .slice(0, limit);
+  if (targets.length === 0) {
+    return;
+  }
+  state.themePrefetchInFlight = true;
+  state.themePrefetchAt = now;
+  try {
+    for (let index = 0; index < targets.length; index += THEME_PREFETCH_BATCH) {
+      const batch = targets.slice(index, index + THEME_PREFETCH_BATCH);
+      await Promise.all(
+        batch.map((entry) =>
+          ensureDetails(entry.id).catch(() => {
+            // best effort only
+          })
+        )
+      );
+    }
+  } finally {
+    state.themePrefetchInFlight = false;
+  }
+}
+
 function applyCatalogSnapshot(snapshot) {
   if (!snapshot || typeof snapshot !== "object" || !Array.isArray(snapshot.items) || snapshot.items.length === 0) {
     return false;
@@ -5348,6 +5522,12 @@ function normalizeCatalogItem(raw) {
   const title = String(raw?.title || "Sans titre");
   const languageHint = normalizeLanguageLabel(raw?.lang || raw?.language || raw?.langue || "");
   const releaseDate = raw?.release_date || raw?.releaseDate || null;
+  const categories = Array.isArray(raw?.categories)
+    ? raw.categories
+    : Array.isArray(raw?.genres)
+      ? raw.genres
+      : [];
+  const genreLabel = raw?.genre || "";
   const externalProvider = String(raw?.external_provider || raw?.externalProvider || "")
     .trim()
     .toLowerCase();
@@ -5388,6 +5568,9 @@ function normalizeCatalogItem(raw) {
     endDate: raw?.end_date || null,
     languageHint,
     isAnime,
+    categories,
+    genres: Array.isArray(raw?.genres) ? raw.genres : [],
+    genre: genreLabel,
     isExternal: Boolean(externalProvider),
     externalProvider,
     externalKey: String(raw?.external_key || raw?.externalKey || "").trim(),
@@ -5610,6 +5793,7 @@ function renderAll() {
     });
     renderHero(heroItem);
     renderCommunityStats();
+    renderThemeFilters();
     renderCatalog(visible);
     if (!hasQuery) {
       renderContinue();
@@ -5730,6 +5914,16 @@ function getVisibleCatalog() {
       const normalized = item.titleKey || normalizeTitleKey(item.title || "");
       return queryKey.length > 0 && normalized.includes(queryKey);
     });
+  }
+
+  const activeThemeSet = query.length === 0 ? getActiveThemeFilterSet(activeView) : null;
+  if (activeThemeSet) {
+    primeThemeDetailsForView(list, activeThemeSet).catch(() => {
+      // best effort only
+    });
+    if (activeThemeSet.size > 0) {
+      list = list.filter((item) => matchesThemeFilter(item, activeThemeSet));
+    }
   }
 
   if (state.uiPrefs.hideWatched) {
@@ -5891,6 +6085,21 @@ function updateCatalogHeading(hasQuery, resultCount) {
 
 }
 
+function getActiveThemeFilterLabels() {
+  const activeSet = getActiveThemeFilterSet(resolveCatalogViewForSearch());
+  if (!activeSet || activeSet.size === 0) {
+    return [];
+  }
+  const labels = [];
+  activeSet.forEach((id) => {
+    const filter = THEME_FILTER_INDEX.get(id);
+    if (filter?.label) {
+      labels.push(filter.label);
+    }
+  });
+  return labels;
+}
+
 function getActiveCatalogFilterLabels() {
   const labels = [];
   if (state.uiPrefs.hideWatched) {
@@ -5913,6 +6122,10 @@ function getActiveCatalogFilterLabels() {
     labels.push("annee ancienne");
   } else if (state.sortBy === "random") {
     labels.push("ordre aleatoire");
+  }
+  const themeLabels = getActiveThemeFilterLabels();
+  if (themeLabels.length > 0) {
+    labels.push(`themes: ${themeLabels.join(", ")}`);
   }
   return labels;
 }
@@ -7461,7 +7674,7 @@ function buildSeasonsFromDetailUrls(details) {
   return seasons;
 }
 
-async function ensureSeasons(id) {
+async function ensureSeasons(id, options = {}) {
   if (state.seasonsCache.has(id)) {
     const cached = state.seasonsCache.get(id);
     if (Array.isArray(cached) && cached.length > 0) {
@@ -7474,6 +7687,7 @@ async function ensureSeasons(id) {
 
   const task = (async () => {
     const item = findItemById(id) || (await buildItemFromDetails(id).catch(() => null));
+    const allowInternalFallback = options.allowInternalFallback !== false;
     let details = null;
     if (item && item.type === "tv" && !item.isAnime) {
       details = state.detailsCache.get(Number(id)) || null;
@@ -7482,6 +7696,17 @@ async function ensureSeasons(id) {
           details = await ensureDetails(id);
         } catch {
           details = null;
+        }
+      }
+    }
+
+    if (allowInternalFallback && item?.isExternal) {
+      const internalCandidate = findInternalProviderCandidate(item);
+      if (internalCandidate && Number(internalCandidate.id || 0) > 0 && internalCandidate.id !== id) {
+        const internalSeasons = await ensureSeasons(internalCandidate.id, { allowInternalFallback: false });
+        if (Array.isArray(internalSeasons) && internalSeasons.length > 0) {
+          state.seasonsCache.set(id, internalSeasons);
+          return internalSeasons;
         }
       }
     }
@@ -7549,7 +7774,12 @@ async function ensureSeasons(id) {
 
     let payload = null;
     try {
-      payload = await fetchJson(`${API_BASE}/media/${id}/seasons`);
+      const detailUrlCount = Array.isArray(details?.urls) ? details.urls.length : 0;
+      const seasonTimeout = detailUrlCount > 500 ? 22000 : detailUrlCount > 200 ? 18000 : 15000;
+      payload = await fetchJson(`${API_BASE}/media/${id}/seasons`, {
+        timeoutMs: seasonTimeout,
+        retryDelays: [350, 900],
+      });
     } catch {
       payload = null;
     }
@@ -9631,14 +9861,21 @@ function preferAnimeSamaSources(item, sources) {
     return base;
   }
   const animeOnly = base.filter((entry) => isAnimeSamaSourceEntry(entry));
+  if (animeOnly.length === 0) {
+    return base;
+  }
   const frenchOnly = animeOnly.filter((entry) => {
     const lang = String(entry?.language || "").trim().toUpperCase();
     return lang === "VF" || lang === "MULTI";
   });
-  if (frenchOnly.length === 0) {
-    return [];
+  if (frenchOnly.length > 0) {
+    return sortSourcesByScore(frenchOnly);
   }
-  return sortSourcesByScore(frenchOnly);
+  const unknownLang = animeOnly.filter((entry) => !String(entry?.language || "").trim());
+  if (unknownLang.length > 0) {
+    return sortSourcesByScore(unknownLang);
+  }
+  return sortSourcesByScore(animeOnly);
 }
 
 function sortSourcesByScore(sources) {
@@ -13146,7 +13383,13 @@ function getItemThemeTokens(item) {
   }
 
   const details = state.detailsCache.get(Number(item.id || 0));
-  const categories = Array.isArray(details?.categories) ? details.categories : [];
+  const categories = Array.isArray(details?.categories)
+    ? details.categories
+    : Array.isArray(item?.categories)
+      ? item.categories
+      : Array.isArray(item?.genres)
+        ? item.genres
+        : [];
   categories.forEach((category) => {
     const name = normalizeThemeToken(category?.name || "");
     if (!name) {
@@ -13156,6 +13399,23 @@ function getItemThemeTokens(item) {
     splitNormalizedTokens(name).forEach((token) => {
       tokens.add(token);
     });
+  });
+
+  const genreHints = [
+    item?.genre,
+    item?.genres,
+  ]
+    .flat()
+    .filter(Boolean)
+    .map((value) => (typeof value === "string" ? value : value?.name || value?.label || ""))
+    .filter(Boolean);
+  genreHints.forEach((hint) => {
+    const normalized = normalizeThemeToken(hint);
+    if (!normalized) {
+      return;
+    }
+    tokens.add(normalized);
+    splitNormalizedTokens(normalized).forEach((token) => tokens.add(token));
   });
   return tokens;
 }

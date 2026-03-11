@@ -395,3 +395,17 @@ Last update: 2026-03-11
 - Header network badge now shows `Total en lignes` with a 40+ active boost (pulls from `/api/analytics/online`).
 - Added a Discord join prompt on entry (desktop + mobile), styled like the adblock gate.
 - Discord prompt is suppressed while adblock gate is active and is shown once per session.
+
+## c186 follow-up (2026-03-11)
+- Added theme filter chips for Films / Series / Anime catalog views (multi-select).
+  - filters appear only when not searching and sit above the catalog grid.
+  - detail prefetch primes genre tags to keep filtering accurate on big lists.
+- Catalog render/cover budgets increased:
+  - `INITIAL_CATALOG_WARMUP_PAGES` -> 3
+  - `CATALOG_RENDER_CHUNK_MAX` -> 140
+- Anime-Sama hoster aggregation expanded:
+  - panel resolution cap raised (`ANIME_PANEL_RESOLUTION_LIMIT = 6`) to expose more VF/MULTI readers.
+  - `multi` is treated as VF-compatible in Anime-Sama language parsing.
+- Provider fallback hardening:
+  - anime playback prefers Anime-Sama sources but falls back to existing sources if Anime-Sama is missing.
+  - external series seasons can reuse internal provider seasons (fixes missing episode lists on titles like The Rookie).
