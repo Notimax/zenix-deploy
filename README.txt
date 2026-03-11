@@ -691,3 +691,8 @@ LATEST SIMPSONS SEASONS FALLBACK + ANIME MULTI PANELS (2026-03-11, c184)
 - If `/media/{id}/seasons` returns empty, we now build seasons from detail urls as a fallback.
 - Anime-Sama panel language detection now treats `multi` as VF-compatible,
   so VF requests can keep multi panels and expose more VF/MULTI readers.
+
+LATEST DISCORD PROMPT + ONLINE COUNT BADGE (2026-03-11, c185)
+- Header badge now shows `Total en lignes: 40 + actifs` (uses `/api/analytics/online`).
+- New Discord join prompt on arrival (desktop + mobile), styled like the adblock gate.
+- Discord prompt is suppressed while adblock gate is active and only shown once per session.

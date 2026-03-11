@@ -7538,6 +7538,24 @@ async function handleAnalyticsHeartbeat(req, res, requestUrl) {
   }
 }
 
+async function handleAnalyticsOnline(req, res, requestUrl) {
+  if (requestUrl.pathname !== "/api/analytics/online") {
+    return false;
+  }
+  if (req.method !== "GET") {
+    sendJson(res, 405, { error: "Method Not Allowed" });
+    return true;
+  }
+  const stats = buildAnalyticsSnapshot();
+  sendJson(res, 200, {
+    type: "success",
+    generatedAt: stats.generatedAt,
+    activeNow: Number(stats.activeNow || 0),
+    activeIps: Number(stats.activeIps || 0),
+  });
+  return true;
+}
+
 async function handleAnalyticsWebhookStatus(req, res, requestUrl) {
   if (requestUrl.pathname !== "/api/analytics/webhook-status") {
     return false;
@@ -8489,6 +8507,12 @@ const server = http.createServer((req, res) => {
   handleAnalyticsHeartbeat(req, res, requestUrl)
     .then((handledAnalytics) => {
       if (handledAnalytics) {
+        return true;
+      }
+      return handleAnalyticsOnline(req, res, requestUrl);
+    })
+    .then((handledAnalyticsOnline) => {
+      if (handledAnalyticsOnline) {
         return true;
       }
       return handleAnalyticsWebhookStatus(req, res, requestUrl);

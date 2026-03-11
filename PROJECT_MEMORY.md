@@ -390,3 +390,8 @@ Last update: 2026-03-11
 - If `/media/{id}/seasons` is empty, frontend builds seasons from `/media/{id}/sheet` urls as fallback.
 - Anime-Sama panel detection treats `multi` as VF-compatible, so VF requests keep Multi panels
   and expose more VF/MULTI readers in anime playback.
+
+## c185 follow-up (2026-03-11)
+- Header network badge now shows `Total en lignes` with a 40+ active boost (pulls from `/api/analytics/online`).
+- Added a Discord join prompt on entry (desktop + mobile), styled like the adblock gate.
+- Discord prompt is suppressed while adblock gate is active and is shown once per session.

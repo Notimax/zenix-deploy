@@ -5986,6 +5986,97 @@ body.adblock-locked .back-to-top {
   user-select: none;
 }
 
+/* ===== Discord join gate ===== */
+.discord-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 209;
+  display: grid;
+  place-items: center;
+  padding: clamp(14px, 4vw, 32px);
+  background:
+    radial-gradient(circle at 12% 12%, rgba(88, 101, 242, 0.26), transparent 45%),
+    radial-gradient(circle at 85% 88%, rgba(72, 179, 255, 0.18), transparent 48%),
+    rgba(5, 6, 10, 0.82);
+  backdrop-filter: blur(8px);
+}
+
+.discord-gate-card {
+  width: min(560px, 100%);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 18px;
+  padding: clamp(18px, 4vw, 28px);
+  background:
+    radial-gradient(circle at 0% 0%, rgba(88, 101, 242, 0.25), transparent 45%),
+    linear-gradient(160deg, rgba(16, 18, 28, 0.98), rgba(9, 10, 16, 0.98));
+  box-shadow: 0 24px 62px rgba(0, 0, 0, 0.62);
+}
+
+.discord-gate-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.discord-gate-icon {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  color: #eaf0ff;
+  background: rgba(88, 101, 242, 0.2);
+  border: 1px solid rgba(88, 101, 242, 0.42);
+  box-shadow: inset 0 0 12px rgba(88, 101, 242, 0.2);
+}
+
+.discord-gate-icon svg {
+  width: 26px;
+  height: 26px;
+}
+
+.discord-gate-kicker {
+  margin: 0 0 6px;
+  font-size: 0.74rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(170, 197, 255, 0.92);
+}
+
+.discord-gate-card h2 {
+  margin: 0;
+  font-size: clamp(1.28rem, 4.8vw, 1.78rem);
+}
+
+.discord-gate-card p {
+  margin: 12px 0 0;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.discord-gate-actions {
+  margin-top: 18px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+body.discord-locked {
+  overflow: hidden;
+}
+
+body.discord-locked main,
+body.discord-locked .topbar,
+body.discord-locked .detail-modal,
+body.discord-locked .player-overlay,
+body.discord-locked .mobile-tabbar,
+body.discord-locked .design-updates,
+body.discord-locked .toast,
+body.discord-locked .back-to-top {
+  pointer-events: none;
+  user-select: none;
+}
+
 /* ===== Mobile catalog 2-up layout (c161) ===== */
 @media (max-width: 740px) {
   .catalog-grid {

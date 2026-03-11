@@ -67,8 +67,8 @@
       "logo": "https://zenix.best/android-chrome-512x512.png"
     }
   </script>
-    <link rel="stylesheet" href="/zenix.css?v=20260311-c184" />
-    <script defer src="/zenix.js?v=20260311-c184"></script>
+    <link rel="stylesheet" href="/zenix.css?v=20260311-c185" />
+    <script defer src="/zenix.js?v=20260311-c185"></script>
 </head>
 <body>
   <div class="startup-splash" id="startupSplash" aria-hidden="true">
@@ -126,7 +126,7 @@
         <span class="profile-mini-avatar" aria-hidden="true">Z</span>
         <span class="profile-mini-meta"><strong>Local</strong><small>UI prefs</small></span>
       </div>
-      <span class="net-badge" id="networkBadge" aria-live="polite">En ligne</span>
+      <span class="net-badge" id="networkBadge" aria-live="polite">Total en lignes</span>
     </div>
   </header>
 
@@ -600,6 +600,32 @@
         <button class="btn btn-primary" id="adblockRetryBtn" type="button">Verifier de nouveau</button>
       </div>
       <p class="adblock-gate-status" id="adblockGateStatus">Verification en cours...</p>
+    </article>
+  </section>
+
+  <section class="discord-gate" id="discordGate" hidden role="dialog" aria-modal="true" aria-labelledby="discordGateTitle">
+    <article class="discord-gate-card">
+      <div class="discord-gate-header">
+        <span class="discord-gate-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" role="img" focusable="false">
+            <path
+              d="M20.1 5.2C18.5 4.5 17 4.1 15.5 4c-.2.4-.4.8-.6 1.2a17.9 17.9 0 0 0-5.8 0c-.2-.4-.4-.8-.6-1.2-1.5.1-3 .5-4.6 1.2C1.7 8.4 1 11.5 1.3 14.7c1.7 1.2 3.4 1.9 5.1 2.3.4-.6.8-1.2 1.1-1.8-.6-.2-1.2-.5-1.7-.9.1-.1.2-.2.3-.2 3.4 1.6 7.2 1.6 10.6 0l.3.2c-.5.4-1.1.7-1.7.9.3.6.7 1.2 1.1 1.8 1.7-.4 3.4-1.1 5.1-2.3.4-3.7-.7-6.8-2.6-9.5ZM8.6 13.2c-.7 0-1.2-.7-1.2-1.5s.5-1.5 1.2-1.5 1.3.7 1.2 1.5-.5 1.5-1.2 1.5Zm6.8 0c-.7 0-1.2-.7-1.2-1.5s.5-1.5 1.2-1.5 1.3.7 1.2 1.5-.5 1.5-1.2 1.5Z"
+              fill="currentColor"
+            />
+          </svg>
+        </span>
+        <div>
+          <p class="discord-gate-kicker">Communaute</p>
+          <h2 id="discordGateTitle">Rejoins le Discord Zenix</h2>
+        </div>
+      </div>
+      <p>
+        Recevoir les alertes sorties, partager tes retours et discuter des sources VF avec la communaute.
+      </p>
+      <div class="discord-gate-actions">
+        <button class="btn btn-primary" id="discordJoinBtn" type="button">Oui, je rejoins</button>
+        <button class="btn btn-soft" id="discordLaterBtn" type="button">Peut-etre plus tard</button>
+      </div>
     </article>
   </section>
 

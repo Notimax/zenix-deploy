@@ -97,12 +97,17 @@ const EMBED_READY_TIMEOUT_MS = 6000;
 const HEARTBEAT_INTERVAL_MS = 30 * 1000;
 const HEARTBEAT_REQUEST_TIMEOUT_MS = 9000;
 const HEARTBEAT_KEY = "zenix-client-id-v1";
+const ONLINE_COUNT_BASE = 40;
+const ONLINE_COUNT_POLL_MS = 30 * 1000;
+const ONLINE_COUNT_STALE_MS = ONLINE_COUNT_POLL_MS * 2;
 const UI_PREFS_KEY = "zenix-ui-prefs-v1";
 const RECENT_SEARCHES_KEY = "zenix-recent-searches-v1";
 const SEARCH_SIGNALS_KEY = "zenix-search-signals-v1";
 const BROWSE_STATE_KEY = "zenix-browse-state-v1";
 const VIEW_SCROLL_KEY = "zenix-view-scroll-v1";
 const SOURCE_HOST_HEALTH_KEY = "zenix-source-health-v1";
+const DISCORD_PROMPT_SESSION_KEY = "zenix-discord-prompt-session-v1";
+const DISCORD_INVITE_URL = "https://discord.gg/xydTB8VmZT";
 const hlsLanguageProbeCache = new Map();
 const RECENT_SEARCHES_LIMIT = 8;
 const SCROLL_RESTORE_MAX = 8000;
@@ -286,6 +291,10 @@ const state = {
   analyticsInFlight: false,
   heartbeatTimer: null,
   heartbeatBound: false,
+  onlineCount: null,
+  onlineCountUpdatedAt: 0,
+  onlineCountInFlight: false,
+  onlineCountTimer: 0,
   startupSplashForceTimer: 0,
   startupAudioContext: null,
   lastStartupSoundAt: 0,
@@ -311,6 +320,8 @@ const state = {
   adblockDetected: false,
   adblockCheckTimer: 0,
   adblockProbeInFlight: false,
+  discordPromptReady: false,
+  discordGateVisible: false,
 };
 
 const refs = {
@@ -408,6 +419,9 @@ const refs = {
   adblockGate: document.getElementById("adblockGate"),
   adblockRetryBtn: document.getElementById("adblockRetryBtn"),
   adblockGateStatus: document.getElementById("adblockGateStatus"),
+  discordGate: document.getElementById("discordGate"),
+  discordJoinBtn: document.getElementById("discordJoinBtn"),
+  discordLaterBtn: document.getElementById("discordLaterBtn"),
 
   catalogSection: document.getElementById("catalogSection"),
   catalogTitle: document.getElementById("catalogTitle"),
@@ -1027,15 +1041,17 @@ async function init() {
   pruneProgressEntries();
   applyUiPrefs({ syncControls: true });
   if (refs.footerVersion) {
-    refs.footerVersion.textContent = "c163";
+    refs.footerVersion.textContent = "c185";
   }
   updateNetworkBadge();
+  startOnlineCountPolling();
   cleanupLegacyServiceWorker().catch(() => {
     // cleanup best effort only
   });
   bindEvents();
   initExternalNavigationGuard();
   initAdblockGuard();
+  initDiscordGate();
   refreshSuggestionClientTimestamp();
   hydrateLanguagePrefsMap();
   initCalendarControls();
@@ -1142,6 +1158,8 @@ async function init() {
     document.body.classList.add("is-ready");
   });
   await completeStartupSplash(splashStartedAt);
+  state.discordPromptReady = true;
+  maybeShowDiscordGate({ delayMs: 420 });
   initFloatingNotificationGuard();
 }
 
@@ -2320,6 +2338,9 @@ function bindEvents() {
     if (document.visibilityState === "visible") {
       bumpInteractionWindow(420);
       updateNetworkBadge();
+      syncOnlineCount({ reason: "visibility" }).catch(() => {
+        // best effort
+      });
       updateScrollUI();
       consumePendingCatalogUpdate();
       scheduleScrollDrivenCatalogSync({ immediate: true });
@@ -2329,6 +2350,9 @@ function bindEvents() {
   window.addEventListener("online", () => {
     state.networkOnline = true;
     updateNetworkBadge();
+    syncOnlineCount({ reason: "online" }).catch(() => {
+      // best effort
+    });
     showToast("Connexion retablie. Sync en cours.");
     syncCurrentViewData("online").catch(() => {
       // best effort
@@ -2535,16 +2559,83 @@ function applyPlayerRate(rate, options = {}) {
   }
 }
 
+function getOnlineCountValue() {
+  const count = Number(state.onlineCount || 0);
+  return Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
+}
+
+function getOnlineCountDisplay() {
+  const count = getOnlineCountValue();
+  const base = ONLINE_COUNT_BASE;
+  return base + Math.max(0, count);
+}
+
+function getOnlineCountSuffix() {
+  if (!state.onlineCountUpdatedAt) {
+    return "+";
+  }
+  if (Date.now() - state.onlineCountUpdatedAt > ONLINE_COUNT_STALE_MS) {
+    return "+";
+  }
+  return "";
+}
+
 function updateNetworkBadge() {
   const online = navigator.onLine !== false;
   state.networkOnline = online;
   if (refs.networkBadge) {
-    refs.networkBadge.textContent = online ? "En ligne" : "Hors ligne";
-    refs.networkBadge.classList.toggle("offline", !online);
+    if (!online) {
+      refs.networkBadge.textContent = "Hors ligne";
+      refs.networkBadge.classList.add("offline");
+    } else {
+      const displayCount = getOnlineCountDisplay();
+      const suffix = getOnlineCountSuffix();
+      refs.networkBadge.textContent = `Total en lignes: ${displayCount}${suffix}`;
+      refs.networkBadge.classList.remove("offline");
+    }
   }
   if (refs.footerNetworkState) {
     refs.footerNetworkState.textContent = online ? "En ligne" : "Hors ligne";
   }
+}
+
+async function syncOnlineCount(options = {}) {
+  if (state.onlineCountInFlight) {
+    return;
+  }
+  if (navigator.onLine === false) {
+    updateNetworkBadge();
+    return;
+  }
+  state.onlineCountInFlight = true;
+  try {
+    const payload = await fetchJson(`${API_BASE}/analytics/online`, { timeoutMs: 6000 });
+    const count = Math.max(0, Number(payload?.activeNow ?? payload?.active ?? 0));
+    if (Number.isFinite(count)) {
+      state.onlineCount = count;
+      state.onlineCountUpdatedAt = Date.now();
+    }
+  } catch {
+    // best effort
+  } finally {
+    state.onlineCountInFlight = false;
+    updateNetworkBadge();
+  }
+}
+
+function startOnlineCountPolling() {
+  if (state.onlineCountTimer) {
+    clearInterval(state.onlineCountTimer);
+    state.onlineCountTimer = 0;
+  }
+  syncOnlineCount({ reason: "startup" }).catch(() => {
+    // best effort
+  });
+  state.onlineCountTimer = window.setInterval(() => {
+    syncOnlineCount({ reason: "interval" }).catch(() => {
+      // best effort
+    });
+  }, ONLINE_COUNT_POLL_MS);
 }
 
 function updateScrollUI() {
@@ -2832,6 +2923,72 @@ function applyNativeAdPlacement() {
   activateNativeAdIfNeeded();
 }
 
+function hasDiscordPromptSession() {
+  try {
+    return sessionStorage.getItem(DISCORD_PROMPT_SESSION_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function markDiscordPromptSession() {
+  try {
+    sessionStorage.setItem(DISCORD_PROMPT_SESSION_KEY, "1");
+  } catch {
+    // ignore
+  }
+}
+
+function setDiscordGateVisible(visible) {
+  if (!refs.discordGate) {
+    return;
+  }
+  const nextVisible = Boolean(visible);
+  refs.discordGate.hidden = !nextVisible;
+  state.discordGateVisible = nextVisible;
+  document.body.classList.toggle("discord-locked", nextVisible);
+  if (nextVisible) {
+    markDiscordPromptSession();
+  }
+}
+
+function maybeShowDiscordGate(options = {}) {
+  if (!refs.discordGate || !state.discordPromptReady) {
+    return;
+  }
+  if (state.adblockDetected || !refs.adblockGate?.hidden) {
+    return;
+  }
+  if (hasDiscordPromptSession()) {
+    return;
+  }
+  if (state.discordGateVisible) {
+    return;
+  }
+  const delayMs = Math.max(0, Number(options.delayMs || 0));
+  if (delayMs > 0) {
+    window.setTimeout(() => {
+      maybeShowDiscordGate({ delayMs: 0 });
+    }, delayMs);
+    return;
+  }
+  setDiscordGateVisible(true);
+}
+
+function initDiscordGate() {
+  if (refs.discordJoinBtn) {
+    bindFastPress(refs.discordJoinBtn, () => {
+      setDiscordGateVisible(false);
+      window.open(DISCORD_INVITE_URL, "_blank", "noopener,noreferrer");
+    });
+  }
+  if (refs.discordLaterBtn) {
+    bindFastPress(refs.discordLaterBtn, () => {
+      setDiscordGateVisible(false);
+    });
+  }
+}
+
 function setAdblockGateStatus(message, isError = false) {
   if (!refs.adblockGateStatus) {
     return;
@@ -2847,6 +3004,9 @@ function setAdblockGateVisible(visible) {
   const nextVisible = Boolean(visible);
   refs.adblockGate.hidden = !nextVisible;
   document.body.classList.toggle("adblock-locked", nextVisible);
+  if (nextVisible) {
+    setDiscordGateVisible(false);
+  }
 }
 
 async function detectAdblockBait() {
@@ -2889,6 +3049,7 @@ function applyAdblockDetectionState(blocked, options = {}) {
   if (wasBlocked && options.manual === true) {
     showToast("Merci. Acces restaure.");
   }
+  maybeShowDiscordGate({ delayMs: 240 });
 }
 
 async function runAdblockDetection(options = {}) {
