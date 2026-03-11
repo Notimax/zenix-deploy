@@ -1098,10 +1098,11 @@ async function init() {
   const splashStartedAt = startStartupSplash();
   applyRuntimeBrowserHints();
   initPerfTierMonitor();
+  scheduleNativeAdWarmup();
   pruneProgressEntries();
   applyUiPrefs({ syncControls: true });
   if (refs.footerVersion) {
-    refs.footerVersion.textContent = "c192";
+    refs.footerVersion.textContent = "c193";
   }
   updateNetworkBadge();
   startOnlineCountPolling();
@@ -3062,6 +3063,15 @@ function ensureNativeAdContainer() {
     frame.setAttribute("sandbox", NATIVE_AD_FRAME_SANDBOX);
     const docHtml = `<!doctype html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>html,body{margin:0;padding:0;background:transparent;overflow:hidden;min-height:180px;}#${NATIVE_AD_CONTAINER_ID}{width:100%;min-height:180px;}</style></head><body><div id="${NATIVE_AD_CONTAINER_ID}"></div><script async data-cfasync="false" src="${NATIVE_AD_SCRIPT_SRC}"></script></body></html>`;
     frame.srcdoc = docHtml;
+    refs.nativeAdUnit.classList.remove("is-loaded");
+    frame.addEventListener("load", () => {
+      window.setTimeout(() => {
+        refs.nativeAdUnit?.classList.add("is-loaded");
+      }, 300);
+    });
+    window.setTimeout(() => {
+      refs.nativeAdUnit?.classList.add("is-loaded");
+    }, 2400);
     refs.nativeAdUnit.innerHTML = "";
     refs.nativeAdUnit.appendChild(frame);
   }
@@ -3121,6 +3131,13 @@ function applyNativeAdPlacement() {
   }
   mountNativeAd(refs.nativeAdHomeMount);
   activateNativeAdIfNeeded();
+}
+
+function scheduleNativeAdWarmup() {
+  const delay = state.perfTier === "low" ? 1100 : 420;
+  window.setTimeout(() => {
+    activateNativeAdIfNeeded();
+  }, delay);
 }
 
 function hasDiscordPromptSession() {

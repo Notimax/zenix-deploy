@@ -1525,6 +1525,27 @@ body.in-app-browser .catalog-grid {
   border: 1px dashed rgba(255, 255, 255, 0.2);
   background: rgba(255, 255, 255, 0.02);
   overflow: hidden;
+  position: relative;
+}
+
+.native-banner-wrap::before {
+  content: "Chargement sponsorise...";
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 0.8rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  background: linear-gradient(140deg, rgba(10, 12, 20, 0.6), rgba(14, 16, 24, 0.25));
+  opacity: 1;
+  transition: opacity 240ms ease;
+  pointer-events: none;
+}
+
+.native-banner-wrap.is-loaded::before {
+  opacity: 0;
 }
 
 .native-banner-frame {

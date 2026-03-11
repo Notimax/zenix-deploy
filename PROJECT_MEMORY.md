@@ -435,3 +435,7 @@ Last update: 2026-03-11
 ## c192 follow-up (2026-03-11)
 - Adaptive performance tuning uses device/network tiering to scale catalog batch sizes and image budgets.
 - Supplemental catalog per-page size now scales with device performance to show more titles on fast devices.
+
+## c193 follow-up (2026-03-11)
+- Added preconnect to ad host and early native banner warmup for faster sponsor rendering.
+- Sponsor slot shows a lightweight loading placeholder that fades when the iframe initializes.
