@@ -164,9 +164,8 @@ const UI_THEME_ORDER = ["cine", "minimal", "neon"];
 const runtimeEnv = detectRuntimeEnvironment();
 
 const THEME_FILTERS = [
-  { id: "enfant", label: "Enfant", tokens: ["enfant", "kids", "jeunesse"] },
-  { id: "familial", label: "Familial", tokens: ["familial", "family"] },
-  { id: "hero", label: "Hero", tokens: ["hero", "super hero", "superhero", "marvel", "dc"] },
+  { id: "famille", label: "Famille / Jeunesse", tokens: ["familial", "family", "enfant", "kids", "jeunesse"] },
+  { id: "superhero", label: "Super-heros", tokens: ["hero", "super hero", "superhero", "marvel", "dc"] },
   { id: "action", label: "Action", tokens: ["action"] },
   { id: "aventure", label: "Aventure", tokens: ["aventure", "adventure"] },
   { id: "comedie", label: "Comedie", tokens: ["comedie", "comedy", "humour"] },
@@ -179,15 +178,31 @@ const THEME_FILTERS = [
   { id: "mystere", label: "Mystere", tokens: ["mystere", "mystery"] },
   { id: "crime", label: "Crime", tokens: ["crime", "policier", "gangster"] },
   { id: "animation", label: "Animation", tokens: ["animation", "dessin anime", "anime", "japanimation"] },
-  { id: "musical", label: "Musical", tokens: ["musical", "musique", "music"] },
-  { id: "sport", label: "Sport", tokens: ["sport"] },
+  { id: "documentaire", label: "Documentaire", tokens: ["documentaire", "documentary"] },
   { id: "historique", label: "Historique", tokens: ["historique", "history", "epoque"] },
   { id: "guerre", label: "Guerre", tokens: ["guerre", "war"] },
   { id: "western", label: "Western", tokens: ["western"] },
-  { id: "documentaire", label: "Documentaire", tokens: ["documentaire", "documentary"] },
-  { id: "biopic", label: "Biopic", tokens: ["biopic", "biographie", "biographical"] },
+  { id: "musique", label: "Musique", tokens: ["musique", "music", "musical"] },
+  { id: "sport", label: "Sport", tokens: ["sport"] },
 ];
 const THEME_FILTER_INDEX = new Map(THEME_FILTERS.map((entry) => [entry.id, entry]));
+const THEME_TOKEN_INDEX = (() => {
+  const index = new Map();
+  THEME_FILTERS.forEach((filter) => {
+    const tokens = new Set([filter.id, ...(filter.tokens || [])]);
+    tokens.forEach((token) => {
+      const normalized = normalizeThemeToken(token);
+      if (!normalized) {
+        return;
+      }
+      if (!index.has(normalized)) {
+        index.set(normalized, new Set());
+      }
+      index.get(normalized).add(filter.id);
+    });
+  });
+  return index;
+})();
 
 function detectRuntimeEnvironment() {
   const ua = String(navigator.userAgent || "").toLowerCase();
@@ -462,8 +477,13 @@ const refs = {
   catalogSection: document.getElementById("catalogSection"),
   catalogTitle: document.getElementById("catalogTitle"),
   catalogSubtitle: document.getElementById("catalogSubtitle"),
-  themeFilterBar: document.getElementById("themeFilterBar"),
-  themeFilterRow: document.getElementById("themeFilterRow"),
+  catalogFilterShell: document.getElementById("catalogFilterShell"),
+  themeFilterToggleBtn: document.getElementById("themeFilterToggleBtn"),
+  themeFilterPanel: document.getElementById("themeFilterPanel"),
+  themeFilterList: document.getElementById("themeFilterList"),
+  themeFilterClearBtn: document.getElementById("themeFilterClearBtn"),
+  themeFilterApplyBtn: document.getElementById("themeFilterApplyBtn"),
+  themeFilterBackdrop: document.getElementById("themeFilterBackdrop"),
   catalogGrid: document.getElementById("catalogGrid"),
   loadMoreBtn: document.getElementById("loadMoreBtn"),
   emptyStateWrap: document.getElementById("emptyStateWrap"),
@@ -1079,7 +1099,7 @@ async function init() {
   pruneProgressEntries();
   applyUiPrefs({ syncControls: true });
   if (refs.footerVersion) {
-    refs.footerVersion.textContent = "c187";
+    refs.footerVersion.textContent = "c188";
   }
   updateNetworkBadge();
   startOnlineCountPolling();
@@ -1570,6 +1590,51 @@ function bindEvents() {
       showToast(isReducedMotionEnabled() ? "Animations reduites." : "Animations activees.");
     });
   }
+
+  if (refs.themeFilterToggleBtn) {
+    bindFastPress(refs.themeFilterToggleBtn, (event) => {
+      event?.stopPropagation?.();
+      toggleThemeFilterPanel();
+    });
+  }
+  if (refs.themeFilterClearBtn) {
+    bindFastPress(refs.themeFilterClearBtn, () => {
+      const activeSet = getActiveThemeFilterSet();
+      if (activeSet && activeSet.size > 0) {
+        activeSet.clear();
+        renderThemeFilters();
+        renderAll();
+      }
+    });
+  }
+  if (refs.themeFilterApplyBtn) {
+    bindFastPress(refs.themeFilterApplyBtn, () => {
+      setThemeFilterPanelOpen(false);
+    });
+  }
+  if (refs.themeFilterBackdrop) {
+    bindFastPress(refs.themeFilterBackdrop, () => {
+      setThemeFilterPanelOpen(false);
+    });
+  }
+  document.addEventListener(
+    "click",
+    (event) => {
+      if (!isThemeFilterPanelOpen() || !(event.target instanceof HTMLElement)) {
+        return;
+      }
+      if (event.target.closest("#catalogFilterShell")) {
+        return;
+      }
+      setThemeFilterPanelOpen(false);
+    },
+    { capture: true }
+  );
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      setThemeFilterPanelOpen(false);
+    }
+  });
 
   if (refs.openDesignUpdatesBtn) {
     bindFastPress(refs.openDesignUpdatesBtn, () => {
@@ -4752,56 +4817,117 @@ function getActiveThemeFilterSet(view = resolveCatalogViewForSearch()) {
   return state.themeFilters?.[bucket] || null;
 }
 
+function isThemeFilterPanelOpen() {
+  return Boolean(refs.themeFilterPanel && !refs.themeFilterPanel.hasAttribute("hidden"));
+}
+
+function setThemeFilterPanelOpen(open) {
+  if (!refs.themeFilterPanel) {
+    return;
+  }
+  const shouldOpen = Boolean(open);
+  setHidden(refs.themeFilterPanel, !shouldOpen);
+  setHidden(refs.themeFilterBackdrop, !shouldOpen);
+  if (refs.themeFilterToggleBtn) {
+    refs.themeFilterToggleBtn.setAttribute("aria-expanded", shouldOpen ? "true" : "false");
+  }
+}
+
+function toggleThemeFilterPanel() {
+  renderThemeFilters();
+  setThemeFilterPanelOpen(!isThemeFilterPanelOpen());
+}
+
+function getThemeFilterAvailability(items, activeSet) {
+  const counts = new Map();
+  const rows = Array.isArray(items) ? items : [];
+  const limit = Math.min(rows.length, 1600);
+  for (let index = 0; index < limit; index += 1) {
+    const item = rows[index];
+    const tokens = getItemThemeTokens(item);
+    if (!tokens || tokens.size === 0) {
+      continue;
+    }
+    const matched = new Set();
+    tokens.forEach((token) => {
+      const bucket = THEME_TOKEN_INDEX.get(token);
+      if (!bucket) {
+        return;
+      }
+      bucket.forEach((id) => matched.add(id));
+    });
+    matched.forEach((id) => {
+      counts.set(id, (counts.get(id) || 0) + 1);
+    });
+  }
+  const filters = THEME_FILTERS.filter(
+    (filter) => (counts.get(filter.id) || 0) > 0 || (activeSet && activeSet.has(filter.id))
+  );
+  return { filters, counts };
+}
+
 function renderThemeFilters() {
-  if (!refs.themeFilterBar || !refs.themeFilterRow) {
+  if (!refs.catalogFilterShell || !refs.themeFilterList) {
     return;
   }
   const activeView = resolveCatalogViewForSearch();
   const bucket = getActiveThemeBucket(activeView);
   const hasQuery = String(state.query || "").trim().length > 0;
   const shouldShow = Boolean(bucket) && !hasQuery;
-  setHidden(refs.themeFilterBar, !shouldShow);
+  setHidden(refs.catalogFilterShell, !shouldShow);
   if (!shouldShow) {
-    refs.themeFilterRow.innerHTML = "";
+    setThemeFilterPanelOpen(false);
+    refs.themeFilterList.innerHTML = "";
     return;
   }
 
   const activeSet = getActiveThemeFilterSet(activeView) || new Set();
-  refs.themeFilterRow.innerHTML = "";
+  const baseList = getVisibleCatalog({ skipThemeFilters: true });
+  primeThemeDetailsForView(baseList, activeSet).catch(() => {
+    // best effort only
+  });
+  const { filters, counts } = getThemeFilterAvailability(baseList, activeSet);
 
-  const buildChip = (label, isActive, onClick) => {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = `theme-chip${isActive ? " active" : ""}`;
-    button.textContent = label;
-    bindFastPress(button, onClick);
-    return button;
-  };
+  refs.themeFilterList.innerHTML = "";
+  if (filters.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "empty";
+    empty.textContent = "Aucun filtre disponible pour cette vue.";
+    refs.themeFilterList.appendChild(empty);
+    return;
+  }
 
-  const hasActive = activeSet.size > 0;
-  refs.themeFilterRow.appendChild(
-    buildChip("Tous", !hasActive, () => {
-      if (activeSet.size === 0) {
-        return;
+  filters.forEach((filter) => {
+    const label = document.createElement("label");
+    label.className = "theme-filter-item";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = activeSet.has(filter.id);
+    checkbox.dataset.filterId = filter.id;
+    const name = document.createElement("span");
+    name.className = "theme-filter-name";
+    name.textContent = filter.label;
+    const countValue = counts.get(filter.id) || 0;
+    const count = document.createElement("span");
+    count.className = "theme-filter-count";
+    count.textContent = countValue > 0 ? String(countValue) : "";
+
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) {
+        activeSet.add(filter.id);
+      } else {
+        activeSet.delete(filter.id);
       }
-      activeSet.clear();
       renderThemeFilters();
       renderAll();
-    })
-  );
+    });
 
-  THEME_FILTERS.forEach((filter) => {
-    refs.themeFilterRow.appendChild(
-      buildChip(filter.label, activeSet.has(filter.id), () => {
-        if (activeSet.has(filter.id)) {
-          activeSet.delete(filter.id);
-        } else {
-          activeSet.add(filter.id);
-        }
-        renderThemeFilters();
-        renderAll();
-      })
-    );
+    label.appendChild(checkbox);
+    label.appendChild(name);
+    if (countValue > 0) {
+      label.appendChild(count);
+    }
+    refs.themeFilterList.appendChild(label);
   });
 }
 
@@ -5870,7 +5996,7 @@ function renderAll() {
   }
 }
 
-function getVisibleCatalog() {
+function getVisibleCatalog(options = {}) {
   const activeView = resolveCatalogViewForSearch();
   let list = state.catalog.slice();
   if (activeView === "top") {
@@ -5916,13 +6042,15 @@ function getVisibleCatalog() {
     });
   }
 
-  const activeThemeSet = query.length === 0 ? getActiveThemeFilterSet(activeView) : null;
-  if (activeThemeSet) {
-    primeThemeDetailsForView(list, activeThemeSet).catch(() => {
-      // best effort only
-    });
-    if (activeThemeSet.size > 0) {
-      list = list.filter((item) => matchesThemeFilter(item, activeThemeSet));
+  if (!options.skipThemeFilters) {
+    const activeThemeSet = query.length === 0 ? getActiveThemeFilterSet(activeView) : null;
+    if (activeThemeSet) {
+      primeThemeDetailsForView(list, activeThemeSet).catch(() => {
+        // best effort only
+      });
+      if (activeThemeSet.size > 0) {
+        list = list.filter((item) => matchesThemeFilter(item, activeThemeSet));
+      }
     }
   }
 

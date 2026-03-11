@@ -67,8 +67,8 @@
       "logo": "https://zenix.best/android-chrome-512x512.png"
     }
   </script>
-    <link rel="stylesheet" href="/zenix.css?v=20260311-c187" />
-    <script defer src="/zenix.js?v=20260311-c187"></script>
+    <link rel="stylesheet" href="/zenix.css?v=20260311-c188" />
+    <script defer src="/zenix.js?v=20260311-c188"></script>
 </head>
 <body>
   <div class="startup-splash" id="startupSplash" aria-hidden="true">
@@ -248,9 +248,26 @@
         <h2 id="catalogTitle">Streaming</h2>
         <p id="catalogSubtitle">Nouveaux titres detectes automatiquement.</p>
       </div>
-      <div class="theme-filter-bar" id="themeFilterBar" hidden>
-        <span class="theme-filter-label">Themes</span>
-        <div class="theme-filter-row" id="themeFilterRow" role="group" aria-label="Filtres par theme"></div>
+      <div class="catalog-filter-shell" id="catalogFilterShell" hidden>
+        <button
+          class="btn btn-soft btn-compact"
+          id="themeFilterToggleBtn"
+          type="button"
+          aria-expanded="false"
+          aria-controls="themeFilterPanel"
+        >
+          Filtre
+        </button>
+        <div class="theme-filter-panel" id="themeFilterPanel" role="dialog" aria-label="Filtres" hidden>
+          <div class="theme-filter-panel-head">
+            <span>Filtres</span>
+            <button class="theme-filter-clear" id="themeFilterClearBtn" type="button">Tout effacer</button>
+          </div>
+          <div class="theme-filter-panel-body" id="themeFilterList"></div>
+          <div class="theme-filter-panel-actions">
+            <button class="btn btn-primary btn-compact" id="themeFilterApplyBtn" type="button">Appliquer</button>
+          </div>
+        </div>
       </div>
       <div class="catalog-grid" id="catalogGrid"></div>
       <div class="catalog-actions">
@@ -633,6 +650,7 @@
     </article>
   </section>
 
+  <div class="theme-filter-backdrop" id="themeFilterBackdrop" hidden></div>
   <div class="toast" id="toast" hidden role="status" aria-live="polite"></div>
   <input id="importListInput" type="file" accept="application/json,.json" hidden />
   <button class="back-to-top" id="backToTopBtn" type="button" hidden aria-label="Remonter en haut">Haut</button>

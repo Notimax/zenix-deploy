@@ -414,3 +414,8 @@ Last update: 2026-03-11
 - Supplemental catalog now pulls Nakios `discover` feeds for movies and series.
 - Default `NAKIOS_CATALOG_PAGES_PER_FEED` raised to 3 to surface more titles
   (ex: Nakios movie id `1629382` now appears via `movies/discover` page 3).
+
+## c188 follow-up (2026-03-11)
+- Theme filter UI switched to a single "Filtre" button that opens a checkbox panel.
+- Filter list regrouped (Famille/Jeunesse, Super-heros, etc) and auto-hides empty filters per view.
+- Panel is responsive (desktop dropdown, mobile bottom sheet) with clear/apply actions.

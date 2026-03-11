@@ -714,3 +714,8 @@ LATEST THEME FILTERS + CATALOG BOOST (2026-03-11, c186)
 LATEST NAKIOS DISCOVER FEED (2026-03-11, c187)
 - Added Nakios `discover` feeds for movies + series.
 - Default Nakios pages per feed raised to 3 (surfaces titles missing from popular/trending/upcoming/top-rated).
+
+LATEST FILTER PANEL UI (2026-03-11, c188)
+- Replaced theme chips with a "Filtre" button that opens a checkbox panel (desktop + mobile).
+- Filter list cleaned and regrouped (Famille/Jeunesse, Super-heros, Action, etc) and auto-hides empty filters.
+- Panel includes clear/apply actions and closes on backdrop/escape.
