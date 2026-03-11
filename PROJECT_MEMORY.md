@@ -451,3 +451,16 @@ Last update: 2026-03-11
 - Branded Nakios-facing labels as Zenix in API responses/UI (no provider names exposed in payload labels).
 - Added pinned Nakios titles to supplemental catalog: Go Karts + Minions (2015, Rise of Gru) + Moi, Moche et Mechant (1-4).
 - Player now pre-issues the gate token before playback to avoid first-load source misses.
+
+## c199 follow-up (2026-03-11)
+- Movie playback now retries sources if the initial pool is empty (prevents refresh-needed starts).
+- If still empty, shows a clear "En attente" (external/pending) or "Lecture indisponible" message and stops the guard.
+- Nakios source timeout increased (frontend + server) to tolerate slower source API responses.
+- Go Karts pinned year corrected to 2020 for better matching.
+
+## c200 follow-up (2026-03-11)
+- Mobile stream prefetch now warms the first HLS manifest (best-effort) to reduce iOS first-play stalls.
+- Added `ZENIX_GATE_DISABLE=1` server flag for local brute tests (gate remains enabled in production).
+- Local brute matrix (F1 + Mercredi, 2026-03-11) with gate disabled:
+  - Source: `__tmp_brut_f1_mercredi_matrix_result_local_c207.json`
+  - Summary: total 8, passed 8, failed 0, `/api/media/*/sheet` 404 count: 0

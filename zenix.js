@@ -69,7 +69,7 @@ const STREAM_DIRECT_TIMEOUT_MS = 5200;
 const STREAM_DIRECT_PREFETCH_TIMEOUT_MS = 3600;
 const ANIME_SIBNET_TIMEOUT_MS = 11000;
 const ZENIX_OWNED_SOURCE_TIMEOUT_MS = 7000;
-const NAKIOS_SOURCE_TIMEOUT_MS = 14000;
+const NAKIOS_SOURCE_TIMEOUT_MS = 20000;
 const SUPPLEMENTAL_CATALOG_TIMEOUT_MS = 14000;
 const EPISODE_SOON_VERIFY_TTL_MS = 3 * 60 * 1000;
 const EPISODE_SOON_VERIFY_LIMIT = 40;
@@ -161,7 +161,7 @@ const ADBLOCK_MONITOR_INTERVAL_MS = 8500;
 const ADBLOCK_BOOT_DELAY_MS = 950;
 const GATE_CHALLENGE_PATH = "/api/gate/challenge";
 const GATE_ISSUE_PATH = "/api/gate/issue";
-const GATE_PROOF_TIMEOUT_MS = 1900;
+const GATE_PROOF_TIMEOUT_MS = 3200;
 const GATE_REFRESH_COOLDOWN_MS = 6 * 60 * 1000;
 const UI_THEME_ORDER = ["cine", "minimal", "neon"];
 const runtimeEnv = detectRuntimeEnvironment();
@@ -7045,9 +7045,40 @@ function prefetchStreamForItem(item) {
       : [`/stream/${itemId}`];
 
   paths.forEach((path) => {
-    fetchStreamJson(path, { prefetch: true }).catch(() => {
+    fetchStreamJson(path, { prefetch: true })
+      .then((payload) => {
+        if (payload) {
+          prefetchHlsManifestFromPayload(payload);
+        }
+      })
+      .catch(() => {
       // best effort prefetch only
-    });
+      });
+  });
+}
+
+function prefetchHlsManifestFromPayload(payload) {
+  if (!isLikelyMobileDevice()) {
+    return;
+  }
+  const sources = extractSources(payload);
+  if (!Array.isArray(sources) || sources.length === 0) {
+    return;
+  }
+  const hlsSource = sources.find((entry) => {
+    const format = String(entry?.format || "").toLowerCase();
+    const url = String(entry?.url || entry?.stream_url || "").toLowerCase();
+    return format === "hls" || url.includes(".m3u8");
+  });
+  if (!hlsSource) {
+    return;
+  }
+  const url = toZenixRelayUrl(hlsSource) || String(hlsSource?.url || hlsSource?.stream_url || "").trim();
+  if (!url) {
+    return;
+  }
+  fetch(url, { mode: "no-cors", credentials: "omit" }).catch(() => {
+    // optional warmup only
   });
 }
 
@@ -8872,6 +8903,7 @@ async function openDetails(id, options = {}) {
   if (!item) {
     throw new Error("Item not found");
   }
+  prefetchStreamForItem(item);
 
   state.activeHeroId = id;
   if (options.syncRoute !== false) {
@@ -9511,6 +9543,86 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
 
   const { season: externalSeason, episode: externalEpisode } = getExternalPlaybackContext(selectedItem || item);
   const streamPath = `/stream/${selectedItem?.id || item.id}`;
+  const refreshMovieSourcePool = async (statusLabel) => {
+    if (token !== state.playToken) {
+      return [];
+    }
+    if (statusLabel) {
+      setPlayerStatus(statusLabel);
+    }
+    if (isExternalItem) {
+      const refreshedExternal = await resolveExternalItemSources(selectedItem);
+      if (token !== state.playToken) {
+        return [];
+      }
+      clearManualSourceLock();
+      state.sourcePool = refreshedExternal.sources;
+    } else {
+      const isSeriesFallbackMode = selectedItem.type === "tv";
+      if (!statusLabel) {
+        setPlayerStatus(isSeriesFallbackMode ? "Actualisation des sources serie..." : "Actualisation des sources film...");
+      }
+      let refreshedPayload = null;
+      if (isSeriesFallbackMode) {
+        const episodePath = `/stream/${selectedItem.id}/episode?season=${externalSeason}&episode=${externalEpisode}`;
+        try {
+          refreshedPayload = await fetchStreamJson(episodePath, { force: true });
+          if (extractSources(refreshedPayload).length === 0) {
+            refreshedPayload = null;
+          }
+        } catch {
+          refreshedPayload = null;
+        }
+      }
+      if (!refreshedPayload) {
+        refreshedPayload = await fetchStreamJson(streamPath, { force: true });
+      }
+      if (token !== state.playToken) {
+        return [];
+      }
+      clearManualSourceLock();
+      const refreshedMovieSources = extractSources(refreshedPayload);
+      const refreshedAutoMovieSources = appendAutoZenixRelaySources(refreshedMovieSources);
+      const refreshedOwnedMovieSources = await appendZenixOwnedSources(selectedItem, 1, 1, refreshedAutoMovieSources);
+      const nakiosPromise = appendNakiosSources(selectedItem, 1, 1, refreshedOwnedMovieSources);
+      let warmNakiosSources = [];
+      if (refreshedOwnedMovieSources.length === 0) {
+        warmNakiosSources = await nakiosPromise.then((sources) => (Array.isArray(sources) ? sources : [])).catch(() => []);
+      } else {
+        warmNakiosSources = await Promise.race([
+          nakiosPromise.then((sources) => (Array.isArray(sources) ? sources : [])).catch(() => []),
+          wait(2200).then(() => []),
+        ]);
+      }
+      const refreshedNakiosMovieSources =
+        Array.isArray(warmNakiosSources) && warmNakiosSources.length > 0 ? warmNakiosSources : refreshedOwnedMovieSources;
+      state.sourcePool = filterMovieSourcesForFrench(refreshedNakiosMovieSources);
+      nakiosPromise
+        .then((sources) => {
+          if (token !== state.playToken) {
+            return;
+          }
+          const nextSources = Array.isArray(sources) ? sources : [];
+          if (nextSources.length === 0) {
+            return;
+          }
+          const merged = mergeSourceLists(state.allEpisodeSources, nextSources);
+          if (merged.length === state.allEpisodeSources.length) {
+            return;
+          }
+          state.allEpisodeSources = merged;
+          state.sourcePool = filterMovieSourcesForFrench(merged);
+          renderPlayerSourceOptions();
+        })
+        .catch(() => {});
+    }
+    state.allEpisodeSources = state.sourcePool.slice();
+    state.sourceRetryAttempts.clear();
+    state.sourceIndex = -1;
+    renderPlayerSourceOptions();
+    scheduleHlsLanguageProbe(state.allEpisodeSources);
+    return state.sourcePool;
+  };
 
   if (isExternalItem) {
     setPlayerStatus("Connexion aux sources externes...");
@@ -9520,11 +9632,6 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
     }
     clearManualSourceLock();
     state.sourcePool = resolved.sources;
-    if (state.sourcePool.length === 0) {
-      setPlayerStatus("Lecture indisponible pour ce titre.", true);
-      showMessage("Lecture indisponible pour ce titre.", true);
-      return;
-    }
   } else {
     const isSeriesFallbackMode = selectedItem.type === "tv";
     setPlayerStatus(isSeriesFallbackMode ? "Connexion au flux serie..." : "Connexion au flux film...");
@@ -9586,7 +9693,17 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
   state.allEpisodeSources = state.sourcePool.slice();
   state.sourceRetryAttempts.clear();
   if (state.sourcePool.length === 0) {
-    throw new Error("No movie source");
+    await refreshMovieSourcePool(
+      isExternalItem ? "Actualisation des sources externes..." : "Actualisation des sources film..."
+    );
+    if (state.sourcePool.length === 0) {
+      const pendingHint = isPendingUploadItem(selectedItem) || (isExternalItem && selectedItem?.externalProvider);
+      const message = pendingHint ? "En attente de mise en ligne." : "Lecture indisponible pour ce titre.";
+      clearPlaybackGuard();
+      setPlayerStatus(message, true);
+      showMessage(message, true);
+      return;
+    }
   }
   state.sourceIndex = -1;
   renderPlayerSourceOptions();
@@ -9602,79 +9719,12 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
     if (token !== state.playToken) {
       throw firstError;
     }
-    if (isExternalItem) {
-      setPlayerStatus("Actualisation des sources externes...");
-      const refreshedExternal = await resolveExternalItemSources(selectedItem);
-      if (token !== state.playToken) {
-        return;
-      }
-      clearManualSourceLock();
-      state.sourcePool = refreshedExternal.sources;
-    } else {
-      const isSeriesFallbackMode = selectedItem.type === "tv";
-      setPlayerStatus(isSeriesFallbackMode ? "Actualisation des sources serie..." : "Actualisation des sources film...");
-      let refreshedPayload = null;
-      if (isSeriesFallbackMode) {
-        const episodePath = `/stream/${selectedItem.id}/episode?season=${externalSeason}&episode=${externalEpisode}`;
-        try {
-          refreshedPayload = await fetchStreamJson(episodePath, { force: true });
-          if (extractSources(refreshedPayload).length === 0) {
-            refreshedPayload = null;
-          }
-        } catch {
-          refreshedPayload = null;
-        }
-      }
-      if (!refreshedPayload) {
-        refreshedPayload = await fetchStreamJson(streamPath, { force: true });
-      }
-      if (token !== state.playToken) {
-        return;
-      }
-      clearManualSourceLock();
-      const refreshedMovieSources = extractSources(refreshedPayload);
-      const refreshedAutoMovieSources = appendAutoZenixRelaySources(refreshedMovieSources);
-      const refreshedOwnedMovieSources = await appendZenixOwnedSources(selectedItem, 1, 1, refreshedAutoMovieSources);
-      const nakiosPromise = appendNakiosSources(selectedItem, 1, 1, refreshedOwnedMovieSources);
-      let warmNakiosSources = [];
-      if (refreshedOwnedMovieSources.length === 0) {
-        warmNakiosSources = await nakiosPromise.then((sources) => (Array.isArray(sources) ? sources : [])).catch(() => []);
-      } else {
-        warmNakiosSources = await Promise.race([
-          nakiosPromise.then((sources) => (Array.isArray(sources) ? sources : [])).catch(() => []),
-          wait(2200).then(() => []),
-        ]);
-      }
-      const refreshedNakiosMovieSources =
-        Array.isArray(warmNakiosSources) && warmNakiosSources.length > 0 ? warmNakiosSources : refreshedOwnedMovieSources;
-      state.sourcePool = filterMovieSourcesForFrench(refreshedNakiosMovieSources);
-      nakiosPromise
-        .then((sources) => {
-          if (token !== state.playToken) {
-            return;
-          }
-          const nextSources = Array.isArray(sources) ? sources : [];
-          if (nextSources.length === 0) {
-            return;
-          }
-          const merged = mergeSourceLists(state.allEpisodeSources, nextSources);
-          if (merged.length === state.allEpisodeSources.length) {
-            return;
-          }
-          state.allEpisodeSources = merged;
-          state.sourcePool = filterMovieSourcesForFrench(merged);
-          renderPlayerSourceOptions();
-        })
-        .catch(() => {});
-    }
-    state.allEpisodeSources = state.sourcePool.slice();
-    state.sourceRetryAttempts.clear();
+    await refreshMovieSourcePool(
+      isExternalItem ? "Actualisation des sources externes..." : "Actualisation des sources film..."
+    );
     if (state.sourcePool.length === 0) {
       throw firstError;
     }
-    state.sourceIndex = -1;
-    renderPlayerSourceOptions();
-    scheduleHlsLanguageProbe(state.allEpisodeSources);
     await playFromSourcePoolWithRescue(resumeTime, token, {
       startIndex: 0,
       skipPremiumFallback: true,

@@ -186,6 +186,10 @@ const ANIME_PLANNING_URL = "https://anime-sama.tv/planning/";
 const ANIME_SAMA_BASE = "https://anime-sama.to";
 const ANIME_SAMA_SEARCH_ENDPOINT = `${ANIME_SAMA_BASE}/template-php/defaut/fetch.php`;
 const PROXY_TIMEOUT_MS = 16000;
+const NAKIOS_SOURCE_REMOTE_TIMEOUT_MS = Math.max(
+  PROXY_TIMEOUT_MS,
+  toInt(process.env.NAKIOS_SOURCE_REMOTE_TIMEOUT_MS, 22000, 12000, 60000)
+);
 const CALENDAR_CACHE_MS = 6 * 60 * 1000;
 const ANIME_SIBNET_CACHE_MS = 12 * 60 * 1000;
 const ANIME_PANEL_RESOLUTION_LIMIT = 6;
@@ -210,9 +214,10 @@ const GATE_CHALLENGE_MAX = Math.max(50, toInt(process.env.GATE_CHALLENGE_MAX, 42
 const GATE_SECRET =
   String(process.env.ZENIX_GATE_SECRET || "").trim() || crypto.randomBytes(32).toString("hex");
 const GATE_ADSCRIPT_PATH = "/_gate/zenix-proof.js";
+const GATE_DISABLED = String(process.env.ZENIX_GATE_DISABLE || "").trim() === "1";
 const gateChallenges = new Map();
 const NAKIOS_PINNED_TITLES = [
-  { title: "Go Karts", mediaType: "movie", year: 2019 },
+  { title: "Go Karts", mediaType: "movie", year: 2020 },
   { title: "Minions", mediaType: "movie", year: 2015 },
   { title: "Minions: The Rise of Gru", mediaType: "movie", year: 2022 },
   { title: "Despicable Me", mediaType: "movie", year: 2010 },
@@ -5715,7 +5720,7 @@ async function resolveNakiosSearchEntry(title, mediaType, year = 0) {
   const safeYear = toInt(year, 0, 0, 2099);
   const queryTitleKey = normalizeTitleKey(safeTitle);
   const target = `${NAKIOS_API_BASE}/api/search/multi?query=${encodeURIComponent(safeTitle)}`;
-  const response = await fetchRemote(target, NAKIOS_FETCH_HEADERS);
+  const response = await fetchRemoteWithTimeout(target, NAKIOS_FETCH_HEADERS, NAKIOS_SOURCE_REMOTE_TIMEOUT_MS);
   if (response.status < 200 || response.status >= 300) {
     return null;
   }
@@ -6560,9 +6565,9 @@ function resolveOwnedSources(type, mediaId, season, episode) {
   });
 }
 
-async function fetchRemote(target, extraHeaders = {}) {
+async function fetchRemoteWithTimeout(target, extraHeaders = {}, timeoutMs = PROXY_TIMEOUT_MS) {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), PROXY_TIMEOUT_MS);
+  const timeoutId = setTimeout(() => controller.abort(), Math.max(1000, Number(timeoutMs || 0)));
   try {
     const response = await fetch(target, {
       method: "GET",
@@ -6583,6 +6588,10 @@ async function fetchRemote(target, extraHeaders = {}) {
   } finally {
     clearTimeout(timeoutId);
   }
+}
+
+async function fetchRemote(target, extraHeaders = {}) {
+  return fetchRemoteWithTimeout(target, extraHeaders, PROXY_TIMEOUT_MS);
 }
 
 async function fetchRemoteText(target, accept = "text/html", extraHeaders = {}) {
@@ -7779,6 +7788,9 @@ function isGateProtectedPath(pathname) {
 }
 
 async function handleGateGuard(req, res, requestUrl) {
+  if (GATE_DISABLED) {
+    return false;
+  }
   if (!isGateProtectedPath(requestUrl.pathname)) {
     return false;
   }

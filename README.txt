@@ -734,3 +734,18 @@ LATEST FILTER PANEL UI (2026-03-11, c188)
 - Replaced theme chips with a "Filtre" button that opens a checkbox panel (desktop + mobile).
 - Filter list cleaned and regrouped (Famille/Jeunesse, Super-heros, Action, etc) and auto-hides empty filters.
 - Panel includes clear/apply actions and closes on backdrop/escape.
+
+LATEST MOVIE SOURCE RETRY + NAKIOS TIMEOUT (2026-03-11, c199)
+- If the movie source pool is empty on first load, player now performs an automatic refresh before failing.
+- If still empty, shows a clear "En attente" (external/pending) or "Lecture indisponible" message and stops the guard.
+- Nakios source fetch timeout increased (frontend + server) to reduce first-load failures on slow source API.
+- Go Karts pinned year corrected to 2020 for better matching.
+
+LATEST IOS PREFETCH + TEST GATE BYPASS (2026-03-11, c200)
+- Mobile prefetch now warms the first HLS manifest (best-effort) to reduce iOS first-play stalls.
+- Added `ZENIX_GATE_DISABLE=1` server flag for local test runs (gate still active in production).
+
+LOCAL BRUTE RESULT (c200, 2026-03-11)
+- Source: `__tmp_brut_f1_mercredi_matrix_result_local_c207.json`
+- Env: `ZENIX_GATE_DISABLE=1`
+- Summary: total 8, passed 8, failed 0, `/api/media/*/sheet` 404 count: 0
