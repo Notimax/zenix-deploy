@@ -771,6 +771,9 @@ LATEST CSS LOAD GUARD (2026-03-12, c204)
 - Added a stylesheet retry guard in `index.html` to re-attach `zenix.css` if it fails to load.
 - Bumped `zenix.css` + `zenix.js` cache-bust version to `20260312-c203`.
 
+LATEST EXTERNAL SOURCE MERGE (2026-03-12, c205)
+- External items now merge owned sources + Nakios sources, then add Zenix relay proxies to maximize readers.
+
 VPS ACCESS (ADKYNET) - OPERATIONAL NOTES (2026-03-12)
 - VPS IP: 185.218.21.29
 - SSH user: root (no "ubuntu" user on this VPS)

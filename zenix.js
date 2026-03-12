@@ -9668,9 +9668,12 @@ async function resolveEpisodePayloadWithStrategy(item, season = 1, episode = 1) 
 
 async function resolveExternalItemSources(item) {
   const { season, episode } = getExternalPlaybackContext(item);
-  const merged = await appendNakiosSources(item, season, episode, []);
+  const ownedMerged = await appendZenixOwnedSources(item, season, episode, []);
+  const merged = await appendNakiosSources(item, season, episode, ownedMerged);
+  const filtered = filterMovieSourcesForFrench(merged);
+  const relayed = appendAutoZenixRelaySources(filtered);
   return {
-    sources: filterMovieSourcesForFrench(merged),
+    sources: relayed,
     season,
     episode,
   };
