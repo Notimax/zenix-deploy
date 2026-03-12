@@ -767,6 +767,10 @@ LATEST ADMIN GATE + EXTERNAL SEARCH FALLBACK (2026-03-12, c202)
 LATEST ADMIN COOKIE FIX (2026-03-12, c203)
 - Admin session cookie now uses `Path=/` so `/api/admin/*` can see it (fixes "login does nothing").
 
+LATEST CSS LOAD GUARD (2026-03-12, c204)
+- Added a stylesheet retry guard in `index.html` to re-attach `zenix.css` if it fails to load.
+- Bumped `zenix.css` + `zenix.js` cache-bust version to `20260312-c203`.
+
 VPS ACCESS (ADKYNET) - OPERATIONAL NOTES (2026-03-12)
 - VPS IP: 185.218.21.29
 - SSH user: root (no "ubuntu" user on this VPS)

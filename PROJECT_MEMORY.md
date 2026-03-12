@@ -105,6 +105,10 @@ Last update: 2026-03-11
 
 ## c203 follow-up (2026-03-12)
 - Admin session cookie `Path` set to `/` so `/api/admin/*` receives it (fixes admin login showing nothing).
+
+## c204 follow-up (2026-03-12)
+- Added a CSS load guard in `index.html` that retries `zenix.css` if the stylesheet fails to attach.
+- Cache-bust version updated for `zenix.css` + `zenix.js` to reduce stale/unstyled refreshes.
     - added a themed anti-adblock access gate (desktop + mobile) with live retry/unlock flow.
     - gate blocks interaction while adblock is detected, then restores access immediately after successful recheck.
     - copy explains free model funding (small non-intrusive ads for hosting/domain).

@@ -67,8 +67,51 @@
       "logo": "https://zenix.best/android-chrome-512x512.png"
     }
   </script>
-    <link rel="stylesheet" href="/zenix.css?v=20260312-c201" />
-    <script defer src="/zenix.js?v=20260312-c201"></script>
+    <link id="zenixStylesheet" rel="stylesheet" href="/zenix.css?v=20260312-c203" onerror="window.__zenixCssRetry && window.__zenixCssRetry()" />
+    <script>
+      (function () {
+        var cssHref = "/zenix.css?v=20260312-c203";
+        var maxRetries = 2;
+        function hasCss() {
+          var sheets = document.styleSheets || [];
+          for (var i = 0; i < sheets.length; i += 1) {
+            var href = sheets[i].href || "";
+            if (href.indexOf("/zenix.css") !== -1) {
+              return true;
+            }
+          }
+          return false;
+        }
+        function retryCss() {
+          var count = window.__zenixCssRetryCount || 0;
+          if (count >= maxRetries) {
+            return;
+          }
+          window.__zenixCssRetryCount = count + 1;
+          var old = document.getElementById("zenixStylesheet");
+          if (old && old.parentNode) {
+            old.parentNode.removeChild(old);
+          }
+          var link = document.createElement("link");
+          link.rel = "stylesheet";
+          link.id = "zenixStylesheet";
+          link.href = cssHref + (cssHref.indexOf("?") === -1 ? "?" : "&") + "retry=" + Date.now();
+          link.onerror = function () {
+            setTimeout(retryCss, 300);
+          };
+          document.head.appendChild(link);
+        }
+        window.__zenixCssRetry = retryCss;
+        window.addEventListener("load", function () {
+          setTimeout(function () {
+            if (!hasCss()) {
+              retryCss();
+            }
+          }, 200);
+        });
+      })();
+    </script>
+    <script defer src="/zenix.js?v=20260312-c203"></script>
 </head>
 <body>
   <div class="startup-splash" id="startupSplash" aria-hidden="true">
