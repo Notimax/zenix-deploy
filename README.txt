@@ -749,3 +749,38 @@ LOCAL BRUTE RESULT (c200, 2026-03-11)
 - Source: `__tmp_brut_f1_mercredi_matrix_result_local_c207.json`
 - Env: `ZENIX_GATE_DISABLE=1`
 - Summary: total 8, passed 8, failed 0, `/api/media/*/sheet` 404 count: 0
+
+VPS ACCESS (ADKYNET) - OPERATIONAL NOTES (2026-03-12)
+- VPS IP: 185.218.21.29
+- SSH user: root (no "ubuntu" user on this VPS)
+- SSH auth: key-based only (password auth not available in this automation context)
+- Local key path (this machine): C:\Users\user\.ssh\zenix_adkynet
+- Public key to authorize on VPS (authorized_keys):
+  ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILik7g3tcw5oNECzWAjunQuzjNBDHkp1pnUwTUy6yr68 zenix
+
+DO NOT STORE PASSWORDS OR PRIVATE KEYS IN THIS REPO.
+If credentials change, store them privately (not in README).
+
+SERVICE LAYOUT (VPS)
+- App path: /opt/zenix (git clone of https://github.com/Notimax/zenix-deploy)
+- Node version: 20.x (installed via NodeSource)
+- Service: /etc/systemd/system/zenix.service
+- Env file: /etc/zenix.env
+- Nginx site: /etc/nginx/sites-available/zenix (enabled via sites-enabled/zenix)
+- TLS cert: /etc/letsencrypt/live/zenix.best
+
+DEPLOY FLOW (VPS)
+1) SSH: ssh -i C:\Users\user\.ssh\zenix_adkynet root@185.218.21.29
+2) Update code:
+   cd /opt/zenix
+   git pull --rebase
+   npm ci --omit=dev
+3) Restart:
+   systemctl restart zenix.service
+   systemctl status zenix.service --no-pager
+4) Verify:
+   curl -I https://zenix.best
+
+NGINX PROXY (current)
+- HTTP -> Node on 127.0.0.1:4173
+- HTTPS handled by Certbot (auto-renew via systemd timer)
