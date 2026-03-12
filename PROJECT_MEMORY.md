@@ -112,6 +112,11 @@ Last update: 2026-03-11
 
 ## c205 follow-up (2026-03-12)
 - External items now merge owned sources + Nakios sources, then add relay proxies to maximize readers.
+
+## c206 follow-up (2026-03-12)
+- Admin search endpoint returns Purstream + Nakios results for fast import.
+- Admin repair endpoint fills missing metadata/tmdbId for custom entries and reports source counts.
+- Admin owned-sources manager allows attaching manual sources to any media id.
     - added a themed anti-adblock access gate (desktop + mobile) with live retry/unlock flow.
     - gate blocks interaction while adblock is detected, then restores access immediately after successful recheck.
     - copy explains free model funding (small non-intrusive ads for hosting/domain).

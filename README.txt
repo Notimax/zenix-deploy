@@ -774,6 +774,11 @@ LATEST CSS LOAD GUARD (2026-03-12, c204)
 LATEST EXTERNAL SOURCE MERGE (2026-03-12, c205)
 - External items now merge owned sources + Nakios sources, then add Zenix relay proxies to maximize readers.
 
+LATEST ADMIN TOOLS (2026-03-12, c206)
+- Added admin search across Zenix (Purstream) + Nakios via `/api/admin/search`.
+- Added admin repair tool (`/api/admin/repair`) to fill missing metadata + tmdb id for custom entries.
+- Added admin owned-sources manager (`/api/admin/owned`) to attach manual sources to titles.
+
 VPS ACCESS (ADKYNET) - OPERATIONAL NOTES (2026-03-12)
 - VPS IP: 185.218.21.29
 - SSH user: root (no "ubuntu" user on this VPS)

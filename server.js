@@ -6882,6 +6882,148 @@ function loadZenixOwnedSourcesData() {
   return nextData;
 }
 
+function normalizeOwnedSourcesData(data) {
+  const base = createEmptyOwnedSourcesData();
+  if (!data || typeof data !== "object") {
+    return base;
+  }
+  return {
+    ...base,
+    ...data,
+    movies: data.movies && typeof data.movies === "object" ? data.movies : {},
+    tv: data.tv && typeof data.tv === "object" ? data.tv : {},
+    series: data.series && typeof data.series === "object" ? data.series : {},
+  };
+}
+
+function saveZenixOwnedSourcesData(data) {
+  const normalized = normalizeOwnedSourcesData(data);
+  const payload = `${JSON.stringify(normalized, null, 2)}\n`;
+  fs.writeFileSync(ZENIX_OWNED_SOURCES_FILE, payload, "utf8");
+  zenixOwnedSourcesCache.loadedAt = Date.now();
+  zenixOwnedSourcesCache.mtimeMs = zenixOwnedSourcesCache.loadedAt;
+  zenixOwnedSourcesCache.data = normalized;
+  return normalized;
+}
+
+function readOwnedSourcesForSelection(data, type, mediaId, season = 1, episode = 1) {
+  const safeType = String(type || "movie").toLowerCase() === "tv" ? "tv" : "movie";
+  const safeId = Math.max(1, Number(mediaId || 0));
+  if (!safeId) {
+    return [];
+  }
+  const movies = data?.movies && typeof data.movies === "object" ? data.movies : {};
+  const tv = data?.tv && typeof data.tv === "object" ? data.tv : {};
+  const series = data?.series && typeof data.series === "object" ? data.series : {};
+  if (safeType === "movie") {
+    const movieNode = readOwnedMediaNode(movies, safeId);
+    return readOwnedSourceArray(movieNode);
+  }
+  const tvNode = readOwnedMediaNode(tv, safeId) || readOwnedMediaNode(series, safeId);
+  return resolveOwnedTvSources(tvNode, season, episode);
+}
+
+function upsertOwnedSource(data, payload) {
+  const safeType = String(payload?.type || "movie").toLowerCase() === "tv" ? "tv" : "movie";
+  const safeId = Math.max(1, Number(payload?.mediaId || 0));
+  if (!safeId) {
+    return data;
+  }
+  const source = payload?.source && typeof payload.source === "object" ? payload.source : {};
+  const streamUrl = String(source.stream_url || source.url || "").trim();
+  if (!streamUrl) {
+    return data;
+  }
+  const normalized = normalizeOwnedSourcesData(data);
+  const targetMap = safeType === "movie" ? normalized.movies : normalized.tv;
+  const idKey = String(safeId);
+  if (!targetMap[idKey] || typeof targetMap[idKey] !== "object") {
+    targetMap[idKey] = {};
+  }
+
+  let bucket = null;
+  if (safeType === "movie") {
+    if (!Array.isArray(targetMap[idKey].sources)) {
+      targetMap[idKey].sources = [];
+    }
+    bucket = targetMap[idKey].sources;
+  } else {
+    const safeSeason = Math.max(1, Number(payload?.season || 1));
+    const safeEpisode = Math.max(1, Number(payload?.episode || 1));
+    const seasonKey = String(safeSeason);
+    const episodeKey = String(safeEpisode);
+    if (!targetMap[idKey][seasonKey] || typeof targetMap[idKey][seasonKey] !== "object") {
+      targetMap[idKey][seasonKey] = {};
+    }
+    const seasonNode = targetMap[idKey][seasonKey];
+    if (!seasonNode[episodeKey] || typeof seasonNode[episodeKey] !== "object") {
+      seasonNode[episodeKey] = {};
+    }
+    if (!Array.isArray(seasonNode[episodeKey].sources)) {
+      seasonNode[episodeKey].sources = [];
+    }
+    bucket = seasonNode[episodeKey].sources;
+  }
+
+  const exists = bucket.some(
+    (entry) => String(entry?.stream_url || entry?.url || "").trim() === streamUrl
+  );
+  if (!exists) {
+    bucket.push({
+      stream_url: streamUrl,
+      format: String(source.format || "").trim() || undefined,
+      quality: String(source.quality || "").trim() || undefined,
+      language: String(source.language || "").trim() || undefined,
+      source_name: String(source.source_name || source.name || "").trim() || undefined,
+      priority: toInt(source.priority, 0, -100000, 100000) || undefined,
+    });
+  }
+
+  return normalized;
+}
+
+function removeOwnedSource(data, payload) {
+  const safeType = String(payload?.type || "movie").toLowerCase() === "tv" ? "tv" : "movie";
+  const safeId = Math.max(1, Number(payload?.mediaId || 0));
+  if (!safeId) {
+    return data;
+  }
+  const streamUrl = String(payload?.stream_url || payload?.url || "").trim();
+  if (!streamUrl) {
+    return data;
+  }
+  const normalized = normalizeOwnedSourcesData(data);
+  const targetMap = safeType === "movie" ? normalized.movies : normalized.tv;
+  const idKey = String(safeId);
+  const node = targetMap[idKey];
+  if (!node || typeof node !== "object") {
+    return normalized;
+  }
+
+  let bucket = null;
+  if (safeType === "movie") {
+    bucket = Array.isArray(node.sources) ? node.sources : [];
+    node.sources = bucket.filter(
+      (entry) => String(entry?.stream_url || entry?.url || "").trim() !== streamUrl
+    );
+  } else {
+    const safeSeason = Math.max(1, Number(payload?.season || 1));
+    const safeEpisode = Math.max(1, Number(payload?.episode || 1));
+    const seasonKey = String(safeSeason);
+    const episodeKey = String(safeEpisode);
+    const seasonNode = node[seasonKey];
+    const episodeNode = seasonNode?.[episodeKey];
+    bucket = Array.isArray(episodeNode?.sources) ? episodeNode.sources : [];
+    if (episodeNode && typeof episodeNode === "object") {
+      episodeNode.sources = bucket.filter(
+        (entry) => String(entry?.stream_url || entry?.url || "").trim() !== streamUrl
+      );
+    }
+  }
+
+  return normalized;
+}
+
 function readOwnedMediaNode(collection, mediaId) {
   const map = collection && typeof collection === "object" ? collection : {};
   return map[String(mediaId)] || map[Number(mediaId)] || null;
@@ -8991,6 +9133,308 @@ async function handleAdminImport(req, res, requestUrl) {
   return true;
 }
 
+async function handleAdminSearch(req, res, requestUrl) {
+  if (requestUrl.pathname !== "/api/admin/search") {
+    return false;
+  }
+  if (req.method !== "GET") {
+    sendJson(res, 405, { error: "Method Not Allowed" });
+    return true;
+  }
+  if (!isAdminAuthenticated(req)) {
+    sendJson(res, 401, { error: "Unauthorized" });
+    return true;
+  }
+  const query = String(requestUrl.searchParams.get("q") || "").trim();
+  if (query.length < 2) {
+    sendJson(res, 400, { error: "Missing query" });
+    return true;
+  }
+
+  const target = `${PURSTREAM_API_BASE}/search-bar/search/${encodeURIComponent(query)}`;
+  const purstreamResponse = await fetchRemote(target, {
+    Referer: `${PURSTREAM_WEB_BASE}/`,
+    Origin: PURSTREAM_WEB_BASE,
+    "Accept-Language": DEFAULT_ACCEPT_LANGUAGE,
+  });
+  const purstreamPayload = purstreamResponse.status >= 200 && purstreamResponse.status < 300
+    ? parseJsonSafe(purstreamResponse.body)
+    : null;
+
+  const nakiosTarget = `${NAKIOS_API_BASE}/api/search/multi?query=${encodeURIComponent(query)}`;
+  const nakiosResponse = await fetchRemoteWithTimeout(
+    nakiosTarget,
+    NAKIOS_FETCH_HEADERS,
+    NAKIOS_SOURCE_REMOTE_TIMEOUT_MS
+  );
+  const nakiosPayload = nakiosResponse.status >= 200 && nakiosResponse.status < 300
+    ? parseJsonSafe(nakiosResponse.body)
+    : null;
+
+  sendJson(res, 200, {
+    ok: true,
+    query,
+    purstream: purstreamPayload || null,
+    nakios: nakiosPayload || null,
+  });
+  return true;
+}
+
+async function handleAdminOwned(req, res, requestUrl) {
+  if (requestUrl.pathname !== "/api/admin/owned") {
+    return false;
+  }
+  if (!isAdminAuthenticated(req)) {
+    sendJson(res, 401, { error: "Unauthorized" });
+    return true;
+  }
+  if (req.method === "GET") {
+    const mediaId = toInt(requestUrl.searchParams.get("mediaId"), 0, 0, 999999999);
+    const type = String(requestUrl.searchParams.get("type") || "movie");
+    const season = toInt(requestUrl.searchParams.get("season"), 1, 1, 500);
+    const episode = toInt(requestUrl.searchParams.get("episode"), 1, 1, 50000);
+    const data = loadZenixOwnedSourcesData();
+    if (mediaId <= 0) {
+      sendJson(res, 200, { ok: true, data });
+      return true;
+    }
+    const sources = readOwnedSourcesForSelection(data, type, mediaId, season, episode);
+    sendJson(res, 200, {
+      ok: true,
+      data: {
+        mediaId,
+        type,
+        season,
+        episode,
+        sources,
+      },
+    });
+    return true;
+  }
+
+  if (req.method === "POST") {
+    let body = null;
+    try {
+      body = await readJsonBody(req, 16384);
+    } catch {
+      sendJson(res, 400, { error: "Invalid JSON" });
+      return true;
+    }
+    const data = loadZenixOwnedSourcesData();
+    const next = upsertOwnedSource(data, body);
+    saveZenixOwnedSourcesData(next);
+    const mediaId = toInt(body?.mediaId, 0, 0, 999999999);
+    const type = String(body?.type || "movie");
+    const season = toInt(body?.season, 1, 1, 500);
+    const episode = toInt(body?.episode, 1, 1, 50000);
+    const sources = readOwnedSourcesForSelection(next, type, mediaId, season, episode);
+    sendJson(res, 200, {
+      ok: true,
+      data: {
+        mediaId,
+        type,
+        season,
+        episode,
+        sources,
+      },
+    });
+    return true;
+  }
+
+  if (req.method === "DELETE") {
+    let body = null;
+    try {
+      body = await readJsonBody(req, 8192);
+    } catch {
+      sendJson(res, 400, { error: "Invalid JSON" });
+      return true;
+    }
+    const data = loadZenixOwnedSourcesData();
+    const next = removeOwnedSource(data, body);
+    saveZenixOwnedSourcesData(next);
+    sendJson(res, 200, { ok: true });
+    return true;
+  }
+
+  sendJson(res, 405, { error: "Method Not Allowed" });
+  return true;
+}
+
+async function handleAdminRepair(req, res, requestUrl) {
+  if (requestUrl.pathname !== "/api/admin/repair") {
+    return false;
+  }
+  if (req.method !== "POST") {
+    sendJson(res, 405, { error: "Method Not Allowed" });
+    return true;
+  }
+  if (!isAdminAuthenticated(req)) {
+    sendJson(res, 401, { error: "Unauthorized" });
+    return true;
+  }
+  let body = null;
+  try {
+    body = await readJsonBody(req, 8192);
+  } catch {
+    sendJson(res, 400, { error: "Invalid JSON" });
+    return true;
+  }
+  const id = toInt(body?.id, 0, 0, 999999999);
+  const externalKey = String(body?.external_key || body?.externalKey || "").trim();
+  const data = loadAdminData(true);
+  const custom = Array.isArray(data.custom) ? data.custom.slice() : [];
+  const entryIndex = custom.findIndex((row) =>
+    (id > 0 && Number(row?.id || 0) === id) ||
+    (externalKey && String(row?.external_key || row?.externalKey || "") === externalKey)
+  );
+
+  if (entryIndex >= 0) {
+    const entry = custom[entryIndex];
+    const mediaType = String(entry?.type || "movie").toLowerCase() === "tv" ? "tv" : "movie";
+    const title = String(entry?.title || "").trim();
+    const year = toInt(entry?.year, 0, 0, 2099);
+    let tmdbId = toInt(entry?.external_tmdb_id || entry?.externalTmdbId, 0, 0, 999999999);
+    let repaired = false;
+
+    const match = await resolveNakiosSearchEntry(title, mediaType, year);
+    if (!tmdbId && match?.id) {
+      tmdbId = Number(match.id);
+    }
+
+    if (tmdbId > 0) {
+      const target =
+        mediaType === "tv"
+          ? `${NAKIOS_API_BASE}/api/series/${tmdbId}`
+          : `${NAKIOS_API_BASE}/api/movies/${tmdbId}`;
+      const response = await fetchRemote(target, NAKIOS_FETCH_HEADERS);
+      if (response.status >= 200 && response.status < 300) {
+        const detail = parseJsonSafe(response.body);
+        const normalized = buildAdminCustomEntryFromNakios(detail, mediaType);
+        if (normalized) {
+          if (!entry.external_tmdb_id && normalized.external_tmdb_id) {
+            entry.external_tmdb_id = normalized.external_tmdb_id;
+            repaired = true;
+          }
+          if (!entry.overview && normalized.overview) {
+            entry.overview = normalized.overview;
+            repaired = true;
+          }
+          if ((!entry.small_poster_path || !entry.large_poster_path) && normalized.small_poster_path) {
+            entry.small_poster_path = normalized.small_poster_path;
+            entry.large_poster_path = normalized.large_poster_path || normalized.small_poster_path;
+            repaired = true;
+          }
+          if (!entry.wallpaper_poster_path && normalized.wallpaper_poster_path) {
+            entry.wallpaper_poster_path = normalized.wallpaper_poster_path;
+            repaired = true;
+          }
+          if (!entry.release_date && normalized.release_date) {
+            entry.release_date = normalized.release_date;
+            repaired = true;
+          }
+          if (!entry.year && normalized.year) {
+            entry.year = normalized.year;
+            repaired = true;
+          }
+        }
+      }
+    }
+
+    custom[entryIndex] = entry;
+    data.custom = custom;
+    saveAdminData(data);
+
+    let nakiosCount = 0;
+    if (tmdbId > 0) {
+      try {
+        const sources = await resolveNakiosSourcesByTmdbId(mediaType, tmdbId, 1, 1);
+        nakiosCount = Array.isArray(sources) ? sources.length : 0;
+      } catch {
+        nakiosCount = 0;
+      }
+    }
+    const ownedCount = readOwnedSourcesForSelection(loadZenixOwnedSourcesData(), mediaType, entry.id, 1, 1).length;
+
+    sendJson(res, 200, {
+      ok: true,
+      repaired,
+      data: {
+        id: entry.id,
+        title: entry.title,
+        type: mediaType,
+        tmdbId: tmdbId || 0,
+        ownedCount,
+        nakiosCount,
+      },
+    });
+    return true;
+  }
+
+  if (id > 0) {
+    let sheet = null;
+    try {
+      const response = await fetchRemote(`${PURSTREAM_API_BASE}/media/${id}/sheet`);
+      if (response.status >= 200 && response.status < 300) {
+        sheet = parseJsonSafe(response.body);
+      }
+    } catch {
+      sheet = null;
+    }
+    const inferredType = String(sheet?.data?.media?.type || sheet?.data?.type || "").toLowerCase();
+    const mediaType = inferredType === "tv" || inferredType === "serie" || inferredType === "series" ? "tv" : "movie";
+    let purstreamCount = 0;
+    try {
+      const episodePath = `${PURSTREAM_API_BASE}/stream/${id}/episode?season=1&episode=1`;
+      const payload = await fetchRemote(episodePath);
+      const parsed = parseJsonSafe(payload.body);
+      const sources = Array.isArray(parsed?.data?.items?.sources) ? parsed.data.items.sources : [];
+      purstreamCount = sources.length;
+    } catch {
+      purstreamCount = 0;
+    }
+    if (purstreamCount === 0) {
+      try {
+        const payload = await fetchRemote(`${PURSTREAM_API_BASE}/stream/${id}`);
+        const parsed = parseJsonSafe(payload.body);
+        const sources = Array.isArray(parsed?.data?.items?.sources) ? parsed.data.items.sources : [];
+        purstreamCount = sources.length;
+      } catch {
+        purstreamCount = 0;
+      }
+    }
+
+    const tmdbId = toInt(sheet?.data?.media?.tmdbId || sheet?.data?.media?.tmdb_id, 0, 0, 999999999);
+    let nakiosCount = 0;
+    if (tmdbId > 0) {
+      try {
+        const sources = await resolveNakiosSourcesByTmdbId(mediaType, tmdbId, 1, 1);
+        nakiosCount = Array.isArray(sources) ? sources.length : 0;
+      } catch {
+        nakiosCount = 0;
+      }
+    }
+    const ownedCount = readOwnedSourcesForSelection(loadZenixOwnedSourcesData(), mediaType, id, 1, 1).length;
+
+    sendJson(res, 200, {
+      ok: true,
+      repaired: false,
+      data: {
+        id,
+        title: String(sheet?.data?.media?.title || sheet?.data?.media?.name || ""),
+        type: mediaType,
+        tmdbId: tmdbId || 0,
+        ownedCount,
+        purstreamCount,
+        nakiosCount,
+      },
+    });
+    return true;
+  }
+
+  sendJson(res, 404, { error: "Entry not found" });
+  return true;
+}
+
 async function handleAdminOverride(req, res, requestUrl) {
   if (requestUrl.pathname !== "/api/admin/override") {
     return false;
@@ -9931,6 +10375,24 @@ const server = http.createServer((req, res) => {
     })
     .then((handledAdminImport) => {
       if (handledAdminImport) {
+        return true;
+      }
+      return handleAdminSearch(req, res, requestUrl);
+    })
+    .then((handledAdminSearch) => {
+      if (handledAdminSearch) {
+        return true;
+      }
+      return handleAdminOwned(req, res, requestUrl);
+    })
+    .then((handledAdminOwned) => {
+      if (handledAdminOwned) {
+        return true;
+      }
+      return handleAdminRepair(req, res, requestUrl);
+    })
+    .then((handledAdminRepair) => {
+      if (handledAdminRepair) {
         return true;
       }
       return handleAdminOverrideDelete(req, res, requestUrl);

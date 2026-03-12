@@ -42,6 +42,11 @@ body.admin-body {
   cursor: pointer;
 }
 
+.admin-btn.admin-ghost {
+  background: rgba(255, 255, 255, 0.12);
+  color: #f2f4ff;
+}
+
 .admin-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
@@ -88,6 +93,13 @@ body.admin-body {
   display: flex;
   gap: 10px;
   align-items: center;
+}
+
+.admin-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 12px;
 }
 
 .admin-list {

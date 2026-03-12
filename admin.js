@@ -26,11 +26,170 @@ const refs = {
   overrideStatusMsg: document.getElementById("overrideStatusMsg"),
   customList: document.getElementById("customList"),
   overrideList: document.getElementById("overrideList"),
+  adminSearchQuery: document.getElementById("adminSearchQuery"),
+  adminSearchType: document.getElementById("adminSearchType"),
+  adminSearchBtn: document.getElementById("adminSearchBtn"),
+  adminSearchStatus: document.getElementById("adminSearchStatus"),
+  adminSearchResults: document.getElementById("adminSearchResults"),
+  repairId: document.getElementById("repairId"),
+  repairExternalKey: document.getElementById("repairExternalKey"),
+  repairBtn: document.getElementById("repairBtn"),
+  repairStatus: document.getElementById("repairStatus"),
+  repairResult: document.getElementById("repairResult"),
+  ownedMediaId: document.getElementById("ownedMediaId"),
+  ownedType: document.getElementById("ownedType"),
+  ownedSeason: document.getElementById("ownedSeason"),
+  ownedEpisode: document.getElementById("ownedEpisode"),
+  ownedStreamUrl: document.getElementById("ownedStreamUrl"),
+  ownedFormat: document.getElementById("ownedFormat"),
+  ownedQuality: document.getElementById("ownedQuality"),
+  ownedLanguage: document.getElementById("ownedLanguage"),
+  ownedName: document.getElementById("ownedName"),
+  ownedPriority: document.getElementById("ownedPriority"),
+  ownedAddBtn: document.getElementById("ownedAddBtn"),
+  ownedLoadBtn: document.getElementById("ownedLoadBtn"),
+  ownedStatus: document.getElementById("ownedStatus"),
+  ownedList: document.getElementById("ownedList"),
 };
 
 const state = {
   data: null,
 };
+
+function extractSearchRows(payload) {
+  const merged = [];
+  const append = (list) => {
+    if (Array.isArray(list)) {
+      list.forEach((row) => {
+        if (row) merged.push(row);
+      });
+    }
+  };
+
+  append(payload?.data?.items?.items);
+  append(payload?.data?.items?.movies?.items);
+  append(payload?.data?.items?.series?.items);
+  append(payload?.data?.items?.tv?.items);
+  append(payload?.data?.movies?.items);
+  append(payload?.data?.results);
+
+  const blocks = payload?.data?.items?.blocks || payload?.data?.blocks;
+  if (blocks && typeof blocks === "object") {
+    Object.values(blocks).forEach((entry) => {
+      append(entry?.items);
+      append(entry);
+    });
+  }
+
+  if (merged.length === 0 && Array.isArray(payload?.data?.items)) {
+    append(payload.data.items);
+  }
+
+  const dedupe = new Map();
+  merged.forEach((entry) => {
+    const id = Number(entry?.id || 0);
+    if (!Number.isFinite(id) || id <= 0) {
+      return;
+    }
+    if (!dedupe.has(id)) {
+      dedupe.set(id, entry);
+    }
+  });
+  return Array.from(dedupe.values());
+}
+
+function extractYear(value) {
+  const raw = String(value || "");
+  const match = raw.match(/\b(19|20)\d{2}\b/);
+  return match ? match[0] : "";
+}
+
+function normalizePurstreamRow(row) {
+  const id = Number(row?.id || 0);
+  if (!id) return null;
+  const title =
+    String(row?.title || row?.name || row?.original_title || row?.original_name || "").trim();
+  const typeRaw = String(row?.type || row?.media_type || row?.mediaType || "").toLowerCase();
+  const type = typeRaw === "tv" || typeRaw === "serie" || typeRaw === "series" ? "tv" : "movie";
+  const year = extractYear(row?.release_date || row?.first_air_date || row?.year || "");
+  const poster =
+    row?.poster_path || row?.poster || row?.image || row?.cover || "";
+  return { id, title, type, year, poster };
+}
+
+function normalizeNakiosRow(row) {
+  const id = Number(row?.id || 0);
+  if (!id) return null;
+  const title =
+    String(row?.title || row?.name || row?.original_title || row?.original_name || "").trim();
+  const typeRaw = String(row?.media_type || row?.type || "").toLowerCase();
+  const type = typeRaw === "tv" ? "tv" : "movie";
+  const year = extractYear(row?.release_date || row?.first_air_date || "");
+  const poster = row?.poster_path || "";
+  return { id, title, type, year, poster };
+}
+
+function buildNakiosImportUrl(row) {
+  const type = row.type === "tv" ? "series" : "movie";
+  return `https://nakios.site/${type}/${row.id}`;
+}
+
+function isAlreadyCustom(row) {
+  const custom = state.data?.custom || [];
+  if (row.provider === "nakios") {
+    return custom.some((entry) => Number(entry?.external_tmdb_id || 0) === row.id);
+  }
+  return false;
+}
+
+function renderSearchResults(results) {
+  if (!refs.adminSearchResults) return;
+  refs.adminSearchResults.innerHTML = "";
+  if (!results || results.length === 0) {
+    refs.adminSearchResults.innerHTML = "<div class=\"admin-muted\">Aucun resultat.</div>";
+    return;
+  }
+  results.forEach((row) => {
+    const wrapper = document.createElement("div");
+    wrapper.className = "admin-item";
+    wrapper.innerHTML = `
+      <div class="admin-item-title">${row.title || "Sans titre"}</div>
+      <div class="admin-item-meta">${row.type === "tv" ? "Serie" : "Film"}${row.year ? ` • ${row.year}` : ""} • ${row.provider}</div>
+      <div class="admin-actions">
+        ${row.provider === "nakios" ? "<button class=\"admin-btn\" data-action=\"import\">Importer</button>" : ""}
+        <button class="admin-btn admin-ghost" data-action="repair">Analyser</button>
+      </div>
+    `;
+    const importBtn = wrapper.querySelector("[data-action='import']");
+    if (importBtn) {
+      importBtn.addEventListener("click", async () => {
+        if (isAlreadyCustom(row)) {
+          refs.adminSearchStatus.textContent = "Deja ajoute (custom).";
+          return;
+        }
+        try {
+          await apiFetch("/api/admin/import", {
+            method: "POST",
+            body: JSON.stringify({ url: buildNakiosImportUrl(row) }),
+          });
+          refs.adminSearchStatus.textContent = `Importe: ${row.title}`;
+          await loadData();
+        } catch (err) {
+          refs.adminSearchStatus.textContent = err.message || "Import impossible.";
+        }
+      });
+    }
+    const repairBtn = wrapper.querySelector("[data-action='repair']");
+    if (repairBtn) {
+      repairBtn.addEventListener("click", async () => {
+        if (refs.repairId) refs.repairId.value = String(row.provider === "purstream" ? row.id : "");
+        if (refs.repairExternalKey) refs.repairExternalKey.value = row.provider === "nakios" ? `movie:${row.id}` : "";
+        await handleRepair();
+      });
+    }
+    refs.adminSearchResults.appendChild(wrapper);
+  });
+}
 
 async function apiFetch(path, options = {}) {
   const init = {
@@ -243,12 +402,165 @@ async function handleOverrideSave() {
   }
 }
 
+async function handleAdminSearch() {
+  if (!refs.adminSearchQuery || !refs.adminSearchStatus || !refs.adminSearchResults) return;
+  const query = refs.adminSearchQuery.value.trim();
+  refs.adminSearchStatus.textContent = "";
+  refs.adminSearchResults.innerHTML = "";
+  if (query.length < 2) {
+    refs.adminSearchStatus.textContent = "Requete trop courte.";
+    return;
+  }
+  const type = refs.adminSearchType?.value || "all";
+  try {
+    const payload = await apiFetch(`/api/admin/search?q=${encodeURIComponent(query)}`);
+    const purstreamRows = extractSearchRows(payload.purstream || {});
+    const nakiosRows = Array.isArray(payload.nakios?.results) ? payload.nakios.results : [];
+    const results = [];
+    purstreamRows.forEach((row) => {
+      const mapped = normalizePurstreamRow(row);
+      if (!mapped) return;
+      if (type !== "all" && mapped.type !== type) return;
+      results.push({ ...mapped, provider: "purstream" });
+    });
+    nakiosRows.forEach((row) => {
+      const mapped = normalizeNakiosRow(row);
+      if (!mapped) return;
+      if (type !== "all" && mapped.type !== type) return;
+      results.push({ ...mapped, provider: "nakios" });
+    });
+    refs.adminSearchStatus.textContent = `${results.length} resultat(s).`;
+    renderSearchResults(results);
+  } catch (err) {
+    refs.adminSearchStatus.textContent = err.message || "Erreur recherche.";
+  }
+}
+
+async function handleRepair() {
+  if (!refs.repairStatus || !refs.repairResult) return;
+  refs.repairStatus.textContent = "";
+  refs.repairResult.textContent = "";
+  const id = Number(refs.repairId?.value || 0) || 0;
+  const externalKey = String(refs.repairExternalKey?.value || "").trim();
+  if (!id && !externalKey) {
+    refs.repairStatus.textContent = "ID ou external key requis.";
+    return;
+  }
+  try {
+    const payload = await apiFetch("/api/admin/repair", {
+      method: "POST",
+      body: JSON.stringify({ id, external_key: externalKey }),
+    });
+    const data = payload.data || {};
+    refs.repairStatus.textContent = payload.repaired ? "Repare." : "Analyse terminee.";
+    refs.repairResult.textContent =
+      `Sources: Zenix=${data.purstreamCount ?? 0} | Owned=${data.ownedCount ?? 0} | Nakios=${data.nakiosCount ?? 0}`;
+    await loadData();
+  } catch (err) {
+    refs.repairStatus.textContent = err.message || "Erreur analyse.";
+  }
+}
+
+async function loadOwnedSources() {
+  if (!refs.ownedMediaId || !refs.ownedStatus || !refs.ownedList) return;
+  const mediaId = Number(refs.ownedMediaId.value || 0);
+  const type = refs.ownedType?.value || "movie";
+  const season = Number(refs.ownedSeason?.value || 1) || 1;
+  const episode = Number(refs.ownedEpisode?.value || 1) || 1;
+  if (!mediaId) {
+    refs.ownedStatus.textContent = "Media ID requis.";
+    return;
+  }
+  try {
+    const payload = await apiFetch(
+      `/api/admin/owned?mediaId=${mediaId}&type=${encodeURIComponent(type)}&season=${season}&episode=${episode}`
+    );
+    const sources = Array.isArray(payload?.data?.sources) ? payload.data.sources : [];
+    refs.ownedStatus.textContent = `${sources.length} source(s).`;
+    refs.ownedList.innerHTML = "";
+    if (sources.length === 0) {
+      refs.ownedList.innerHTML = "<div class=\"admin-muted\">Aucune source.</div>";
+      return;
+    }
+    sources.forEach((row) => {
+      const wrapper = document.createElement("div");
+      wrapper.className = "admin-item";
+      wrapper.innerHTML = `
+        <div class="admin-item-title">${row.source_name || "Zenix Source"}</div>
+        <div class="admin-item-meta">${row.language || "Auto"} • ${row.quality || "Auto"} • ${row.format || "Auto"}</div>
+        <div class="admin-item-meta">${row.stream_url || ""}</div>
+        <button class="admin-btn admin-danger" type="button">Supprimer</button>
+      `;
+      const btn = wrapper.querySelector("button");
+      if (btn) {
+        btn.addEventListener("click", async () => {
+          await apiFetch("/api/admin/owned", {
+            method: "DELETE",
+            body: JSON.stringify({
+              mediaId,
+              type,
+              season,
+              episode,
+              stream_url: row.stream_url,
+            }),
+          });
+          await loadOwnedSources();
+        });
+      }
+      refs.ownedList.appendChild(wrapper);
+    });
+  } catch (err) {
+    refs.ownedStatus.textContent = err.message || "Erreur.";
+  }
+}
+
+async function handleOwnedAdd() {
+  if (!refs.ownedStatus) return;
+  const mediaId = Number(refs.ownedMediaId?.value || 0);
+  const type = refs.ownedType?.value || "movie";
+  const season = Number(refs.ownedSeason?.value || 1) || 1;
+  const episode = Number(refs.ownedEpisode?.value || 1) || 1;
+  const stream_url = String(refs.ownedStreamUrl?.value || "").trim();
+  if (!mediaId || !stream_url) {
+    refs.ownedStatus.textContent = "Media ID et URL requis.";
+    return;
+  }
+  try {
+    await apiFetch("/api/admin/owned", {
+      method: "POST",
+      body: JSON.stringify({
+        mediaId,
+        type,
+        season,
+        episode,
+        source: {
+          stream_url,
+          format: refs.ownedFormat?.value || "",
+          quality: refs.ownedQuality?.value || "",
+          language: refs.ownedLanguage?.value || "",
+          source_name: refs.ownedName?.value || "",
+          priority: Number(refs.ownedPriority?.value || 0) || 0,
+        },
+      }),
+    });
+    refs.ownedStatus.textContent = "Source ajoutee.";
+    refs.ownedStreamUrl.value = "";
+    await loadOwnedSources();
+  } catch (err) {
+    refs.ownedStatus.textContent = err.message || "Erreur.";
+  }
+}
+
 function bindEvents() {
   if (refs.loginBtn) refs.loginBtn.addEventListener("click", handleLogin);
   if (refs.logoutBtn) refs.logoutBtn.addEventListener("click", handleLogout);
   if (refs.annSaveBtn) refs.annSaveBtn.addEventListener("click", saveAnnouncement);
   if (refs.importBtn) refs.importBtn.addEventListener("click", handleImport);
   if (refs.overrideSaveBtn) refs.overrideSaveBtn.addEventListener("click", handleOverrideSave);
+  if (refs.adminSearchBtn) refs.adminSearchBtn.addEventListener("click", handleAdminSearch);
+  if (refs.repairBtn) refs.repairBtn.addEventListener("click", handleRepair);
+  if (refs.ownedLoadBtn) refs.ownedLoadBtn.addEventListener("click", loadOwnedSources);
+  if (refs.ownedAddBtn) refs.ownedAddBtn.addEventListener("click", handleOwnedAdd);
 }
 
 bindEvents();

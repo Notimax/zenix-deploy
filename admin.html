@@ -63,6 +63,105 @@
         </section>
 
         <section class="admin-card">
+          <h2>Recherche (Zenix + Nakios)</h2>
+          <div class="admin-field">
+            <label for="adminSearchQuery">Rechercher un titre</label>
+            <input id="adminSearchQuery" type="text" placeholder="Ex: Inception" />
+          </div>
+          <div class="admin-field">
+            <label for="adminSearchType">Type</label>
+            <select id="adminSearchType">
+              <option value="all">Tous</option>
+              <option value="movie">Films</option>
+              <option value="tv">Series</option>
+            </select>
+          </div>
+          <button class="admin-btn" id="adminSearchBtn" type="button">Rechercher</button>
+          <p class="admin-muted" id="adminSearchStatus"></p>
+          <div class="admin-list" id="adminSearchResults"></div>
+        </section>
+
+        <section class="admin-card">
+          <h2>Analyse / Reparer</h2>
+          <div class="admin-field">
+            <label for="repairId">ID Zenix (custom)</label>
+            <input id="repairId" type="number" placeholder="Ex: 1500123456" />
+          </div>
+          <div class="admin-field">
+            <label for="repairExternalKey">External key</label>
+            <input id="repairExternalKey" type="text" placeholder="movie:12345" />
+          </div>
+          <button class="admin-btn" id="repairBtn" type="button">Analyser / Reparer</button>
+          <p class="admin-muted" id="repairStatus"></p>
+          <div class="admin-muted" id="repairResult"></div>
+        </section>
+
+        <section class="admin-card">
+          <h2>Sources proprietaires (Zenix)</h2>
+          <div class="admin-field">
+            <label for="ownedMediaId">Media ID</label>
+            <input id="ownedMediaId" type="number" placeholder="Ex: 1500123456" />
+          </div>
+          <div class="admin-field">
+            <label for="ownedType">Type</label>
+            <select id="ownedType">
+              <option value="movie">Film</option>
+              <option value="tv">Serie / Anime</option>
+            </select>
+          </div>
+          <div class="admin-field">
+            <label for="ownedSeason">Saison</label>
+            <input id="ownedSeason" type="number" min="1" step="1" placeholder="1" />
+          </div>
+          <div class="admin-field">
+            <label for="ownedEpisode">Episode</label>
+            <input id="ownedEpisode" type="number" min="1" step="1" placeholder="1" />
+          </div>
+          <div class="admin-field">
+            <label for="ownedStreamUrl">Stream URL</label>
+            <input id="ownedStreamUrl" type="text" placeholder="https://..." />
+          </div>
+          <div class="admin-field">
+            <label for="ownedFormat">Format</label>
+            <select id="ownedFormat">
+              <option value="">Auto</option>
+              <option value="hls">HLS</option>
+              <option value="mp4">MP4</option>
+              <option value="dash">DASH</option>
+              <option value="webm">WEBM</option>
+              <option value="embed">Embed</option>
+            </select>
+          </div>
+          <div class="admin-field">
+            <label for="ownedQuality">Qualite</label>
+            <input id="ownedQuality" type="text" placeholder="HD / 1080p" />
+          </div>
+          <div class="admin-field">
+            <label for="ownedLanguage">Langue</label>
+            <select id="ownedLanguage">
+              <option value="VF">VF</option>
+              <option value="MULTI">MULTI</option>
+              <option value="VOSTFR">VOSTFR</option>
+              <option value="VO">VO</option>
+            </select>
+          </div>
+          <div class="admin-field">
+            <label for="ownedName">Nom source</label>
+            <input id="ownedName" type="text" placeholder="Zenix Source" />
+          </div>
+          <div class="admin-field">
+            <label for="ownedPriority">Priorite</label>
+            <input id="ownedPriority" type="number" step="1" placeholder="120" />
+          </div>
+          <div class="admin-actions">
+            <button class="admin-btn" id="ownedAddBtn" type="button">Ajouter source</button>
+            <button class="admin-btn admin-ghost" id="ownedLoadBtn" type="button">Charger sources</button>
+          </div>
+          <p class="admin-muted" id="ownedStatus"></p>
+          <div class="admin-list" id="ownedList"></div>
+        </section>
+
+        <section class="admin-card">
           <h2>Override (modifier/masquer)</h2>
           <div class="admin-field">
             <label for="overrideId">ID Zenix (optionnel)</label>
