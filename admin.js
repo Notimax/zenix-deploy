@@ -29,6 +29,7 @@ const refs = {
   adminSearchQuery: document.getElementById("adminSearchQuery"),
   adminSearchType: document.getElementById("adminSearchType"),
   adminSearchBtn: document.getElementById("adminSearchBtn"),
+  adminSearchClearBtn: document.getElementById("adminSearchClearBtn"),
   adminSearchStatus: document.getElementById("adminSearchStatus"),
   adminSearchResults: document.getElementById("adminSearchResults"),
   repairId: document.getElementById("repairId"),
@@ -54,6 +55,9 @@ const refs = {
 
 const state = {
   data: null,
+  searchSeq: 0,
+  searchTimer: 0,
+  lastQuery: "",
 };
 
 function extractSearchRows(payload) {
@@ -156,12 +160,15 @@ function renderSearchResults(results) {
     const wrapper = document.createElement("div");
     wrapper.className = "admin-item";
     const showImport = row.provider === "nakios" || row.provider === "filmer2";
+    const canRepair = row.provider === "purstream";
     wrapper.innerHTML = `
       <div class="admin-item-title">${row.title || "Sans titre"}</div>
       <div class="admin-item-meta">${row.type === "tv" ? "Serie" : "Film"}${row.year ? ` • ${row.year}` : ""} • ${row.provider}</div>
       <div class="admin-actions">
         ${showImport ? "<button class=\"admin-btn\" data-action=\"import\">Importer</button>" : ""}
-        <button class="admin-btn admin-ghost" data-action="repair">Analyser</button>
+        <button class="admin-btn admin-ghost" data-action="autofix">Auto-fix</button>
+        ${canRepair ? "<button class=\"admin-btn admin-ghost\" data-action=\"repair\">Analyser</button>" : ""}
+        <button class="admin-btn admin-ghost" data-action="select">Selectionner</button>
       </div>
     `;
     const importBtn = wrapper.querySelector("[data-action='import']");
@@ -188,12 +195,83 @@ function renderSearchResults(results) {
     if (repairBtn) {
       repairBtn.addEventListener("click", async () => {
         if (refs.repairId) refs.repairId.value = String(row.provider === "purstream" ? row.id : "");
-        if (refs.repairExternalKey) refs.repairExternalKey.value = row.provider === "nakios" ? `movie:${row.id}` : "";
+        if (refs.repairExternalKey) refs.repairExternalKey.value = "";
         await handleRepair();
+      });
+    }
+    const autoFixBtn = wrapper.querySelector("[data-action='autofix']");
+    if (autoFixBtn) {
+      autoFixBtn.addEventListener("click", async () => {
+        await handleAutoFix(row);
+      });
+    }
+    const selectBtn = wrapper.querySelector("[data-action='select']");
+    if (selectBtn) {
+      selectBtn.addEventListener("click", () => {
+        applySelectionFromRow(row);
       });
     }
     refs.adminSearchResults.appendChild(wrapper);
   });
+}
+
+function applySelectionFromRow(row) {
+  if (!row) return;
+  if (refs.importUrl) {
+    if (row.provider === "nakios") {
+      refs.importUrl.value = buildNakiosImportUrl(row);
+    } else if (row.provider === "filmer2") {
+      refs.importUrl.value = row.url || "";
+    } else {
+      refs.importUrl.value = "";
+    }
+  }
+  if (refs.repairId) {
+    refs.repairId.value = row.provider === "purstream" ? String(row.id || "") : "";
+  }
+  if (refs.overrideId) {
+    refs.overrideId.value = row.provider === "purstream" ? String(row.id || "") : "";
+  }
+  if (refs.overrideTitle) {
+    refs.overrideTitle.value = row.title || "";
+  }
+  if (refs.adminSearchStatus) {
+    refs.adminSearchStatus.textContent = `Selection: ${row.title || "Titre"}`;
+  }
+}
+
+async function handleAutoFix(row) {
+  if (!row) return;
+  if (refs.adminSearchStatus) {
+    refs.adminSearchStatus.textContent = `Auto-fix en cours: ${row.title || ""}`;
+  }
+  try {
+    let targetId = 0;
+    if (row.provider === "purstream") {
+      targetId = Number(row.id || 0);
+    } else {
+      const importUrl = row.provider === "nakios" ? buildNakiosImportUrl(row) : row.url;
+      const payload = await apiFetch("/api/admin/import", {
+        method: "POST",
+        body: JSON.stringify({ url: importUrl }),
+      });
+      targetId = Number(payload?.data?.id || 0);
+    }
+    if (targetId > 0) {
+      await apiFetch("/api/admin/repair", {
+        method: "POST",
+        body: JSON.stringify({ id: targetId }),
+      });
+    }
+    if (refs.adminSearchStatus) {
+      refs.adminSearchStatus.textContent = `Auto-fix termine: ${row.title || ""}`;
+    }
+    await loadData();
+  } catch (err) {
+    if (refs.adminSearchStatus) {
+      refs.adminSearchStatus.textContent = err.message || "Auto-fix impossible.";
+    }
+  }
 }
 
 async function apiFetch(path, options = {}) {
@@ -230,13 +308,31 @@ function renderCustomList(items) {
     wrapper.innerHTML = `
       <div class="admin-item-title">${entry.title || "Sans titre"}</div>
       <div class="admin-item-meta">ID: ${entry.id} • ${entry.type} • ${entry.external_key || ""}</div>
-      <button class="admin-btn admin-danger" type="button">Supprimer</button>
+      <div class="admin-actions">
+        <button class="admin-btn admin-ghost" data-action="select">Selectionner</button>
+        <button class="admin-btn admin-ghost" data-action="repair">Analyser</button>
+        <button class="admin-btn admin-danger" data-action="delete" type="button">Supprimer</button>
+      </div>
     `;
-    const btn = wrapper.querySelector("button");
-    if (btn) {
-      btn.addEventListener("click", async () => {
+    const deleteBtn = wrapper.querySelector("[data-action='delete']");
+    if (deleteBtn) {
+      deleteBtn.addEventListener("click", async () => {
         await apiFetch(`/api/admin/custom?id=${entry.id}`, { method: "DELETE" });
         await loadData();
+      });
+    }
+    const selectBtn = wrapper.querySelector("[data-action='select']");
+    if (selectBtn) {
+      selectBtn.addEventListener("click", () => {
+        applySelectionFromRow({ id: entry.id, title: entry.title, provider: "purstream" });
+      });
+    }
+    const repairBtn = wrapper.querySelector("[data-action='repair']");
+    if (repairBtn) {
+      repairBtn.addEventListener("click", async () => {
+        if (refs.repairId) refs.repairId.value = String(entry.id || "");
+        if (refs.repairExternalKey) refs.repairExternalKey.value = String(entry.external_key || "");
+        await handleRepair();
       });
     }
     refs.customList.appendChild(wrapper);
@@ -407,7 +503,7 @@ async function handleOverrideSave() {
   }
 }
 
-async function handleAdminSearch() {
+async function handleAdminSearch(options = {}) {
   if (!refs.adminSearchQuery || !refs.adminSearchStatus || !refs.adminSearchResults) return;
   const query = refs.adminSearchQuery.value.trim();
   refs.adminSearchStatus.textContent = "";
@@ -416,9 +512,15 @@ async function handleAdminSearch() {
     refs.adminSearchStatus.textContent = "Requete trop courte.";
     return;
   }
+  const seq = (state.searchSeq || 0) + 1;
+  state.searchSeq = seq;
   const type = refs.adminSearchType?.value || "all";
+  refs.adminSearchStatus.textContent = options.silent ? "Recherche..." : "Recherche...";
   try {
     const payload = await apiFetch(`/api/admin/search?q=${encodeURIComponent(query)}`);
+    if (seq !== state.searchSeq) {
+      return;
+    }
     const purstreamRows = extractSearchRows(payload.purstream || {});
     const nakiosRows = Array.isArray(payload.nakios?.results) ? payload.nakios.results : [];
     const filmer2Rows = Array.isArray(payload.filmer2) ? payload.filmer2 : [];
@@ -449,9 +551,35 @@ async function handleAdminSearch() {
     });
     refs.adminSearchStatus.textContent = `${results.length} resultat(s).`;
     renderSearchResults(results);
+    state.lastQuery = query;
   } catch (err) {
+    if (seq !== state.searchSeq) {
+      return;
+    }
     refs.adminSearchStatus.textContent = err.message || "Erreur recherche.";
   }
+}
+
+function scheduleAdminSearch() {
+  if (!refs.adminSearchQuery) return;
+  if (state.searchTimer) {
+    clearTimeout(state.searchTimer);
+  }
+  const query = refs.adminSearchQuery.value.trim();
+  if (query.length < 2) {
+    refs.adminSearchStatus.textContent = "Tape au moins 2 lettres.";
+    refs.adminSearchResults.innerHTML = "";
+    return;
+  }
+  state.searchTimer = setTimeout(() => {
+    handleAdminSearch({ silent: true });
+  }, 320);
+}
+
+function clearAdminSearch() {
+  if (refs.adminSearchQuery) refs.adminSearchQuery.value = "";
+  if (refs.adminSearchStatus) refs.adminSearchStatus.textContent = "";
+  if (refs.adminSearchResults) refs.adminSearchResults.innerHTML = "";
 }
 
 async function handleRepair() {
@@ -575,7 +703,16 @@ function bindEvents() {
   if (refs.annSaveBtn) refs.annSaveBtn.addEventListener("click", saveAnnouncement);
   if (refs.importBtn) refs.importBtn.addEventListener("click", handleImport);
   if (refs.overrideSaveBtn) refs.overrideSaveBtn.addEventListener("click", handleOverrideSave);
-  if (refs.adminSearchBtn) refs.adminSearchBtn.addEventListener("click", handleAdminSearch);
+  if (refs.adminSearchBtn) refs.adminSearchBtn.addEventListener("click", () => handleAdminSearch());
+  if (refs.adminSearchQuery) {
+    refs.adminSearchQuery.addEventListener("input", scheduleAdminSearch);
+  }
+  if (refs.adminSearchType) {
+    refs.adminSearchType.addEventListener("change", scheduleAdminSearch);
+  }
+  if (refs.adminSearchClearBtn) {
+    refs.adminSearchClearBtn.addEventListener("click", clearAdminSearch);
+  }
   if (refs.repairBtn) refs.repairBtn.addEventListener("click", handleRepair);
   if (refs.ownedLoadBtn) refs.ownedLoadBtn.addEventListener("click", loadOwnedSources);
   if (refs.ownedAddBtn) refs.ownedAddBtn.addEventListener("click", handleOwnedAdd);

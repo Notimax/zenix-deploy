@@ -9865,6 +9865,24 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
       isExternalItem ? "Actualisation des sources externes..." : "Actualisation des sources film..."
     );
     if (state.sourcePool.length === 0) {
+      const rescue = await attemptExternalRescue(selectedItem, externalSeason, externalEpisode);
+      if (rescue && rescue.item && rescue.item.id && rescue.item.id !== selectedItem.id) {
+        notifyActionMessage("Source alternative trouvee, bascule en cours...");
+        return loadMovieStream(rescue.item, resumeTime, token, syncRoute);
+      }
+      if (rescue && Array.isArray(rescue.sources) && rescue.sources.length > 0) {
+        if (rescue.detailUrl) {
+          selectedItem.externalDetailUrl = rescue.detailUrl;
+          selectedItem.external_detail_url = rescue.detailUrl;
+        }
+        state.sourcePool = filterMovieSourcesForFrench(rescue.sources);
+        state.allEpisodeSources = state.sourcePool.slice();
+        state.sourceRetryAttempts.clear();
+        renderPlayerSourceOptions();
+        notifyActionMessage("Sources externes injectees automatiquement.");
+      }
+    }
+    if (state.sourcePool.length === 0) {
       const pendingHint = isPendingUploadItem(selectedItem) || (isExternalItem && selectedItem?.externalProvider);
       const message = pendingHint ? "En attente de mise en ligne." : "Lecture indisponible pour ce titre.";
       clearPlaybackGuard();
@@ -10063,12 +10081,37 @@ async function loadEpisodeStream(
     }
   };
 
-  let language = await applyEpisodeSourcePayload(
-    resolved.payload,
-    preferredLanguage,
-    resolved.preloadedNakios,
-    resolved.nakiosPromise
-  );
+  let language = "";
+  try {
+    language = await applyEpisodeSourcePayload(
+      resolved.payload,
+      preferredLanguage,
+      resolved.preloadedNakios,
+      resolved.nakiosPromise
+    );
+  } catch (error) {
+    if (token !== state.playToken) {
+      throw error;
+    }
+    const rescue = await attemptExternalRescue(selectedItem, safeSeason, safeEpisode);
+    if (token !== state.playToken) {
+      return;
+    }
+    if (rescue && rescue.item && rescue.item.id && rescue.item.id !== selectedItem.id) {
+      notifyActionMessage("Source alternative trouvee, bascule en cours...");
+      return loadEpisodeStream(rescue.item, safeSeason, safeEpisode, resumeTime, token, preferredLanguage, syncRoute);
+    }
+    if (rescue && Array.isArray(rescue.sources) && rescue.sources.length > 0) {
+      if (rescue.detailUrl) {
+        selectedItem.externalDetailUrl = rescue.detailUrl;
+        selectedItem.external_detail_url = rescue.detailUrl;
+      }
+      language = await applyEpisodeSourcePayload(buildSourcePayloadFromList(rescue.sources), preferredLanguage);
+      notifyActionMessage("Sources externes injectees automatiquement.");
+    } else {
+      throw error;
+    }
+  }
   try {
     await playEpisodeSources();
   } catch (firstError) {
@@ -10502,6 +10545,104 @@ async function appendFilmer2Sources(item, season, episode, sources) {
   } catch {
     return base;
   }
+}
+
+async function findFilmer2MatchByTitle(item) {
+  if (!item) {
+    return null;
+  }
+  const title = String(item?.title || "").trim();
+  if (title.length < 2) {
+    return null;
+  }
+  const type = item?.type === "tv" ? "tv" : "movie";
+  const year = getItemReleaseYear(item) || getCatalogReleaseYear(item);
+  const params = new URLSearchParams({
+    q: title,
+    type,
+  });
+  if (year > 0) {
+    params.set("year", String(year));
+  }
+  try {
+    const payload = await fetchJson(`${API_BASE}/filmer2-search?${params.toString()}`, {
+      timeoutMs: 6000,
+      retryDelays: [320, 800],
+    });
+    const best = payload?.data?.best || null;
+    if (best && best.url) {
+      return best;
+    }
+    const matches = Array.isArray(payload?.data?.matches) ? payload.data.matches : [];
+    return matches[0] || null;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchFilmer2SourcesForItem(item, season = 1, episode = 1) {
+  const baseItem = item || {};
+  const detailUrl =
+    String(baseItem?.externalDetailUrl || baseItem?.external_detail_url || "").trim() ||
+    String(baseItem?.detailUrl || "").trim();
+  const safeUrl = detailUrl || (await findFilmer2MatchByTitle(baseItem))?.url;
+  if (!safeUrl) {
+    return { sources: [], detailUrl: "" };
+  }
+  const params = new URLSearchParams({
+    url: safeUrl,
+    season: String(Math.max(1, Number(season || 1))),
+    episode: String(Math.max(1, Number(episode || 1))),
+  });
+  try {
+    const payload = await fetchJson(`${API_BASE}/filmer2-source?${params.toString()}`, {
+      timeoutMs: NAKIOS_SOURCE_TIMEOUT_MS,
+      retryDelays: [400, 900],
+    });
+    const raw = Array.isArray(payload?.data?.sources) ? payload.data.sources : [];
+    const normalized = raw
+      .map((entry, index) =>
+        normalizeSourceEntry(
+          {
+            ...entry,
+            source_name: String(entry?.source_name || entry?.name || "Zenix").trim() || "Zenix",
+          },
+          index
+        )
+      )
+      .filter(Boolean);
+    return { sources: normalized, detailUrl: safeUrl };
+  } catch {
+    return { sources: [], detailUrl: "" };
+  }
+}
+
+async function attemptExternalRescue(item, season = 1, episode = 1) {
+  if (!item || item.isAnime) {
+    return null;
+  }
+  const safeSeason = Math.max(1, Number(season || 1));
+  const safeEpisode = Math.max(1, Number(episode || 1));
+  let internalCandidate = findInternalProviderCandidate(item);
+  if (!internalCandidate) {
+    internalCandidate = await findInternalProviderCandidateFromSearch(item);
+  }
+  if (internalCandidate && internalCandidate.id !== item.id) {
+    const playable = await hasPlayablePurstreamSources(internalCandidate, safeSeason, safeEpisode);
+    if (playable) {
+      return { item: internalCandidate, sources: [], detailUrl: "", mode: "purstream" };
+    }
+  }
+  const filmer2Result = await fetchFilmer2SourcesForItem(item, safeSeason, safeEpisode);
+  if (Array.isArray(filmer2Result.sources) && filmer2Result.sources.length > 0) {
+    return {
+      item,
+      sources: filmer2Result.sources,
+      detailUrl: filmer2Result.detailUrl,
+      mode: "filmer2",
+    };
+  }
+  return null;
 }
 
 function getAnimeSamaCatalogUrl(item) {
@@ -13929,6 +14070,16 @@ function showToast(message, isError = false) {
   }, 2000);
 }
 
+function notifyActionMessage(message, isError = false) {
+  if (isLikelyMobileDevice()) {
+    if (refs.syncInfo) {
+      refs.syncInfo.textContent = message;
+    }
+    return;
+  }
+  showToast(message, isError);
+}
+
 function getImageLoadingTargets(img) {
   if (!(img instanceof HTMLImageElement)) {
     return [];
@@ -14498,15 +14649,40 @@ function updateDetailFavoriteButton(id) {
 
 async function copyCurrentLink() {
   const url = window.location.href;
-  await copyText(url);
-  showToast("Lien copie.");
+  const item = state.selectedDetailId ? findItemById(state.selectedDetailId) : null;
+  const title = String(item?.title || document.title || "Zenix").trim();
+  const usedNative = await shareLink(url, title);
+  notifyActionMessage(usedNative ? "Partage ouvert." : "Lien copie.");
 }
 
 async function copyBrowseLink() {
   syncBrowseRoute({ replace: true });
   const url = window.location.href;
-  await copyText(url);
-  showToast("Lien de la vue copie.");
+  const usedNative = await shareLink(url, "Zenix");
+  notifyActionMessage(usedNative ? "Partage ouvert." : "Lien de la vue copie.");
+}
+
+async function shareLink(url, title) {
+  const safeUrl = String(url || "").trim();
+  if (!safeUrl) {
+    return false;
+  }
+  if (navigator.share) {
+    try {
+      await navigator.share({
+        title: String(title || "Zenix").trim(),
+        text: String(title || "Zenix").trim(),
+        url: safeUrl,
+      });
+      return true;
+    } catch (err) {
+      if (err && String(err.name || "").toLowerCase() === "aborterror") {
+        return true;
+      }
+    }
+  }
+  await copyText(safeUrl);
+  return false;
 }
 
 async function copyText(value) {

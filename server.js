@@ -6255,6 +6255,47 @@ function scoreNakiosSearchEntry(entry, queryTitleKey, normalizedType, safeYear) 
   return score;
 }
 
+function scoreFilmer2SearchEntry(entry, queryTitleKey, normalizedType, safeYear) {
+  if (!entry) {
+    return -Infinity;
+  }
+  const rowTitle = String(entry?.title || entry?.name || "").trim();
+  const rowTitleKey = normalizeTitleKey(rowTitle);
+  const rowYear = toInt(entry?.external_year || entry?.year, 0, 0, 2099);
+  let score = 0;
+  if (rowTitleKey === queryTitleKey) {
+    score += 140;
+  } else if (rowTitleKey.includes(queryTitleKey) || queryTitleKey.includes(rowTitleKey)) {
+    score += 85;
+  } else if (rowTitleKey && queryTitleKey && rowTitleKey[0] === queryTitleKey[0]) {
+    score += 30;
+  }
+  if (normalizedType) {
+    const rowType = normalizeSupplementalMediaType(entry?.type || entry?.mediaType || "");
+    if (rowType === normalizedType) {
+      score += 30;
+    } else {
+      score -= 15;
+    }
+  }
+  if (safeYear > 0 && rowYear > 0) {
+    const diff = Math.abs(rowYear - safeYear);
+    if (diff === 0) {
+      score += 60;
+    } else if (diff === 1) {
+      score += 35;
+    } else if (diff <= 2) {
+      score += 12;
+    } else {
+      score -= diff * 3;
+    }
+  }
+  if (entry?.large_poster_path || entry?.small_poster_path) {
+    score += 12;
+  }
+  return score;
+}
+
 function extractMetaContent(html, key) {
   const safeKey = String(key || "").trim();
   if (!safeKey) {
@@ -9571,6 +9612,72 @@ async function handleAdminSearch(req, res, requestUrl) {
   return true;
 }
 
+async function handleFilmer2Search(req, res, requestUrl) {
+  if (requestUrl.pathname !== "/api/filmer2-search") {
+    return false;
+  }
+  if (req.method !== "GET") {
+    sendJson(res, 405, { error: "Method Not Allowed" });
+    return true;
+  }
+  const query = String(requestUrl.searchParams.get("q") || "").trim();
+  if (query.length < 2) {
+    sendJson(res, 400, { error: "Query too short" });
+    return true;
+  }
+  const typeParam = String(requestUrl.searchParams.get("type") || "").trim().toLowerCase();
+  const normalizedType = typeParam === "tv" || typeParam === "movie" ? typeParam : "";
+  const safeYear = toInt(requestUrl.searchParams.get("year"), 0, 0, 2099);
+  const queryKey = normalizeTitleKey(query);
+  let rows = [];
+  try {
+    rows = await loadFilmer2CatalogEntries();
+  } catch {
+    rows = [];
+  }
+  const matches = Array.isArray(rows)
+    ? rows
+        .filter((row) => {
+          if (!row) {
+            return false;
+          }
+          if (normalizedType) {
+            const rowType = normalizeSupplementalMediaType(row?.type || row?.mediaType || "");
+            if (rowType !== normalizedType) {
+              return false;
+            }
+          }
+          const titleKey = normalizeTitleKey(row?.title || "");
+          return titleKey.includes(queryKey);
+        })
+        .map((row) => ({
+          title: row?.title || "",
+          type: row?.type || "movie",
+          year: row?.external_year || row?.year || 0,
+          url: row?.external_detail_url || "",
+          poster: row?.large_poster_path || row?.small_poster_path || "",
+        }))
+        .filter((row) => row.title && row.url)
+    : [];
+  const scored = matches
+    .map((row) => ({
+      row,
+      score: scoreFilmer2SearchEntry(row, queryKey, normalizedType, safeYear),
+    }))
+    .sort((left, right) => right.score - left.score);
+  const best = scored[0]?.row || null;
+  sendJson(res, 200, {
+    apiVersion: "zenix-filmer2-search-v1",
+    type: "success",
+    data: {
+      query,
+      matches: scored.slice(0, 24).map((entry) => entry.row),
+      best,
+    },
+  });
+  return true;
+}
+
 async function handleAdminOwned(req, res, requestUrl) {
   if (requestUrl.pathname !== "/api/admin/owned") {
     return false;
@@ -10852,6 +10959,12 @@ const server = http.createServer((req, res) => {
     })
     .then((handledAdminSearch) => {
       if (handledAdminSearch) {
+        return true;
+      }
+      return handleFilmer2Search(req, res, requestUrl);
+    })
+    .then((handledFilmer2Search) => {
+      if (handledFilmer2Search) {
         return true;
       }
       return handleAdminOwned(req, res, requestUrl);

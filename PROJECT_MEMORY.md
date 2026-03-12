@@ -123,6 +123,10 @@ Last update: 2026-03-11
 - Filmer2 titles are merged into supplemental catalog with Nakios-aware dedupe.
 - New endpoints: `/api/filmer2-source`, `/api/filmer2-seasons`.
 - Admin import/search supports Filmer2 URLs and search results.
+- Added public `/api/filmer2-search` endpoint for title lookups.
+- Share buttons now use native `navigator.share` when available (fallback copy).
+- Pending playback now triggers auto-rescue (Purstream search -> Filmer2 sources) before showing "En attente".
+- Admin search is live (debounced) with Auto-fix + Selection actions; IDs are auto-filled on selection.
     - added a themed anti-adblock access gate (desktop + mobile) with live retry/unlock flow.
     - gate blocks interaction while adblock is detected, then restores access immediately after successful recheck.
     - copy explains free model funding (small non-intrusive ads for hosting/domain).

@@ -785,6 +785,12 @@ LATEST FILMER2 INTEGRATION (2026-03-12, c207)
 - Filmer2 sources available via `/api/filmer2-source`, seasons via `/api/filmer2-seasons`.
 - Admin import now accepts Filmer2 URLs; admin search lists Filmer2 results.
 
+LATEST SHARE + PENDING RESCUE + ADMIN LIVE SEARCH (2026-03-12, c208)
+- Share buttons use native `navigator.share` when available, fallback to copy with visible feedback.
+- When playback returns empty/pending sources, auto-rescue tries Purstream search then Filmer2 sources and auto-switches if playable.
+- Added public Filmer2 search endpoint: `/api/filmer2-search`.
+- Admin search is now live (debounced) with Auto-fix + Selection actions; IDs are auto-filled when you pick a result.
+
 VPS ACCESS (ADKYNET) - OPERATIONAL NOTES (2026-03-12)
 - VPS IP: 185.218.21.29
 - SSH user: root (no "ubuntu" user on this VPS)

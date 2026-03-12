@@ -63,7 +63,8 @@
         </section>
 
         <section class="admin-card">
-          <h2>Recherche (Zenix + Nakios)</h2>
+          <h2>Recherche rapide</h2>
+          <p class="admin-muted" id="adminSearchHelp">Tape le debut du titre: resultats en direct, pas besoin d'appuyer sur entrer.</p>
           <div class="admin-field">
             <label for="adminSearchQuery">Rechercher un titre</label>
             <input id="adminSearchQuery" type="text" placeholder="Ex: Inception" />
@@ -76,7 +77,10 @@
               <option value="tv">Series</option>
             </select>
           </div>
-          <button class="admin-btn" id="adminSearchBtn" type="button">Rechercher</button>
+          <div class="admin-actions">
+            <button class="admin-btn" id="adminSearchBtn" type="button">Rechercher</button>
+            <button class="admin-btn admin-ghost" id="adminSearchClearBtn" type="button">Effacer</button>
+          </div>
           <p class="admin-muted" id="adminSearchStatus"></p>
           <div class="admin-list" id="adminSearchResults"></div>
         </section>
