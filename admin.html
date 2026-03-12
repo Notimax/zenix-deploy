@@ -74,6 +74,20 @@
           <div class="admin-list" id="adminSearchResults"></div>
         </section>
 
+        <section class="admin-card">
+          <h2>Importer par URL</h2>
+          <p class="admin-muted">Colle une URL Nakios / Anime-Sama / Filmer2.</p>
+          <div class="admin-field">
+            <label for="importUrl">URL</label>
+            <input id="importUrl" type="url" placeholder="https://..." />
+          </div>
+          <div class="admin-actions">
+            <button class="admin-btn" id="importBtn" type="button">Importer</button>
+          </div>
+          <p class="admin-muted" id="importStatus"></p>
+          <div class="admin-muted" id="importResult"></div>
+        </section>
+
         <section class="admin-card" id="adminSelectionCard">
           <h2>Selection</h2>
           <div class="admin-selected" id="adminSelectedInfo">Aucune selection.</div>
@@ -89,6 +103,7 @@
 
         <section class="admin-card">
           <h2>Catalogue ajoute</h2>
+          <p class="admin-muted" id="customStatus"></p>
           <div class="admin-list" id="customList"></div>
         </section>
       </div>

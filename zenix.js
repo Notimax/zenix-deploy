@@ -14741,9 +14741,20 @@ function updateDetailFavoriteButton(id) {
 }
 
 async function copyCurrentLink() {
-  const url = window.location.href;
-  const item = state.selectedDetailId ? findItemById(state.selectedDetailId) : null;
-  const title = String(item?.title || document.title || "Zenix").trim();
+  let url = window.location.href;
+  let title = String(document.title || "Zenix").trim();
+  if (state.nowPlaying && Number(state.nowPlaying.id || 0) > 0) {
+    url = buildShareUrl({
+      watchId: Number(state.nowPlaying.id || 0),
+      season: Number(state.nowPlaying.season || 1),
+      episode: Number(state.nowPlaying.episode || 1),
+    });
+    title = String(state.nowPlaying.title || title).trim();
+  } else if (state.selectedDetailId) {
+    const item = findItemById(state.selectedDetailId);
+    url = buildShareUrl({ detailId: Number(state.selectedDetailId || 0) });
+    title = String(item?.title || title).trim();
+  }
   const usedNative = await shareLink(url, title);
   notifyActionMessage(usedNative ? "Partage ouvert." : "Lien copie.");
 }
@@ -14776,6 +14787,26 @@ async function shareLink(url, title) {
   }
   await copyText(safeUrl);
   return false;
+}
+
+function buildShareUrl(options = {}) {
+  const base = new URL("/", window.location.origin);
+  const watchId = Number(options.watchId || 0);
+  const detailId = Number(options.detailId || 0);
+  if (watchId > 0) {
+    base.searchParams.set("watch", String(watchId));
+    const season = Number(options.season || 0);
+    const episode = Number(options.episode || 0);
+    if (season > 0) {
+      base.searchParams.set("s", String(season));
+    }
+    if (episode > 0) {
+      base.searchParams.set("e", String(episode));
+    }
+  } else if (detailId > 0) {
+    base.searchParams.set("detail", String(detailId));
+  }
+  return base.toString();
 }
 
 async function copyText(value) {

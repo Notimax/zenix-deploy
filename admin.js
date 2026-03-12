@@ -58,6 +58,7 @@ const refs = {
   selectedShowBtn: document.getElementById("adminSelectedShowBtn"),
   selectedDeleteBtn: document.getElementById("adminSelectedDeleteBtn"),
   selectedStatus: document.getElementById("adminSelectedStatus"),
+  customStatus: document.getElementById("customStatus"),
 };
 
 const state = {
@@ -171,13 +172,19 @@ function renderSearchResults(results) {
   results.forEach((row) => {
     const wrapper = document.createElement("div");
     wrapper.className = "admin-item";
-    const showImport = false;
+    const alreadyCustom = isAlreadyCustom(row);
+    const showImport = row.provider !== "purstream";
+    const importDisabled = alreadyCustom;
     const canRepair = row.provider === "purstream";
     wrapper.innerHTML = `
       <div class="admin-item-title">${row.title || "Sans titre"}</div>
-      <div class="admin-item-meta">${row.type === "tv" ? "Serie" : "Film"}${row.year ? ` • ${row.year}` : ""} • ${row.provider}</div>
+      <div class="admin-item-meta">${row.type === "tv" ? "Serie" : "Film"}${row.year ? ` - ${row.year}` : ""} - ${row.provider}</div>
       <div class="admin-actions">
-        ${showImport ? "<button class=\"admin-btn\" data-action=\"import\">Importer</button>" : ""}
+        ${
+          showImport
+            ? `<button class="admin-btn" data-action="import" ${importDisabled ? "disabled" : ""}>Importer</button>`
+            : ""
+        }
         <button class="admin-btn admin-ghost" data-action="autofix">Auto-fix</button>
         ${canRepair ? "<button class=\"admin-btn admin-ghost\" data-action=\"repair\">Analyser</button>" : ""}
         <button class="admin-btn admin-ghost" data-action="select">Selectionner</button>
@@ -337,7 +344,7 @@ function renderSelectedItem() {
   const customLabel = item.customEntry ? "Oui" : "Non";
   refs.selectedInfo.innerHTML = `
     <div class="admin-item-title">${item.title || "Sans titre"}</div>
-    <div class="admin-item-meta">${item.type === "tv" ? "Serie" : "Film"}${item.year ? ` â€¢ ${item.year}` : ""} â€¢ ${item.provider}</div>
+    <div class="admin-item-meta">${item.type === "tv" ? "Serie" : "Film"}${item.year ? ` - ${item.year}` : ""} - ${item.provider}</div>
     <div class="admin-item-meta">Ajoute: ${customLabel}</div>
   `;
   const canImport = item.provider !== "purstream" && !item.customEntry;
@@ -421,6 +428,7 @@ async function handleSelectedDelete() {
   if (!item || !item.customEntry) return;
   await apiFetch(`/api/admin/custom?id=${item.customEntry.id}`, { method: "DELETE" });
   if (refs.selectedStatus) refs.selectedStatus.textContent = "Supprime.";
+  if (refs.customStatus) refs.customStatus.textContent = "Suppression terminee.";
   setSelectedItem(null);
   await loadData();
 }
@@ -504,7 +512,7 @@ function renderCustomList(items) {
     wrapper.className = "admin-item";
     wrapper.innerHTML = `
       <div class="admin-item-title">${entry.title || "Sans titre"}</div>
-      <div class="admin-item-meta">ID: ${entry.id} • ${entry.type} • ${entry.external_key || ""}</div>
+      <div class="admin-item-meta">ID: ${entry.id} - ${entry.type} - ${entry.external_key || ""}</div>
       <div class="admin-actions">
         <button class="admin-btn admin-ghost" data-action="select">Selectionner</button>
         <button class="admin-btn admin-danger" data-action="delete" type="button">Supprimer</button>
@@ -513,8 +521,13 @@ function renderCustomList(items) {
     const deleteBtn = wrapper.querySelector("[data-action='delete']");
     if (deleteBtn) {
       deleteBtn.addEventListener("click", async () => {
-        await apiFetch(`/api/admin/custom?id=${entry.id}`, { method: "DELETE" });
-        await loadData();
+        try {
+          await apiFetch(`/api/admin/custom?id=${entry.id}`, { method: "DELETE" });
+          if (refs.customStatus) refs.customStatus.textContent = "Suppression terminee.";
+          await loadData();
+        } catch (err) {
+          if (refs.customStatus) refs.customStatus.textContent = err.message || "Suppression impossible.";
+        }
       });
     }
     const selectBtn = wrapper.querySelector("[data-action='select']");
@@ -678,6 +691,9 @@ async function handleImport() {
       ? `OK: ${entry.title} (${entry.type})`
       : "Import termine.";
     refs.importUrl.value = "";
+    if (entry) {
+      setSelectedItem(buildSelectedFromCustom(entry));
+    }
     await loadData();
   } catch (err) {
     refs.importStatus.textContent = err.message || "Erreur import.";
@@ -761,7 +777,11 @@ async function handleAdminSearch(options = {}) {
     if (seq !== state.searchSeq) {
       return;
     }
-    refs.adminSearchStatus.textContent = err.message || "Erreur recherche.";
+    const message = err.message || "Erreur recherche.";
+    if (message.toLowerCase().includes("unauthorized")) {
+      await checkSession();
+    }
+    refs.adminSearchStatus.textContent = message;
   }
 }
 
