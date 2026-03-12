@@ -8270,6 +8270,23 @@ async function ensureSeasons(id, options = {}) {
           // continue
         }
       }
+      const nakiosTmdbId = Number(item?.externalTmdbId || item?.external_tmdb_id || 0);
+      if (nakiosTmdbId > 0) {
+        try {
+          const params = new URLSearchParams({ tmdbId: String(nakiosTmdbId) });
+          const nakiosPayload = await fetchJson(`${API_BASE}/nakios-seasons?${params.toString()}`, {
+            timeoutMs: 8000,
+            retryDelays: [350, 900],
+          });
+          const nakiosSeasons = Array.isArray(nakiosPayload?.data?.items) ? nakiosPayload.data.items : [];
+          if (nakiosSeasons.length > 0) {
+            state.seasonsCache.set(id, nakiosSeasons);
+            return nakiosSeasons;
+          }
+        } catch {
+          // continue
+        }
+      }
     }
     const detailSeasons = details ? buildSeasonsFromDetailUrls(details) : [];
     const detailFastPath =

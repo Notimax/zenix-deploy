@@ -278,6 +278,10 @@ const ANALYTICS_IP_LIST_EMBED_CHARS = Math.max(
   Math.min(3900, Number(process.env.ANALYTICS_IP_LIST_EMBED_CHARS || 3600))
 );
 const ANALYTICS_IP_LIST_MAX_LINES = Math.max(20, Number(process.env.ANALYTICS_IP_LIST_MAX_LINES || 400));
+const NAKIOS_SEASONS_CACHE_MS = Math.max(
+  5 * 60 * 1000,
+  Number(process.env.NAKIOS_SEASONS_CACHE_MS || 6 * 60 * 60 * 1000)
+);
 const SUGGESTIONS_EMAIL_TO =
   normalizeSuggestionEmail(process.env.SUGGESTIONS_EMAIL_TO || "seekosint@gmail.com") || "seekosint@gmail.com";
 const SUGGESTIONS_RELAY_BASE = String(process.env.SUGGESTIONS_RELAY_BASE || "https://formsubmit.co/ajax")
@@ -323,6 +327,8 @@ const calendarCache = new Map();
 const ANIME_SEASONS_CACHE_MS = 1000 * 60 * 20;
 const animeSibnetCache = new Map();
 const animeSeasonsCache = new Map();
+const nakiosSeasonsCache = new Map();
+const nakiosSeasonsInFlight = new Map();
 const pidoovDetailCache = new Map();
 const pidoovLookupCache = new Map();
 const nakiosLookupCache = new Map();
@@ -6583,6 +6589,65 @@ async function resolveNakiosSourcesByTmdbId(mediaType, tmdbId, season = 1, episo
   return out;
 }
 
+async function fetchNakiosSeasonsByTmdbId(tmdbId) {
+  const safeTmdbId = toInt(tmdbId, 0, 0, 999999999);
+  if (safeTmdbId <= 0) {
+    return [];
+  }
+  const cached = nakiosSeasonsCache.get(safeTmdbId);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.value;
+  }
+  if (nakiosSeasonsInFlight.has(safeTmdbId)) {
+    return nakiosSeasonsInFlight.get(safeTmdbId);
+  }
+
+  const task = (async () => {
+    try {
+      const response = await fetchRemote(`${NAKIOS_API_BASE}/api/series/${safeTmdbId}`, NAKIOS_FETCH_HEADERS);
+      if (response.status < 200 || response.status >= 300) {
+        return [];
+      }
+      const payload = parseJsonSafe(response.body);
+      const rows = Array.isArray(payload?.seasons) ? payload.seasons : [];
+      const seasons = rows
+        .map((row) => {
+          const seasonNumber = toInt(row?.season_number || row?.seasonNumber, 0, 0, 500);
+          const episodeCount = toInt(row?.episode_count || row?.episodeCount, 0, 0, 50000);
+          if (!seasonNumber || episodeCount <= 0) {
+            return null;
+          }
+          const airDate = String(row?.air_date || "").trim();
+          const episodes = Array.from({ length: episodeCount }, (_, idx) => ({
+            episode: idx + 1,
+            name: `Episode ${idx + 1}`,
+            runtime: 0,
+            airDate,
+            isSoon: false,
+          }));
+          return { season: seasonNumber, episodes };
+        })
+        .filter(Boolean)
+        .sort((a, b) => a.season - b.season);
+      nakiosSeasonsCache.set(safeTmdbId, {
+        expiresAt: Date.now() + NAKIOS_SEASONS_CACHE_MS,
+        value: seasons,
+      });
+      prunePidoovTimedCache(nakiosSeasonsCache, 4000);
+      return seasons;
+    } catch {
+      return [];
+    }
+  })();
+
+  nakiosSeasonsInFlight.set(safeTmdbId, task);
+  try {
+    return await task;
+  } finally {
+    nakiosSeasonsInFlight.delete(safeTmdbId);
+  }
+}
+
 async function loadSupplementalCatalogEntries(force = false, options = {}) {
   const [nakiosRows, filmer2Rows] = await Promise.all([
     loadNakiosCatalogEntries(force, options),
@@ -10389,6 +10454,52 @@ async function handleFilmer2Seasons(req, res, requestUrl) {
   return true;
 }
 
+async function handleNakiosSeasons(req, res, requestUrl) {
+  if (requestUrl.pathname !== "/api/nakios-seasons") {
+    return false;
+  }
+  if (req.method !== "GET") {
+    sendJson(res, 405, { error: "Method Not Allowed" });
+    return true;
+  }
+  let tmdbId = toInt(requestUrl.searchParams.get("tmdbId"), 0, 0, 999999999);
+  const title = String(requestUrl.searchParams.get("title") || "").trim();
+  const year = toInt(requestUrl.searchParams.get("year"), 0, 0, 2099);
+  const typeParam = String(requestUrl.searchParams.get("type") || "tv").toLowerCase();
+  const mediaType = typeParam === "movie" ? "movie" : "tv";
+
+  if (tmdbId <= 0 && title.length >= 2) {
+    try {
+      tmdbId = await resolveNakiosTmdbIdBySearch(title, mediaType, year);
+    } catch {
+      tmdbId = 0;
+    }
+  }
+
+  if (tmdbId <= 0) {
+    sendJson(res, 200, {
+      apiVersion: "zenix-nakios-seasons-v1",
+      type: "success",
+      data: {
+        tmdbId: 0,
+        items: [],
+      },
+    });
+    return true;
+  }
+
+  const seasons = await fetchNakiosSeasonsByTmdbId(tmdbId);
+  sendJson(res, 200, {
+    apiVersion: "zenix-nakios-seasons-v1",
+    type: "success",
+    data: {
+      tmdbId,
+      items: seasons,
+    },
+  });
+  return true;
+}
+
 async function handleFilmer2Source(req, res, requestUrl) {
   if (requestUrl.pathname !== "/api/filmer2-source") {
     return false;
@@ -11031,6 +11142,12 @@ const server = http.createServer((req, res) => {
     })
     .then((handledFilmer2Seasons) => {
       if (handledFilmer2Seasons) {
+        return true;
+      }
+      return handleNakiosSeasons(req, res, requestUrl);
+    })
+    .then((handledNakiosSeasons) => {
+      if (handledNakiosSeasons) {
         return true;
       }
       return handleAnimeSibnet(req, res, requestUrl);
