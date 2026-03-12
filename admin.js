@@ -51,6 +51,13 @@ const refs = {
   ownedLoadBtn: document.getElementById("ownedLoadBtn"),
   ownedStatus: document.getElementById("ownedStatus"),
   ownedList: document.getElementById("ownedList"),
+  selectedInfo: document.getElementById("adminSelectedInfo"),
+  selectedAutoFixBtn: document.getElementById("adminSelectedAutoFixBtn"),
+  selectedImportBtn: document.getElementById("adminSelectedImportBtn"),
+  selectedHideBtn: document.getElementById("adminSelectedHideBtn"),
+  selectedShowBtn: document.getElementById("adminSelectedShowBtn"),
+  selectedDeleteBtn: document.getElementById("adminSelectedDeleteBtn"),
+  selectedStatus: document.getElementById("adminSelectedStatus"),
 };
 
 const state = {
@@ -58,6 +65,11 @@ const state = {
   searchSeq: 0,
   searchTimer: 0,
   lastQuery: "",
+  selectedItem: null,
+  customById: new Map(),
+  customByExternalKey: new Map(),
+  overridesById: {},
+  overridesByExternalKey: {},
 };
 
 function extractSearchRows(payload) {
@@ -159,7 +171,7 @@ function renderSearchResults(results) {
   results.forEach((row) => {
     const wrapper = document.createElement("div");
     wrapper.className = "admin-item";
-    const showImport = row.provider === "nakios" || row.provider === "filmer2";
+    const showImport = false;
     const canRepair = row.provider === "purstream";
     wrapper.innerHTML = `
       <div class="admin-item-title">${row.title || "Sans titre"}</div>
@@ -215,28 +227,209 @@ function renderSearchResults(results) {
   });
 }
 
-function applySelectionFromRow(row) {
-  if (!row) return;
-  if (refs.importUrl) {
-    if (row.provider === "nakios") {
-      refs.importUrl.value = buildNakiosImportUrl(row);
-    } else if (row.provider === "filmer2") {
-      refs.importUrl.value = row.url || "";
-    } else {
-      refs.importUrl.value = "";
+function normalizeAdminTitleKey(value) {
+  const raw = String(value || "").trim().toLowerCase();
+  if (!raw) return "";
+  let cleaned = raw;
+  try {
+    cleaned = raw.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  } catch {
+    cleaned = raw;
+  }
+  cleaned = cleaned.replace(/[^a-z0-9]+/g, " ").trim();
+  return cleaned.replace(/\s+/g, " ");
+}
+
+function buildSelectedFromCustom(entry) {
+  if (!entry) return null;
+  return {
+    id: Number(entry.id || 0) || 0,
+    title: String(entry.title || "").trim(),
+    type: String(entry.type || "movie").toLowerCase() === "tv" ? "tv" : "movie",
+    provider: "purstream",
+    year: entry.year || "",
+    customEntry: entry,
+    externalKey: String(entry.external_key || "").trim(),
+    externalDetailUrl: String(entry.external_detail_url || "").trim(),
+  };
+}
+
+function resolveCustomEntryForRow(row) {
+  if (!row || !state.data || !Array.isArray(state.data.custom)) return null;
+  if (row.provider === "nakios") {
+    return state.data.custom.find((entry) => Number(entry?.external_tmdb_id || 0) === row.id) || null;
+  }
+  if (row.provider === "filmer2") {
+    return state.data.custom.find((entry) => String(entry?.external_detail_url || "") === String(row.url || "")) || null;
+  }
+  if (row.provider === "purstream") {
+    return state.data.custom.find((entry) => Number(entry?.id || 0) === Number(row.id || 0)) || null;
+  }
+  return null;
+}
+
+function buildSelectedFromRow(row) {
+  if (!row) return null;
+  const customEntry = resolveCustomEntryForRow(row);
+  if (customEntry) {
+    const built = buildSelectedFromCustom(customEntry);
+    if (built) {
+      return { ...built, provider: row.provider || built.provider };
     }
   }
-  if (refs.repairId) {
-    refs.repairId.value = row.provider === "purstream" ? String(row.id || "") : "";
+  return {
+    id: Number(row.id || 0) || 0,
+    title: String(row.title || "").trim(),
+    type: String(row.type || "movie").toLowerCase() === "tv" ? "tv" : "movie",
+    provider: row.provider || "purstream",
+    year: row.year || "",
+    url: String(row.url || "").trim(),
+    tmdbId: row.provider === "nakios" ? Number(row.id || 0) || 0 : 0,
+    customEntry: customEntry || null,
+  };
+}
+
+function setSelectedItem(item) {
+  state.selectedItem = item || null;
+  renderSelectedItem();
+}
+
+function resolveOverrideTarget(item) {
+  if (!item) return null;
+  if (item.customEntry && Number(item.customEntry.id || 0) > 0) {
+    return { id: Number(item.customEntry.id || 0) };
   }
-  if (refs.overrideId) {
-    refs.overrideId.value = row.provider === "purstream" ? String(row.id || "") : "";
+  if (item.provider === "purstream" && Number(item.id || 0) > 0) {
+    return { id: Number(item.id || 0) };
   }
-  if (refs.overrideTitle) {
-    refs.overrideTitle.value = row.title || "";
+  if (item.customEntry && String(item.customEntry.external_key || "")) {
+    return { external_key: String(item.customEntry.external_key || "").trim() };
   }
+  return null;
+}
+
+function isHiddenOverride(target) {
+  if (!target) return false;
+  if (target.id && state.overridesById) {
+    const entry = state.overridesById[String(target.id)] || state.overridesById[target.id];
+    return Boolean(entry?.hidden);
+  }
+  if (target.external_key && state.overridesByExternalKey) {
+    const entry = state.overridesByExternalKey[String(target.external_key)] || null;
+    return Boolean(entry?.hidden);
+  }
+  return false;
+}
+
+function renderSelectedItem() {
+  if (!refs.selectedInfo) return;
+  const item = state.selectedItem;
+  if (!item) {
+    refs.selectedInfo.textContent = "Aucune selection.";
+    if (refs.selectedAutoFixBtn) refs.selectedAutoFixBtn.disabled = true;
+    if (refs.selectedImportBtn) refs.selectedImportBtn.hidden = true;
+    if (refs.selectedHideBtn) refs.selectedHideBtn.hidden = true;
+    if (refs.selectedShowBtn) refs.selectedShowBtn.hidden = true;
+    if (refs.selectedDeleteBtn) refs.selectedDeleteBtn.hidden = true;
+    if (refs.selectedStatus) refs.selectedStatus.textContent = "";
+    return;
+  }
+  const customLabel = item.customEntry ? "Oui" : "Non";
+  refs.selectedInfo.innerHTML = `
+    <div class="admin-item-title">${item.title || "Sans titre"}</div>
+    <div class="admin-item-meta">${item.type === "tv" ? "Serie" : "Film"}${item.year ? ` â€¢ ${item.year}` : ""} â€¢ ${item.provider}</div>
+    <div class="admin-item-meta">Ajoute: ${customLabel}</div>
+  `;
+  const canImport = item.provider !== "purstream" && !item.customEntry;
+  const target = resolveOverrideTarget(item);
+  const hidden = isHiddenOverride(target);
+  if (refs.selectedAutoFixBtn) refs.selectedAutoFixBtn.disabled = false;
+  if (refs.selectedImportBtn) refs.selectedImportBtn.hidden = !canImport;
+  if (refs.selectedHideBtn) refs.selectedHideBtn.hidden = !target || hidden;
+  if (refs.selectedShowBtn) refs.selectedShowBtn.hidden = !target || !hidden;
+  if (refs.selectedDeleteBtn) refs.selectedDeleteBtn.hidden = !item.customEntry;
+  if (refs.selectedStatus) {
+    refs.selectedStatus.textContent = hidden ? "Statut: masqué" : "";
+  }
+}
+
+async function applyOverridePatch(patch) {
+  const target = resolveOverrideTarget(state.selectedItem);
+  if (!target) {
+    if (refs.selectedStatus) refs.selectedStatus.textContent = "Action indisponible.";
+    return;
+  }
+  const body = { patch };
+  if (target.id) {
+    body.id = target.id;
+  } else if (target.external_key) {
+    body.external_key = target.external_key;
+  }
+  await apiFetch("/api/admin/override", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+  await loadData();
+}
+
+async function handleSelectedImport() {
+  const item = state.selectedItem;
+  if (!item || item.provider === "purstream") return;
+  if (item.customEntry) {
+    if (refs.selectedStatus) refs.selectedStatus.textContent = "Deja ajoute.";
+    return;
+  }
+  const importUrl = item.provider === "nakios" ? buildNakiosImportUrl(item) : item.url;
+  if (!importUrl) {
+    if (refs.selectedStatus) refs.selectedStatus.textContent = "URL introuvable.";
+    return;
+  }
+  const payload = await apiFetch("/api/admin/import", {
+    method: "POST",
+    body: JSON.stringify({ url: importUrl }),
+  });
+  if (refs.selectedStatus) refs.selectedStatus.textContent = "Import termine.";
+  await loadData();
+  const entry = payload?.data || null;
+  if (entry) {
+    setSelectedItem(buildSelectedFromCustom(entry));
+  }
+}
+
+async function handleSelectedAutoFix() {
+  const item = state.selectedItem;
+  if (!item) return;
+  await handleAutoFix(item);
+  await loadData();
+  if (item.customEntry) {
+    setSelectedItem(buildSelectedFromCustom(item.customEntry));
+  } else {
+    setSelectedItem(item);
+  }
+}
+
+async function handleSelectedHide() {
+  await applyOverridePatch({ hidden: true });
+}
+
+async function handleSelectedShow() {
+  await applyOverridePatch({ hidden: false });
+}
+
+async function handleSelectedDelete() {
+  const item = state.selectedItem;
+  if (!item || !item.customEntry) return;
+  await apiFetch(`/api/admin/custom?id=${item.customEntry.id}`, { method: "DELETE" });
+  if (refs.selectedStatus) refs.selectedStatus.textContent = "Supprime.";
+  setSelectedItem(null);
+  await loadData();
+}
+
+function applySelectionFromRow(row) {
+  const selected = buildSelectedFromRow(row);
+  setSelectedItem(selected);
   if (refs.adminSearchStatus) {
-    refs.adminSearchStatus.textContent = `Selection: ${row.title || "Titre"}`;
+    refs.adminSearchStatus.textContent = `Selection: ${row?.title || "Titre"}`;
   }
 }
 
@@ -255,7 +448,11 @@ async function handleAutoFix(row) {
         method: "POST",
         body: JSON.stringify({ url: importUrl }),
       });
-      targetId = Number(payload?.data?.id || 0);
+      const entry = payload?.data || null;
+      targetId = Number(entry?.id || 0);
+      if (entry) {
+        setSelectedItem(buildSelectedFromCustom(entry));
+      }
     }
     if (targetId > 0) {
       await apiFetch("/api/admin/repair", {
@@ -310,7 +507,6 @@ function renderCustomList(items) {
       <div class="admin-item-meta">ID: ${entry.id} • ${entry.type} • ${entry.external_key || ""}</div>
       <div class="admin-actions">
         <button class="admin-btn admin-ghost" data-action="select">Selectionner</button>
-        <button class="admin-btn admin-ghost" data-action="repair">Analyser</button>
         <button class="admin-btn admin-danger" data-action="delete" type="button">Supprimer</button>
       </div>
     `;
@@ -325,14 +521,6 @@ function renderCustomList(items) {
     if (selectBtn) {
       selectBtn.addEventListener("click", () => {
         applySelectionFromRow({ id: entry.id, title: entry.title, provider: "purstream" });
-      });
-    }
-    const repairBtn = wrapper.querySelector("[data-action='repair']");
-    if (repairBtn) {
-      repairBtn.addEventListener("click", async () => {
-        if (refs.repairId) refs.repairId.value = String(entry.id || "");
-        if (refs.repairExternalKey) refs.repairExternalKey.value = String(entry.external_key || "");
-        await handleRepair();
       });
     }
     refs.customList.appendChild(wrapper);
@@ -389,9 +577,26 @@ function renderAnnouncement(data) {
 async function loadData() {
   const payload = await apiFetch("/api/admin/data");
   state.data = payload.data;
+  state.customById = new Map();
+  state.customByExternalKey = new Map();
+  if (Array.isArray(state.data?.custom)) {
+    state.data.custom.forEach((entry) => {
+      const id = Number(entry?.id || 0);
+      if (id > 0) {
+        state.customById.set(id, entry);
+      }
+      const extKey = String(entry?.external_key || "").trim();
+      if (extKey) {
+        state.customByExternalKey.set(extKey, entry);
+      }
+    });
+  }
+  state.overridesById = state.data?.overrides?.byId || {};
+  state.overridesByExternalKey = state.data?.overrides?.byExternalKey || {};
   renderAnnouncement(state.data);
   renderCustomList(state.data.custom || []);
   renderOverrideList(state.data);
+  renderSelectedItem();
 }
 
 async function checkSession() {
@@ -716,6 +921,11 @@ function bindEvents() {
   if (refs.repairBtn) refs.repairBtn.addEventListener("click", handleRepair);
   if (refs.ownedLoadBtn) refs.ownedLoadBtn.addEventListener("click", loadOwnedSources);
   if (refs.ownedAddBtn) refs.ownedAddBtn.addEventListener("click", handleOwnedAdd);
+  if (refs.selectedAutoFixBtn) refs.selectedAutoFixBtn.addEventListener("click", handleSelectedAutoFix);
+  if (refs.selectedImportBtn) refs.selectedImportBtn.addEventListener("click", handleSelectedImport);
+  if (refs.selectedHideBtn) refs.selectedHideBtn.addEventListener("click", handleSelectedHide);
+  if (refs.selectedShowBtn) refs.selectedShowBtn.addEventListener("click", handleSelectedShow);
+  if (refs.selectedDeleteBtn) refs.selectedDeleteBtn.addEventListener("click", handleSelectedDelete);
 }
 
 bindEvents();
