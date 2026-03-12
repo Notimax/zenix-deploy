@@ -9426,6 +9426,83 @@ function findInternalProviderCandidate(item, options = {}) {
   return null;
 }
 
+async function findInternalProviderCandidateFromSearch(item, options = {}) {
+  if (!item) {
+    return null;
+  }
+  const title = String(item.title || item.titleKey || "").trim();
+  if (title.length < 2) {
+    return null;
+  }
+  const mediaType = item.type === "tv" ? "tv" : "movie";
+  const targetYear = getItemReleaseYear(item);
+  const maxYearDelta = Math.max(0, Number(options.maxYearDelta || 2));
+  let payload = null;
+  try {
+    payload = await fetchJson(`${API_BASE}/search-bar/search/${encodeURIComponent(title)}`, {
+      timeoutMs: 4200,
+    });
+  } catch {
+    payload = null;
+  }
+  if (!payload) {
+    return null;
+  }
+
+  const rows = extractSearchRows(payload);
+  if (rows.length === 0) {
+    return null;
+  }
+  const candidates = rows.map(normalizeCatalogItem).filter(Boolean);
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  let best = null;
+  let bestScore = -Infinity;
+  const targetTitleKey = normalizeTitleKey(title);
+  for (const candidate of candidates) {
+    const candidateId = Number(candidate?.id || 0);
+    if (candidateId <= 0 || candidateId >= SUPPLEMENTAL_MEDIA_ID_MIN) {
+      continue;
+    }
+    if (Boolean(candidate?.isExternal)) {
+      continue;
+    }
+    if ((candidate.type === "tv" ? "tv" : "movie") !== mediaType) {
+      continue;
+    }
+    const candidateTitle = String(candidate.title || candidate.titleKey || "").trim();
+    if (!areProviderTitlesCompatible(candidateTitle, title)) {
+      continue;
+    }
+    const candidateYear = getItemReleaseYear(candidate);
+    if (targetYear > 0 && candidateYear > 0) {
+      const delta = Math.abs(candidateYear - targetYear);
+      if (delta > maxYearDelta) {
+        continue;
+      }
+    }
+    let score = 0;
+    const candidateTitleKey = normalizeTitleKey(candidateTitle);
+    if (candidateTitleKey && targetTitleKey && candidateTitleKey === targetTitleKey) {
+      score += 2;
+    }
+    if (targetYear > 0 && candidateYear > 0) {
+      const delta = Math.abs(candidateYear - targetYear);
+      score += Math.max(0, 2 - delta);
+    }
+    if (candidate.poster) {
+      score += 0.2;
+    }
+    if (score > bestScore) {
+      best = candidate;
+      bestScore = score;
+    }
+  }
+  return best;
+}
+
 async function hasPlayablePurstreamSources(item, season = 1, episode = 1) {
   const mediaId = Number(item?.id || 0);
   if (mediaId <= 0 || mediaId >= SUPPLEMENTAL_MEDIA_ID_MIN) {
@@ -9463,7 +9540,10 @@ async function resolvePlayableProviderItem(item, season = 1, episode = 1) {
   if (!item || !item.isExternal) {
     return item;
   }
-  const internalCandidate = findInternalProviderCandidate(item);
+  let internalCandidate = findInternalProviderCandidate(item);
+  if (!internalCandidate) {
+    internalCandidate = await findInternalProviderCandidateFromSearch(item);
+  }
   if (!internalCandidate) {
     return item;
   }

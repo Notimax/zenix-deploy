@@ -8183,6 +8183,12 @@ function isGateProtectedPath(pathname) {
   if (/^\/api\/analytics\//i.test(pathname)) {
     return false;
   }
+  if (/^\/api\/admin\//i.test(pathname)) {
+    return false;
+  }
+  if (pathname === "/api/announcement") {
+    return false;
+  }
   if (pathname === "/api/suggestions") {
     return false;
   }

@@ -759,6 +759,11 @@ LATEST ADMIN + ANNOUNCEMENT (2026-03-12, c201)
   - overrides (edit title/overview/poster/status or hide entries).
 - Public announcement endpoint: `/api/announcement`.
 
+LATEST ADMIN GATE + EXTERNAL SEARCH FALLBACK (2026-03-12, c202)
+- Adblock gate now exempts `/api/admin/*` and `/api/announcement` so admin login works even with adblock.
+- External playback can now query internal search to find a playable Purstream candidate when Nakios has no sources
+  (helps titles like "Go Karts" if they exist in the main catalog).
+
 VPS ACCESS (ADKYNET) - OPERATIONAL NOTES (2026-03-12)
 - VPS IP: 185.218.21.29
 - SSH user: root (no "ubuntu" user on this VPS)
