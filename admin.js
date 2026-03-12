@@ -139,6 +139,9 @@ function isAlreadyCustom(row) {
   if (row.provider === "nakios") {
     return custom.some((entry) => Number(entry?.external_tmdb_id || 0) === row.id);
   }
+  if (row.provider === "filmer2") {
+    return custom.some((entry) => String(entry?.external_detail_url || "") === String(row.url || ""));
+  }
   return false;
 }
 
@@ -152,11 +155,12 @@ function renderSearchResults(results) {
   results.forEach((row) => {
     const wrapper = document.createElement("div");
     wrapper.className = "admin-item";
+    const showImport = row.provider === "nakios" || row.provider === "filmer2";
     wrapper.innerHTML = `
       <div class="admin-item-title">${row.title || "Sans titre"}</div>
       <div class="admin-item-meta">${row.type === "tv" ? "Serie" : "Film"}${row.year ? ` • ${row.year}` : ""} • ${row.provider}</div>
       <div class="admin-actions">
-        ${row.provider === "nakios" ? "<button class=\"admin-btn\" data-action=\"import\">Importer</button>" : ""}
+        ${showImport ? "<button class=\"admin-btn\" data-action=\"import\">Importer</button>" : ""}
         <button class="admin-btn admin-ghost" data-action="repair">Analyser</button>
       </div>
     `;
@@ -168,9 +172,10 @@ function renderSearchResults(results) {
           return;
         }
         try {
+          const importUrl = row.provider === "nakios" ? buildNakiosImportUrl(row) : row.url;
           await apiFetch("/api/admin/import", {
             method: "POST",
-            body: JSON.stringify({ url: buildNakiosImportUrl(row) }),
+            body: JSON.stringify({ url: importUrl }),
           });
           refs.adminSearchStatus.textContent = `Importe: ${row.title}`;
           await loadData();
@@ -416,6 +421,7 @@ async function handleAdminSearch() {
     const payload = await apiFetch(`/api/admin/search?q=${encodeURIComponent(query)}`);
     const purstreamRows = extractSearchRows(payload.purstream || {});
     const nakiosRows = Array.isArray(payload.nakios?.results) ? payload.nakios.results : [];
+    const filmer2Rows = Array.isArray(payload.filmer2) ? payload.filmer2 : [];
     const results = [];
     purstreamRows.forEach((row) => {
       const mapped = normalizePurstreamRow(row);
@@ -428,6 +434,18 @@ async function handleAdminSearch() {
       if (!mapped) return;
       if (type !== "all" && mapped.type !== type) return;
       results.push({ ...mapped, provider: "nakios" });
+    });
+    filmer2Rows.forEach((row) => {
+      const mapped = {
+        id: Number(row?.id || 0) || 0,
+        title: String(row?.title || "").trim(),
+        type: String(row?.type || "movie").toLowerCase() === "tv" ? "tv" : "movie",
+        year: row?.year || "",
+        url: String(row?.url || "").trim(),
+      };
+      if (!mapped.title || !mapped.url) return;
+      if (type !== "all" && mapped.type !== type) return;
+      results.push({ ...mapped, provider: "filmer2", url: mapped.url });
     });
     refs.adminSearchStatus.textContent = `${results.length} resultat(s).`;
     renderSearchResults(results);

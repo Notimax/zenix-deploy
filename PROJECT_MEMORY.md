@@ -117,6 +117,12 @@ Last update: 2026-03-11
 - Admin search endpoint returns Purstream + Nakios results for fast import.
 - Admin repair endpoint fills missing metadata/tmdbId for custom entries and reports source counts.
 - Admin owned-sources manager allows attaching manual sources to any media id.
+
+## c207 follow-up (2026-03-12)
+- Filmer2 integration added: catalog parsing + detail sources/episodes extraction.
+- Filmer2 titles are merged into supplemental catalog with Nakios-aware dedupe.
+- New endpoints: `/api/filmer2-source`, `/api/filmer2-seasons`.
+- Admin import/search supports Filmer2 URLs and search results.
     - added a themed anti-adblock access gate (desktop + mobile) with live retry/unlock flow.
     - gate blocks interaction while adblock is detected, then restores access immediately after successful recheck.
     - copy explains free model funding (small non-intrusive ads for hosting/domain).

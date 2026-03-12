@@ -779,6 +779,12 @@ LATEST ADMIN TOOLS (2026-03-12, c206)
 - Added admin repair tool (`/api/admin/repair`) to fill missing metadata + tmdb id for custom entries.
 - Added admin owned-sources manager (`/api/admin/owned`) to attach manual sources to titles.
 
+LATEST FILMER2 INTEGRATION (2026-03-12, c207)
+- Filmer2 catalog + sources parser added (home list + detail pages).
+- Filmer2 titles are merged into supplemental catalog (dedupe by title/year vs Nakios).
+- Filmer2 sources available via `/api/filmer2-source`, seasons via `/api/filmer2-seasons`.
+- Admin import now accepts Filmer2 URLs; admin search lists Filmer2 results.
+
 VPS ACCESS (ADKYNET) - OPERATIONAL NOTES (2026-03-12)
 - VPS IP: 185.218.21.29
 - SSH user: root (no "ubuntu" user on this VPS)

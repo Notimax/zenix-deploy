@@ -8172,6 +8172,26 @@ async function ensureSeasons(id, options = {}) {
         }
       }
     }
+
+    if (item?.isExternal && item?.type === "tv" && !item?.isAnime) {
+      const filmer2Url = String(item?.externalDetailUrl || item?.external_detail_url || "").trim();
+      if (filmer2Url && isFilmer2DetailUrl(filmer2Url)) {
+        try {
+          const params = new URLSearchParams({ url: filmer2Url });
+          const filmer2Payload = await fetchJson(`${API_BASE}/filmer2-seasons?${params.toString()}`, {
+            timeoutMs: 8000,
+            retryDelays: [350, 900],
+          });
+          const filmer2Seasons = Array.isArray(filmer2Payload?.data?.items) ? filmer2Payload.data.items : [];
+          if (filmer2Seasons.length > 0) {
+            state.seasonsCache.set(id, filmer2Seasons);
+            return filmer2Seasons;
+          }
+        } catch {
+          // continue
+        }
+      }
+    }
     const detailSeasons = details ? buildSeasonsFromDetailUrls(details) : [];
     const detailFastPath =
       detailSeasons.length > 0 &&
@@ -9669,8 +9689,9 @@ async function resolveEpisodePayloadWithStrategy(item, season = 1, episode = 1) 
 async function resolveExternalItemSources(item) {
   const { season, episode } = getExternalPlaybackContext(item);
   const ownedMerged = await appendZenixOwnedSources(item, season, episode, []);
-  const merged = await appendNakiosSources(item, season, episode, ownedMerged);
-  const filtered = filterMovieSourcesForFrench(merged);
+  const nakiosMerged = await appendNakiosSources(item, season, episode, ownedMerged);
+  const filmer2Merged = await appendFilmer2Sources(item, season, episode, nakiosMerged);
+  const filtered = filterMovieSourcesForFrench(filmer2Merged);
   const relayed = appendAutoZenixRelaySources(filtered);
   return {
     sources: relayed,
@@ -9976,11 +9997,17 @@ async function loadEpisodeStream(
       }
     }
 
+    const filmer2MergedSources = await appendFilmer2Sources(
+      selectedItem,
+      safeSeason,
+      safeEpisode,
+      nakiosMergedSources
+    );
     state.allEpisodeSources = await appendAnimeSibnetSource(
       selectedItem,
       safeSeason,
       safeEpisode,
-      nakiosMergedSources,
+      filmer2MergedSources,
       preferredLanguageInput
     );
     state.allEpisodeSources = preferAnimeSamaSources(selectedItem, state.allEpisodeSources);
@@ -10417,6 +10444,64 @@ function isAnimeSamaSourceEntry(entry) {
     return false;
   }
   return raw.includes("sibnet.ru") || /anime-sama\.(tv|to)/i.test(raw);
+}
+
+function isFilmer2DetailUrl(url) {
+  return /filmer2\.com/i.test(String(url || ""));
+}
+
+async function appendFilmer2Sources(item, season, episode, sources) {
+  const base = Array.isArray(sources) ? sources.slice() : [];
+  if (!item) {
+    return base;
+  }
+  const detailUrl = String(item?.externalDetailUrl || item?.external_detail_url || "").trim();
+  if (!detailUrl || !isFilmer2DetailUrl(detailUrl)) {
+    return base;
+  }
+  const params = new URLSearchParams({
+    url: detailUrl,
+    season: String(Math.max(1, Number(season || 1))),
+    episode: String(Math.max(1, Number(episode || 1))),
+  });
+  try {
+    const payload = await fetchJson(`${API_BASE}/filmer2-source?${params.toString()}`, {
+      timeoutMs: NAKIOS_SOURCE_TIMEOUT_MS,
+      retryDelays: [400, 900],
+    });
+    const raw = Array.isArray(payload?.data?.sources) ? payload.data.sources : [];
+    if (raw.length === 0) {
+      return base;
+    }
+    const existing = new Set(base.map((entry) => getSourceDedupKey(entry)).filter(Boolean));
+    const filmer2Sources = raw
+      .map((entry, index) =>
+        normalizeSourceEntry(
+          {
+            ...entry,
+            source_name: String(entry?.source_name || entry?.name || "Zenix").trim() || "Zenix",
+          },
+          index
+        )
+      )
+      .filter((entry) => {
+        if (!entry) {
+          return false;
+        }
+        const key = getSourceDedupKey(entry);
+        if (!key || existing.has(key)) {
+          return false;
+        }
+        existing.add(key);
+        return true;
+      });
+    if (filmer2Sources.length === 0) {
+      return base;
+    }
+    return base.concat(filmer2Sources);
+  } catch {
+    return base;
+  }
 }
 
 function getAnimeSamaCatalogUrl(item) {

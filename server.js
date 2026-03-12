@@ -16,6 +16,8 @@ const NAKIOS_BASE = "https://nakios.site";
 const NAKIOS_HOST = "nakios.site";
 const NAKIOS_API_BASE = "https://api.nakios.site";
 const NAKIOS_API_HOST = "api.nakios.site";
+const FILMER2_BASE = "https://filmer2.com";
+const FILMER2_HOST = "filmer2.com";
 const DEFAULT_BROWSER_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 const DEFAULT_ACCEPT_LANGUAGE = "fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7";
@@ -38,6 +40,11 @@ const NAKIOS_LOOKUP_CACHE_MS = Math.max(
 const NAKIOS_FETCH_HEADERS = {
   Referer: `${NAKIOS_BASE}/`,
   Origin: NAKIOS_BASE,
+  "Accept-Language": DEFAULT_ACCEPT_LANGUAGE,
+};
+const FILMER2_FETCH_HEADERS = {
+  Referer: `${FILMER2_BASE}/`,
+  Origin: FILMER2_BASE,
   "Accept-Language": DEFAULT_ACCEPT_LANGUAGE,
 };
 const NAKIOS_CATALOG_FEEDS = [
@@ -141,6 +148,14 @@ const RENDEZVOUS_FETCH_HEADERS = {
 const SUPPLEMENTAL_CATALOG_CACHE_MS = Math.max(
   60 * 1000,
   Number(process.env.SUPPLEMENTAL_CATALOG_CACHE_MS || 20 * 60 * 1000)
+);
+const FILMER2_CATALOG_CACHE_MS = Math.max(
+  5 * 60 * 1000,
+  Number(process.env.FILMER2_CATALOG_CACHE_MS || 45 * 60 * 1000)
+);
+const FILMER2_DETAIL_CACHE_MS = Math.max(
+  5 * 60 * 1000,
+  Number(process.env.FILMER2_DETAIL_CACHE_MS || 60 * 60 * 1000)
 );
 const SUPPLEMENTAL_CATALOG_PAGE_SIZE = Math.max(
   20,
@@ -358,6 +373,12 @@ const supplementalCatalogCache = {
   entries: [],
   inFlight: null,
 };
+const filmer2CatalogCache = {
+  loadedAt: 0,
+  entries: [],
+  inFlight: null,
+};
+const filmer2DetailCache = new Map();
 const nakiosCatalogCache = {
   loadedAt: 0,
   entries: [],
@@ -4980,6 +5001,8 @@ function isAllowedSupplementalDetailHost(hostname) {
     safeHost.endsWith(`.${NAKIOS_HOST}`) ||
     safeHost === NAKIOS_API_HOST ||
     safeHost.endsWith(`.${NAKIOS_API_HOST}`) ||
+    safeHost === FILMER2_HOST ||
+    safeHost.endsWith(`.${FILMER2_HOST}`) ||
     safeHost === PIDOOV_HOST ||
     safeHost.endsWith(`.${PIDOOV_HOST}`) ||
     safeHost === RENDEZVOUS_HOST ||
@@ -5682,6 +5705,277 @@ function pickBestNakiosCatalogRow(current, next) {
   return current;
 }
 
+function getSupplementalAvailabilityPriority(value) {
+  const normalized = normalizeNakiosAvailabilityStatus(value || "");
+  if (normalized === "available") {
+    return 2;
+  }
+  if (normalized === "pending") {
+    return 1;
+  }
+  return 0;
+}
+
+function isFilmer2Url(url) {
+  const raw = String(url || "").trim();
+  if (!raw) {
+    return false;
+  }
+  try {
+    const parsed = new URL(raw, FILMER2_BASE);
+    return String(parsed.hostname || "").toLowerCase().endsWith(FILMER2_HOST);
+  } catch {
+    return false;
+  }
+}
+
+function toAbsoluteFilmer2Url(url, baseUrl) {
+  const raw = String(url || "").trim();
+  if (!raw) {
+    return "";
+  }
+  try {
+    return new URL(raw, baseUrl || FILMER2_BASE).href;
+  } catch {
+    return raw;
+  }
+}
+
+function extractFilmer2Title(html) {
+  const h1Match = String(html || "").match(/<h1[^>]*itemprop=["']name["'][^>]*>([^<]+)<\/h1>/i);
+  if (h1Match?.[1]) {
+    return String(h1Match[1]).replace(/\s+/g, " ").trim();
+  }
+  const titleMatch = String(html || "").match(/<h1[^>]*class=["']title["'][^>]*>([^<]+)<\/h1>/i);
+  if (titleMatch?.[1]) {
+    return String(titleMatch[1]).replace(/\s+/g, " ").trim();
+  }
+  const metaTitle = extractMetaContent(html, "og:title") || extractMetaContent(html, "twitter:title");
+  return String(metaTitle || "").replace(/\s+/g, " ").trim();
+}
+
+function extractFilmer2Description(html) {
+  const match = String(html || "").match(/<div[^>]*itemprop=["']description["'][^>]*>([\s\S]*?)<\/div>/i);
+  if (match?.[1]) {
+    return String(match[1]).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  }
+  const metaDesc = extractMetaContent(html, "og:description") || extractMetaContent(html, "description");
+  return String(metaDesc || "").replace(/\s+/g, " ").trim();
+}
+
+function extractFilmer2Poster(html) {
+  const match = String(html || "").match(/<img[^>]*itemprop=["']image["'][^>]*src=["']([^"']+)["']/i);
+  if (match?.[1]) {
+    return String(match[1]).trim();
+  }
+  return extractMetaContent(html, "og:image") || extractMetaContent(html, "twitter:image") || "";
+}
+
+function extractFilmer2Backdrop(html) {
+  const match = String(html || "").match(/background-image:\s*url\(([^)]+)\)/i);
+  if (match?.[1]) {
+    return String(match[1]).replace(/['"]/g, "").trim();
+  }
+  return "";
+}
+
+function extractFilmer2Sources(html, detailUrl) {
+  const body = String(html || "");
+  const urls = new Set();
+  const sourceRegex = /<source[^>]+src=["']([^"']+)["']/gi;
+  let match = sourceRegex.exec(body);
+  while (match) {
+    const value = String(match[1] || "").trim();
+    if (value) {
+      urls.add(toAbsoluteFilmer2Url(value, detailUrl));
+    }
+    match = sourceRegex.exec(body);
+  }
+
+  const playerRegex = /player\.src\(\s*\{\s*src:\s*["']([^"']+)["']/gi;
+  match = playerRegex.exec(body);
+  while (match) {
+    const value = String(match[1] || "").trim();
+    if (value) {
+      urls.add(toAbsoluteFilmer2Url(value, detailUrl));
+    }
+    match = playerRegex.exec(body);
+  }
+
+  return Array.from(urls).filter(Boolean);
+}
+
+function extractFilmer2Seasons(html) {
+  const body = String(html || "");
+  const seasons = [];
+  const seasonRegex = /<ul[^>]*class=["']episodes["'][^>]*data-season=["'](\d+)["'][^>]*>([\s\S]*?)<\/ul>/gi;
+  let match = seasonRegex.exec(body);
+  while (match) {
+    const seasonNumber = Number(match[1] || 0);
+    const listBody = match[2] || "";
+    if (!seasonNumber) {
+      match = seasonRegex.exec(body);
+      continue;
+    }
+    const episodeRegex = /<li[^>]*>\s*<a[^>]*>([^<]+)<\/a>/gi;
+    const episodes = [];
+    let epMatch = episodeRegex.exec(listBody);
+    let episodeIndex = 1;
+    while (epMatch) {
+      const label = String(epMatch[1] || "").replace(/\s+/g, " ").trim();
+      if (label) {
+        const parsedNumberMatch = label.match(/Episode\s*(\d+)/i);
+        const episodeNumber = parsedNumberMatch ? Number(parsedNumberMatch[1]) : episodeIndex;
+        episodes.push({
+          episode: episodeNumber,
+          name: label,
+          runtime: 0,
+          airDate: "",
+          isSoon: false,
+        });
+        episodeIndex += 1;
+      }
+      epMatch = episodeRegex.exec(listBody);
+    }
+    if (episodes.length > 0) {
+      seasons.push({ season: seasonNumber, episodes });
+    }
+    match = seasonRegex.exec(body);
+  }
+  return seasons.sort((a, b) => a.season - b.season);
+}
+
+async function fetchFilmer2Detail(detailUrl) {
+  const safeUrl = String(detailUrl || "").trim();
+  if (!safeUrl || !isFilmer2Url(safeUrl)) {
+    return null;
+  }
+  const cached = filmer2DetailCache.get(safeUrl);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.value;
+  }
+  const response = await fetchRemoteText(safeUrl, "text/html", FILMER2_FETCH_HEADERS);
+  if (response.status < 200 || response.status >= 300) {
+    return null;
+  }
+  const html = response.body || "";
+  const title = extractFilmer2Title(html);
+  if (!title) {
+    return null;
+  }
+  const year = toInt(parseYearFromText(title), 0, 0, 2099);
+  const poster = extractFilmer2Poster(html);
+  const backdrop = extractFilmer2Backdrop(html);
+  const description = extractFilmer2Description(html);
+  const sources = extractFilmer2Sources(html, safeUrl);
+  const seasons = extractFilmer2Seasons(html);
+  const detail = {
+    url: safeUrl,
+    title,
+    year,
+    poster,
+    backdrop,
+    description,
+    sources,
+    seasons,
+  };
+  filmer2DetailCache.set(safeUrl, {
+    expiresAt: Date.now() + FILMER2_DETAIL_CACHE_MS,
+    value: detail,
+  });
+  return detail;
+}
+
+async function loadFilmer2CatalogEntries(force = false) {
+  const now = Date.now();
+  if (
+    !force &&
+    filmer2CatalogCache.loadedAt > 0 &&
+    now - filmer2CatalogCache.loadedAt < FILMER2_CATALOG_CACHE_MS &&
+    Array.isArray(filmer2CatalogCache.entries) &&
+    filmer2CatalogCache.entries.length > 0
+  ) {
+    return filmer2CatalogCache.entries;
+  }
+  if (filmer2CatalogCache.inFlight) {
+    return filmer2CatalogCache.inFlight;
+  }
+
+  const task = (async () => {
+    const response = await fetchRemoteText(FILMER2_BASE, "text/html", FILMER2_FETCH_HEADERS);
+    if (response.status < 200 || response.status >= 300) {
+      return [];
+    }
+    const html = response.body || "";
+    const linkRegex = /href=["']((?:movie|tv)\/[^"']+\.html)["']/gi;
+    const links = new Set();
+    let match = linkRegex.exec(html);
+    while (match) {
+      const href = String(match[1] || "").trim();
+      if (href) {
+        links.add(toAbsoluteFilmer2Url(href, FILMER2_BASE));
+      }
+      match = linkRegex.exec(html);
+    }
+    const detailUrls = Array.from(links);
+    if (detailUrls.length === 0) {
+      return [];
+    }
+
+    const reservedIds = new Set();
+    const entries = await mapWithConcurrency(detailUrls, Math.min(6, detailUrls.length), async (url) => {
+      const detail = await fetchFilmer2Detail(url);
+      if (!detail) {
+        return null;
+      }
+      const type = /\/tv\//i.test(url) ? "tv" : "movie";
+      const rawKey = `filmer2:${type}:${normalizeTitleKey(detail.title)}`;
+      const releaseDate = detail.year ? `${detail.year}-01-01` : "";
+      const availability = detail.sources.length > 0 ? "available" : "pending";
+      const row = mapSupplementalCandidateToCatalogRow(
+        {
+          provider: ZENIX_EXTERNAL_PROVIDER,
+          providerLabel: ZENIX_BRAND_LABEL,
+          rawKey,
+          title: detail.title,
+          year: detail.year,
+          mediaType: type,
+          release_date: releaseDate,
+          poster: detail.poster,
+          backdrop: detail.backdrop,
+          detailUrl: detail.url,
+          language: "VF",
+        },
+        reservedIds
+      );
+      if (!row) {
+        return null;
+      }
+      row.external_detail_url = detail.url;
+      row.external_label = ZENIX_BRAND_LABEL;
+      row.availability_status = availability;
+      row.external_status = availability;
+      row.is_pending_upload = availability === "pending";
+      row.supplemental_rank = scoreSupplementalCandidate(row);
+      row.supplemental_date = releaseDate || row.supplemental_date || "";
+      return row;
+    });
+
+    const filtered = entries.filter(Boolean);
+    filmer2CatalogCache.entries = filtered;
+    filmer2CatalogCache.loadedAt = Date.now();
+    filmer2CatalogCache.inFlight = null;
+    return filtered;
+  })();
+
+  filmer2CatalogCache.inFlight = task;
+  try {
+    return await task;
+  } finally {
+    filmer2CatalogCache.inFlight = null;
+  }
+}
+
 async function fetchNakiosFeedPage(feed, page) {
   const mediaType = String(feed?.mediaType || "").toLowerCase() === "tv" ? "tv" : "movie";
   const path = String(feed?.path || "").trim();
@@ -6111,6 +6405,31 @@ function buildAdminCustomEntryFromAnimeSama(catalogUrl, html) {
   });
 }
 
+function buildAdminCustomEntryFromFilmer2(detail, mediaType) {
+  if (!detail || typeof detail !== "object") {
+    return null;
+  }
+  const normalizedType = String(mediaType || "").toLowerCase() === "tv" ? "tv" : "movie";
+  const title = String(detail?.title || "").trim();
+  if (!title) {
+    return null;
+  }
+  const year = toInt(detail?.year, 0, 0, 2099);
+  const externalKey = `filmer2:${normalizedType}:${normalizeTitleKey(title)}`;
+  return normalizeAdminCustomEntry({
+    type: normalizedType,
+    title,
+    year,
+    overview: String(detail?.description || "").trim(),
+    small_poster_path: String(detail?.poster || "").trim(),
+    large_poster_path: String(detail?.poster || "").trim(),
+    wallpaper_poster_path: String(detail?.backdrop || detail?.poster || "").trim(),
+    external_key: externalKey,
+    external_detail_url: String(detail?.url || "").trim(),
+    providerLabel: ZENIX_BRAND_LABEL,
+  });
+}
+
 async function resolveNakiosSearchEntry(title, mediaType, year = 0) {
   const safeTitle = String(title || "").trim();
   if (safeTitle.length < 2) {
@@ -6224,10 +6543,43 @@ async function resolveNakiosSourcesByTmdbId(mediaType, tmdbId, season = 1, episo
 }
 
 async function loadSupplementalCatalogEntries(force = false, options = {}) {
-  const rows = await loadNakiosCatalogEntries(force, options);
+  const [nakiosRows, filmer2Rows] = await Promise.all([
+    loadNakiosCatalogEntries(force, options),
+    loadFilmer2CatalogEntries(force),
+  ]);
   const adminData = loadAdminData();
-  const baseRows = Array.isArray(rows) ? rows : [];
-  const overridden = baseRows.map((entry) => applyAdminOverride(entry, adminData)).filter(Boolean);
+  const baseRows = Array.isArray(nakiosRows) ? nakiosRows : [];
+  const filmer2List = Array.isArray(filmer2Rows) ? filmer2Rows : [];
+  const bySemantic = new Map();
+  baseRows.forEach((row) => {
+    const key = buildNakiosSemanticKey(row);
+    if (!key || key.startsWith("::")) {
+      return;
+    }
+    bySemantic.set(key, row);
+  });
+  filmer2List.forEach((row) => {
+    const key = buildNakiosSemanticKey(row);
+    if (!key || key.startsWith("::")) {
+      return;
+    }
+    const current = bySemantic.get(key);
+    if (!current) {
+      bySemantic.set(key, row);
+      return;
+    }
+    const currentPriority = getSupplementalAvailabilityPriority(
+      current?.availability_status || current?.external_status
+    );
+    const nextPriority = getSupplementalAvailabilityPriority(
+      row?.availability_status || row?.external_status
+    );
+    if (nextPriority > currentPriority) {
+      bySemantic.set(key, row);
+    }
+  });
+  const mergedRows = Array.from(bySemantic.values());
+  const overridden = mergedRows.map((entry) => applyAdminOverride(entry, adminData)).filter(Boolean);
   const merged = mergeAdminCustomEntries(overridden, adminData);
   supplementalCatalogCache.entries = merged;
   supplementalCatalogCache.loadedAt = Date.now();
@@ -9066,6 +9418,14 @@ function parseAdminImportUrl(input) {
     }
     return { provider: "anime-sama", catalogUrl: safe };
   }
+  if (host.endsWith(FILMER2_HOST)) {
+    const match = pathName.match(/\/(movie|tv)\/[^/]+\.html/i);
+    if (!match) {
+      return null;
+    }
+    const mediaType = match[1].toLowerCase() === "tv" ? "tv" : "movie";
+    return { provider: "filmer2", mediaType, detailUrl: parsed.href };
+  }
   return null;
 }
 
@@ -9111,6 +9471,11 @@ async function handleAdminImport(req, res, requestUrl) {
     });
     if (response.status >= 200 && response.status < 300) {
       entry = buildAdminCustomEntryFromAnimeSama(parsed.catalogUrl, response.body || "");
+    }
+  } else if (parsed.provider === "filmer2") {
+    const detail = await fetchFilmer2Detail(parsed.detailUrl);
+    if (detail) {
+      entry = buildAdminCustomEntryFromFilmer2(detail, parsed.mediaType);
     }
   }
   if (!entry) {
@@ -9171,11 +9536,37 @@ async function handleAdminSearch(req, res, requestUrl) {
     ? parseJsonSafe(nakiosResponse.body)
     : null;
 
+  let filmer2Results = [];
+  try {
+    const queryKey = normalizeTitleKey(query);
+    const filmer2Rows = await loadFilmer2CatalogEntries();
+    filmer2Results = Array.isArray(filmer2Rows)
+      ? filmer2Rows
+          .filter((row) => {
+            if (!row || !queryKey) {
+              return false;
+            }
+            const titleKey = normalizeTitleKey(row?.title || "");
+            return titleKey.includes(queryKey);
+          })
+          .slice(0, 40)
+          .map((row) => ({
+            title: row?.title || "",
+            type: row?.type || "movie",
+            year: row?.external_year || row?.year || 0,
+            url: row?.external_detail_url || "",
+          }))
+      : [];
+  } catch {
+    filmer2Results = [];
+  }
+
   sendJson(res, 200, {
     ok: true,
     query,
     purstream: purstreamPayload || null,
     nakios: nakiosPayload || null,
+    filmer2: filmer2Results,
   });
   return true;
 }
@@ -9861,6 +10252,86 @@ async function handleAnimeSeasons(req, res, requestUrl) {
   }
 }
 
+async function handleFilmer2Seasons(req, res, requestUrl) {
+  if (requestUrl.pathname !== "/api/filmer2-seasons") {
+    return false;
+  }
+  if (req.method !== "GET") {
+    sendJson(res, 405, { error: "Method Not Allowed" });
+    return true;
+  }
+  const url = String(requestUrl.searchParams.get("url") || "").trim();
+  if (!url || !isFilmer2Url(url)) {
+    sendJson(res, 400, { error: "Invalid url" });
+    return true;
+  }
+  const detail = await fetchFilmer2Detail(url);
+  if (!detail) {
+    sendJson(res, 404, { error: "Filmer2 detail unavailable" });
+    return true;
+  }
+  const seasons = Array.isArray(detail.seasons) ? detail.seasons : [];
+  sendJson(res, 200, {
+    apiVersion: "zenix-filmer2-seasons-v1",
+    type: "success",
+    data: {
+      title: detail.title,
+      items: seasons,
+    },
+  });
+  return true;
+}
+
+async function handleFilmer2Source(req, res, requestUrl) {
+  if (requestUrl.pathname !== "/api/filmer2-source") {
+    return false;
+  }
+  if (req.method !== "GET") {
+    sendJson(res, 405, { error: "Method Not Allowed" });
+    return true;
+  }
+  const url = String(requestUrl.searchParams.get("url") || "").trim();
+  if (!url || !isFilmer2Url(url)) {
+    sendJson(res, 400, { error: "Invalid url" });
+    return true;
+  }
+  const detail = await fetchFilmer2Detail(url);
+  if (!detail) {
+    sendJson(res, 404, { error: "Filmer2 detail unavailable" });
+    return true;
+  }
+  const dedupe = new Set();
+  const sources = Array.isArray(detail.sources)
+    ? detail.sources
+        .map((src, index) => {
+          const streamUrl = String(src || "").trim();
+          if (!streamUrl || dedupe.has(streamUrl)) {
+            return null;
+          }
+          dedupe.add(streamUrl);
+          return {
+            stream_url: streamUrl,
+            source_name: ZENIX_BRAND_LABEL,
+            quality: "HD",
+            language: "VF",
+            format: inferOwnedSourceFormat(streamUrl, "mp4"),
+            priority: 320 - Math.min(40, index * 4),
+          };
+        })
+        .filter(Boolean)
+    : [];
+  sendJson(res, 200, {
+    apiVersion: "zenix-filmer2-source-v1",
+    type: "success",
+    data: {
+      title: detail.title,
+      count: sources.length,
+      sources,
+    },
+  });
+  return true;
+}
+
 async function handleNakiosSource(req, res, requestUrl) {
   if (requestUrl.pathname !== "/api/nakios-source") {
     return false;
@@ -10443,10 +10914,22 @@ const server = http.createServer((req, res) => {
       if (handledAnimeSeasons) {
         return true;
       }
+      return handleFilmer2Seasons(req, res, requestUrl);
+    })
+    .then((handledFilmer2Seasons) => {
+      if (handledFilmer2Seasons) {
+        return true;
+      }
       return handleAnimeSibnet(req, res, requestUrl);
     })
     .then((handledAnimeSibnet) => {
       if (handledAnimeSibnet) {
+        return true;
+      }
+      return handleFilmer2Source(req, res, requestUrl);
+    })
+    .then((handledFilmer2Source) => {
+      if (handledFilmer2Source) {
         return true;
       }
       return handleNakiosSource(req, res, requestUrl);
