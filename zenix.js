@@ -272,6 +272,7 @@ const state = {
   selectedDetailId: null,
   detailsCache: new Map(),
   detailsMissing: new Set(),
+  pendingMediaIds: new Set(),
   trailersCache: new Map(),
   seasonsCache: new Map(),
   progress: loadProgress(),
@@ -6935,6 +6936,9 @@ function normalizeAvailabilityStatus(value) {
     raw === "waiting" ||
     raw === "en attente" ||
     raw === "attente" ||
+    raw.includes("mise en ligne") ||
+    raw.includes("pas encore en ligne") ||
+    raw.includes("non disponible") ||
     raw === "coming" ||
     raw === "upcoming"
   ) {
@@ -6967,17 +6971,92 @@ function getItemAvailabilityStatus(item) {
   if (!item || typeof item !== "object") {
     return "";
   }
+  const id = Number(item?.id || 0);
   const direct = normalizeAvailabilityStatus(
     item?.availabilityStatus || item?.externalStatus || item?.availability_status || item?.external_status || item?.status || ""
   );
   if (direct) {
     return direct;
   }
+  if (id > 0 && state.pendingMediaIds && state.pendingMediaIds.has(id)) {
+    return "pending";
+  }
   return isTruthyDataFlag(item?.isPendingUpload ?? item?.is_pending_upload) ? "pending" : "";
 }
 
 function isPendingUploadItem(item) {
   return getItemAvailabilityStatus(item) === "pending";
+}
+
+function applyAvailabilityToItem(item, status) {
+  if (!item || typeof item !== "object") {
+    return false;
+  }
+  const normalized = normalizeAvailabilityStatus(status);
+  if (!normalized) {
+    return false;
+  }
+  const changed = getItemAvailabilityStatus(item) !== normalized;
+  item.availabilityStatus = normalized;
+  item.externalStatus = normalized;
+  item.isPendingUpload = normalized === "pending";
+  item.is_pending_upload = normalized === "pending";
+  return changed;
+}
+
+function markItemAvailability(mediaId, status) {
+  const id = Number(mediaId || 0);
+  const normalized = normalizeAvailabilityStatus(status);
+  if (!Number.isFinite(id) || id <= 0 || !normalized) {
+    return false;
+  }
+  if (normalized === "pending") {
+    state.pendingMediaIds.add(id);
+  } else {
+    state.pendingMediaIds.delete(id);
+  }
+  let changed = false;
+  const apply = (entry) => {
+    if (entry && Number(entry?.id || 0) === id) {
+      if (applyAvailabilityToItem(entry, normalized)) {
+        changed = true;
+      }
+    }
+  };
+  state.catalog.forEach(apply);
+  state.topDaily.forEach(apply);
+  const detail = state.detailsCache.get(id);
+  if (detail && typeof detail === "object") {
+    if (applyAvailabilityToItem(detail, normalized)) {
+      state.detailsCache.set(id, detail);
+      changed = true;
+    }
+  }
+  const calendarBuckets = [
+    state.calendarData?.merged,
+    state.calendarData?.purstream?.items,
+    state.calendarData?.animeSama?.items,
+    state.calendarData?.supplemental?.items,
+  ];
+  calendarBuckets.forEach((bucket) => {
+    if (!Array.isArray(bucket)) {
+      return;
+    }
+    bucket.forEach((entry) => {
+      const entryId = Number(entry?.mediaId || entry?.id || 0);
+      if (entryId !== id) {
+        return;
+      }
+      entry.availability_status = normalized;
+      entry.external_status = normalized;
+      entry.is_pending_upload = normalized === "pending";
+      changed = true;
+    });
+  });
+  if (changed) {
+    renderAll();
+  }
+  return changed;
 }
 
 function resolveDetailLanguageLabel(details, mediaId = 0) {
@@ -9069,11 +9148,20 @@ async function openDetails(id, options = {}) {
   parts.push(getItemTypeLabel(item));
   refs.detailMeta.textContent = parts.join(" - ");
 
-  refs.detailOverview.textContent =
-    details?.overview || "Aucune description detaillee disponible pour ce titre.";
+  const pendingOverviewNote = isPendingUploadItem(item)
+    ? "Contenu encore trop recent. Mise en ligne en cours."
+    : "";
+  const detailOverviewBase = details?.overview || "Aucune description detaillee disponible pour ce titre.";
+  refs.detailOverview.textContent = pendingOverviewNote
+    ? `${pendingOverviewNote}
+${detailOverviewBase}`
+    : detailOverviewBase;
 
   refs.detailBadges.innerHTML = "";
   const badges = [getItemTypeLabel(item)];
+  if (isPendingUploadItem(item)) {
+    badges.unshift("En attente");
+  }
   if (languageLabel) {
     badges.push(languageLabel);
   }
@@ -9884,7 +9972,12 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
     }
     if (state.sourcePool.length === 0) {
       const pendingHint = isPendingUploadItem(selectedItem) || (isExternalItem && selectedItem?.externalProvider);
-      const message = pendingHint ? "En attente de mise en ligne." : "Lecture indisponible pour ce titre.";
+      if (pendingHint) {
+        markItemAvailability(selectedItem.id, "pending");
+      }
+      const message = pendingHint
+        ? "En attente de mise en ligne. Contenu encore trop recent."
+        : "Lecture indisponible pour ce titre.";
       clearPlaybackGuard();
       setPlayerStatus(message, true);
       showMessage(message, true);
