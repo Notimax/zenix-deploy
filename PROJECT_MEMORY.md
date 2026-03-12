@@ -90,7 +90,14 @@ Last update: 2026-03-11
   - c153 follow-up:
     - detail modal and player surfaces now visually hide scrollbars while preserving scroll behavior.
     - applied to overlay/panel containers and player source chips for cleaner modal/player UI.
-  - c154 follow-up:
+- c154 follow-up:
+
+## Admin + announcement (c201, 2026-03-12)
+- Private admin panel at `/admin` with server-side password (env `ZENIX_ADMIN_PASSWORD`).
+- Admin API endpoints: `/api/admin/*` + public `/api/announcement`.
+- Admin can set announcement (duration), import titles by URL (Nakios/Anime-Sama),
+  and apply overrides (title/overview/poster/status/hidden).
+- Announcement banner is shown on site (desktop + mobile) when active.
     - added a themed anti-adblock access gate (desktop + mobile) with live retry/unlock flow.
     - gate blocks interaction while adblock is detected, then restores access immediately after successful recheck.
     - copy explains free model funding (small non-intrusive ads for hosting/domain).

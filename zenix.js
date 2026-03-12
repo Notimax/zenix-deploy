@@ -386,6 +386,9 @@ const refs = {
   startupSplash: document.getElementById("startupSplash"),
   heroSection: document.getElementById("hero"),
   statusStrip: document.getElementById("statusStrip"),
+  announcementBanner: document.getElementById("announcementBanner"),
+  announcementText: document.getElementById("announcementText"),
+  announcementClose: document.getElementById("announcementClose"),
   quickLinksSection: document.getElementById("quickLinksSection"),
   filtersPanel: document.getElementById("filtersPanel"),
   communityPanel: document.getElementById("communityPanel"),
@@ -1108,7 +1111,7 @@ async function init() {
   pruneProgressEntries();
   applyUiPrefs({ syncControls: true });
   if (refs.footerVersion) {
-    refs.footerVersion.textContent = "c198";
+    refs.footerVersion.textContent = "c201";
   }
   updateNetworkBadge();
   startOnlineCountPolling();
@@ -1119,6 +1122,7 @@ async function init() {
   initExternalNavigationGuard();
   initAdblockGuard();
   initDiscordGate();
+  loadAnnouncement();
   refreshSuggestionClientTimestamp();
   hydrateLanguagePrefsMap();
   initCalendarControls();
@@ -3209,6 +3213,66 @@ function initDiscordGate() {
     bindFastPress(refs.discordLaterBtn, () => {
       setDiscordGateVisible(false);
     });
+  }
+}
+
+function setAnnouncementVisible(visible, message = "") {
+  if (!refs.announcementBanner || !refs.announcementText) {
+    return;
+  }
+  const nextVisible = Boolean(visible);
+  refs.announcementBanner.hidden = !nextVisible;
+  if (nextVisible) {
+    refs.announcementText.textContent = message;
+  }
+}
+
+function getAnnouncementDismissKey(message) {
+  const safe = String(message || "").trim();
+  if (!safe) {
+    return "";
+  }
+  return `zenix-announcement:${safe.slice(0, 120)}`;
+}
+
+async function loadAnnouncement() {
+  if (!refs.announcementBanner || !refs.announcementText) {
+    return;
+  }
+  try {
+    const payload = await fetchJson(`${API_BASE}/announcement`, { timeoutMs: 6000 });
+    const data = payload?.data;
+    const message = String(data?.message || "").trim();
+    if (!message) {
+      setAnnouncementVisible(false);
+      return;
+    }
+    const dismissKey = getAnnouncementDismissKey(message);
+    if (dismissKey) {
+      try {
+        if (sessionStorage.getItem(dismissKey) === "1") {
+          setAnnouncementVisible(false);
+          return;
+        }
+      } catch {
+        // ignore
+      }
+    }
+    setAnnouncementVisible(true, message);
+    if (refs.announcementClose) {
+      refs.announcementClose.onclick = () => {
+        setAnnouncementVisible(false);
+        if (dismissKey) {
+          try {
+            sessionStorage.setItem(dismissKey, "1");
+          } catch {
+            // ignore
+          }
+        }
+      };
+    }
+  } catch {
+    setAnnouncementVisible(false);
   }
 }
 

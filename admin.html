@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>Zenix Admin</title>
+  <link rel="stylesheet" href="/admin.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet" />
+  <script defer src="/admin.js"></script>
+</head>
+<body class="admin-body">
+  <div class="admin-shell">
+    <header class="admin-header">
+      <div>
+        <h1>Zenix Admin</h1>
+        <p>Acces prive, gestion du catalogue et des annonces.</p>
+      </div>
+      <button class="admin-btn" id="adminLogoutBtn" type="button" hidden>Deconnexion</button>
+    </header>
+
+    <section class="admin-card" id="adminLoginCard">
+      <h2>Connexion</h2>
+      <div class="admin-field">
+        <label for="adminPassword">Mot de passe</label>
+        <input id="adminPassword" type="password" placeholder="Mot de passe admin" />
+      </div>
+      <button class="admin-btn" id="adminLoginBtn" type="button">Se connecter</button>
+      <p class="admin-muted" id="adminLoginStatus"></p>
+    </section>
+
+    <section id="adminApp" hidden>
+      <div class="admin-grid">
+        <section class="admin-card">
+          <h2>Annonce globale</h2>
+          <div class="admin-field">
+            <label for="annMessage">Message</label>
+            <textarea id="annMessage" placeholder="Votre message d'annonce"></textarea>
+          </div>
+          <div class="admin-field">
+            <label for="annDuration">Duree (heures)</label>
+            <input id="annDuration" type="number" min="0" step="1" placeholder="0 = illimite" />
+          </div>
+          <div class="admin-inline admin-field">
+            <input id="annEnabled" type="checkbox" />
+            <label for="annEnabled">Activer l'annonce</label>
+          </div>
+          <button class="admin-btn" id="annSaveBtn" type="button">Enregistrer</button>
+          <p class="admin-muted" id="annStatus"></p>
+        </section>
+
+        <section class="admin-card">
+          <h2>Importer par URL</h2>
+          <div class="admin-field">
+            <label for="importUrl">URL (Nakios ou Anime-sama)</label>
+            <input id="importUrl" type="text" placeholder="https://nakios.site/movie/1234" />
+          </div>
+          <button class="admin-btn" id="importBtn" type="button">Importer</button>
+          <p class="admin-muted" id="importStatus"></p>
+          <div class="admin-muted" id="importResult"></div>
+        </section>
+
+        <section class="admin-card">
+          <h2>Override (modifier/masquer)</h2>
+          <div class="admin-field">
+            <label for="overrideId">ID Zenix (optionnel)</label>
+            <input id="overrideId" type="number" placeholder="Ex: 1500123456" />
+          </div>
+          <div class="admin-field">
+            <label for="overrideExternalKey">External key (optionnel)</label>
+            <input id="overrideExternalKey" type="text" placeholder="movie:1629382" />
+          </div>
+          <div class="admin-field">
+            <label for="overrideTitle">Titre</label>
+            <input id="overrideTitle" type="text" placeholder="Nouveau titre" />
+          </div>
+          <div class="admin-field">
+            <label for="overrideOverview">Resume</label>
+            <textarea id="overrideOverview" placeholder="Nouveau resume"></textarea>
+          </div>
+          <div class="admin-field">
+            <label for="overridePoster">Poster URL</label>
+            <input id="overridePoster" type="text" placeholder="https://..." />
+          </div>
+          <div class="admin-field">
+            <label for="overrideBackdrop">Backdrop URL</label>
+            <input id="overrideBackdrop" type="text" placeholder="https://..." />
+          </div>
+          <div class="admin-field">
+            <label for="overrideStatus">Statut</label>
+            <select id="overrideStatus">
+              <option value="">Ne pas changer</option>
+              <option value="available">Disponible</option>
+              <option value="pending">En attente</option>
+              <option value="unknown">Inconnu</option>
+            </select>
+          </div>
+          <div class="admin-inline admin-field">
+            <input id="overrideHide" type="checkbox" />
+            <label for="overrideHide">Masquer</label>
+          </div>
+          <button class="admin-btn" id="overrideSaveBtn" type="button">Appliquer</button>
+          <p class="admin-muted" id="overrideStatusMsg"></p>
+        </section>
+
+        <section class="admin-card">
+          <h2>Custom entries</h2>
+          <div class="admin-list" id="customList"></div>
+        </section>
+
+        <section class="admin-card">
+          <h2>Overrides actifs</h2>
+          <div class="admin-list" id="overrideList"></div>
+        </section>
+      </div>
+    </section>
+  </div>
+</body>
+</html>

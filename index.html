@@ -67,8 +67,8 @@
       "logo": "https://zenix.best/android-chrome-512x512.png"
     }
   </script>
-    <link rel="stylesheet" href="/zenix.css?v=20260311-c200" />
-    <script defer src="/zenix.js?v=20260311-c200"></script>
+    <link rel="stylesheet" href="/zenix.css?v=20260312-c201" />
+    <script defer src="/zenix.js?v=20260312-c201"></script>
 </head>
 <body>
   <div class="startup-splash" id="startupSplash" aria-hidden="true">
@@ -129,6 +129,14 @@
       <span class="net-badge" id="networkBadge" aria-live="polite">Total en lignes</span>
     </div>
   </header>
+
+  <section class="announcement-banner" id="announcementBanner" hidden>
+    <div class="announcement-inner">
+      <span class="announcement-label">Annonce</span>
+      <p class="announcement-text" id="announcementText"></p>
+      <button class="announcement-close" id="announcementClose" type="button">OK</button>
+    </div>
+  </section>
 
   <main class="layout">
     <p class="sr-only">Zenix Stream propose des films, des series et des anime en streaming VF.</p>

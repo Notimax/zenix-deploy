@@ -750,6 +750,15 @@ LOCAL BRUTE RESULT (c200, 2026-03-11)
 - Env: `ZENIX_GATE_DISABLE=1`
 - Summary: total 8, passed 8, failed 0, `/api/media/*/sheet` 404 count: 0
 
+LATEST ADMIN + ANNOUNCEMENT (2026-03-12, c201)
+- Added private admin panel at `/admin` (not linked from main UI).
+- Admin auth uses server-side password (env `ZENIX_ADMIN_PASSWORD`) + secure HttpOnly session cookie.
+- Admin features:
+  - announcement message with duration (shown on desktop + mobile).
+  - import by URL (Nakios + Anime-Sama) to add custom entries.
+  - overrides (edit title/overview/poster/status or hide entries).
+- Public announcement endpoint: `/api/announcement`.
+
 VPS ACCESS (ADKYNET) - OPERATIONAL NOTES (2026-03-12)
 - VPS IP: 185.218.21.29
 - SSH user: root (no "ubuntu" user on this VPS)

@@ -216,6 +216,23 @@ const GATE_SECRET =
 const GATE_ADSCRIPT_PATH = "/_gate/zenix-proof.js";
 const GATE_DISABLED = String(process.env.ZENIX_GATE_DISABLE || "").trim() === "1";
 const gateChallenges = new Map();
+const ADMIN_COOKIE_NAME = "zenix_admin";
+const ADMIN_PASSWORD = String(process.env.ZENIX_ADMIN_PASSWORD || "").trim();
+const ADMIN_SESSION_SECRET =
+  String(process.env.ZENIX_ADMIN_SESSION_SECRET || "").trim() || crypto.randomBytes(32).toString("hex");
+const ADMIN_SESSION_TTL_MS = Math.max(
+  15 * 60 * 1000,
+  Number(process.env.ZENIX_ADMIN_SESSION_TTL_MS || 12 * 60 * 60 * 1000)
+);
+const ADMIN_DATA_FILE = path.resolve(process.env.ZENIX_ADMIN_DATA_FILE || path.join(ROOT, "admin-data.json"));
+const ADMIN_LOGIN_WINDOW_MS = Math.max(60 * 1000, Number(process.env.ZENIX_ADMIN_LOGIN_WINDOW_MS || 5 * 60 * 1000));
+const ADMIN_LOGIN_MAX_ATTEMPTS = Math.max(
+  3,
+  Number(process.env.ZENIX_ADMIN_LOGIN_MAX_ATTEMPTS || 8)
+);
+const adminLoginAttempts = new Map();
+const adminSessions = new Map();
+const adminDataCache = { loadedAt: 0, value: null };
 const NAKIOS_PINNED_TITLES = [
   { title: "Go Karts", mediaType: "movie", year: 2020 },
   { title: "Minions", mediaType: "movie", year: 2015 },
@@ -1135,9 +1152,242 @@ function parseCookies(req) {
     if (!key) {
       return acc;
     }
-    acc[key] = decodeURIComponent(value);
-    return acc;
-  }, {});
+      acc[key] = decodeURIComponent(value);
+      return acc;
+    }, {});
+}
+
+function timingSafeEqualStrings(left, right) {
+  const a = Buffer.from(String(left || ""));
+  const b = Buffer.from(String(right || ""));
+  if (a.length !== b.length) {
+    return false;
+  }
+  return crypto.timingSafeEqual(a, b);
+}
+
+function buildDefaultAdminData() {
+  return {
+    announcement: {
+      message: "",
+      enabled: false,
+      expiresAt: 0,
+      updatedAt: "",
+    },
+    custom: [],
+    overrides: {
+      byId: {},
+      byExternalKey: {},
+    },
+  };
+}
+
+function normalizeAdminData(raw) {
+  const base = buildDefaultAdminData();
+  if (!raw || typeof raw !== "object") {
+    return base;
+  }
+  const ann = raw.announcement || {};
+  base.announcement = {
+    message: String(ann.message || "").trim(),
+    enabled: Boolean(ann.enabled),
+    expiresAt: Number(ann.expiresAt || 0),
+    updatedAt: String(ann.updatedAt || ""),
+  };
+  base.custom = Array.isArray(raw.custom) ? raw.custom.filter(Boolean) : [];
+  const overrides = raw.overrides || {};
+  base.overrides = {
+    byId: overrides.byId && typeof overrides.byId === "object" ? overrides.byId : {},
+    byExternalKey: overrides.byExternalKey && typeof overrides.byExternalKey === "object" ? overrides.byExternalKey : {},
+  };
+  return base;
+}
+
+function loadAdminData(force = false) {
+  const now = Date.now();
+  if (!force && adminDataCache.value && now - adminDataCache.loadedAt < 2000) {
+    return adminDataCache.value;
+  }
+  let data = null;
+  try {
+    if (fs.existsSync(ADMIN_DATA_FILE)) {
+      const raw = fs.readFileSync(ADMIN_DATA_FILE, "utf-8");
+      data = parseJsonSafe(raw);
+    }
+  } catch {
+    data = null;
+  }
+  const normalized = normalizeAdminData(data);
+  adminDataCache.value = normalized;
+  adminDataCache.loadedAt = now;
+  return normalized;
+}
+
+function saveAdminData(data) {
+  const normalized = normalizeAdminData(data);
+  try {
+    const tmp = `${ADMIN_DATA_FILE}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(normalized, null, 2), "utf-8");
+    fs.renameSync(tmp, ADMIN_DATA_FILE);
+  } catch {
+    // best effort
+  }
+  adminDataCache.value = normalized;
+  adminDataCache.loadedAt = Date.now();
+  return normalized;
+}
+
+function getActiveAnnouncement(data) {
+  const payload = data?.announcement || {};
+  const message = String(payload.message || "").trim();
+  if (!payload.enabled || !message) {
+    return null;
+  }
+  const expiresAt = Number(payload.expiresAt || 0);
+  if (expiresAt > 0 && Date.now() > expiresAt) {
+    const next = normalizeAdminData(data);
+    next.announcement.enabled = false;
+    saveAdminData(next);
+    return null;
+  }
+  return {
+    message,
+    expiresAt,
+    updatedAt: String(payload.updatedAt || ""),
+  };
+}
+
+function getAdminSession(req) {
+  const cookies = parseCookies(req);
+  const token = String(cookies[ADMIN_COOKIE_NAME] || "").trim();
+  if (!token) {
+    return null;
+  }
+  const session = adminSessions.get(token);
+  if (!session || Number(session.expiresAt || 0) < Date.now()) {
+    adminSessions.delete(token);
+    return null;
+  }
+  return session;
+}
+
+function setAdminCookie(res, token, ttlMs = ADMIN_SESSION_TTL_MS) {
+  const maxAge = Math.max(60, Math.floor(ttlMs / 1000));
+  res.setHeader("Set-Cookie", [
+    `${ADMIN_COOKIE_NAME}=${token}; HttpOnly; Secure; SameSite=Strict; Path=/admin; Max-Age=${maxAge}`,
+  ]);
+}
+
+function clearAdminCookie(res) {
+  res.setHeader("Set-Cookie", [
+    `${ADMIN_COOKIE_NAME}=; HttpOnly; Secure; SameSite=Strict; Path=/admin; Max-Age=0`,
+  ]);
+}
+
+function isAdminAuthenticated(req) {
+  if (!ADMIN_PASSWORD) {
+    return false;
+  }
+  return Boolean(getAdminSession(req));
+}
+
+function isAdminLoginAllowed(ip, now = Date.now()) {
+  const key = String(ip || "unknown");
+  const existing = adminLoginAttempts.get(key) || { count: 0, resetAt: now + ADMIN_LOGIN_WINDOW_MS };
+  if (now > existing.resetAt) {
+    existing.count = 0;
+    existing.resetAt = now + ADMIN_LOGIN_WINDOW_MS;
+  }
+  if (existing.count >= ADMIN_LOGIN_MAX_ATTEMPTS) {
+    adminLoginAttempts.set(key, existing);
+    return false;
+  }
+  existing.count += 1;
+  adminLoginAttempts.set(key, existing);
+  return true;
+}
+
+function applyAdminOverride(entry, adminData) {
+  if (!entry || typeof entry !== "object") {
+    return null;
+  }
+  const overrides = adminData?.overrides || {};
+  const byId = overrides.byId || {};
+  const byExternalKey = overrides.byExternalKey || {};
+  const idKey = String(entry.id || "");
+  const extKey = String(entry.external_key || "");
+  const override = (extKey && byExternalKey[extKey]) || (idKey && byId[idKey]) || null;
+  if (!override || typeof override !== "object") {
+    return entry;
+  }
+  if (override.hidden === true) {
+    return null;
+  }
+  const next = { ...entry };
+  if (override.title) {
+    next.title = String(override.title || "").trim() || next.title;
+  }
+  if (override.overview) {
+    next.overview = String(override.overview || "").trim();
+  }
+  if (override.poster) {
+    const poster = String(override.poster || "").trim();
+    if (poster) {
+      next.small_poster_path = poster;
+      next.large_poster_path = poster;
+      next.wallpaper_poster_path = next.wallpaper_poster_path || poster;
+    }
+  }
+  if (override.backdrop) {
+    const backdrop = String(override.backdrop || "").trim();
+    if (backdrop) {
+      next.wallpaper_poster_path = backdrop;
+    }
+  }
+  if (override.release_date) {
+    next.release_date = String(override.release_date || "").trim();
+  }
+  if (override.availability_status) {
+    const status = normalizeNakiosAvailabilityStatus(override.availability_status);
+    if (status) {
+      next.availability_status = status;
+      next.external_status = status;
+    }
+  }
+  if (override.type) {
+    next.type = String(override.type || "").toLowerCase() === "tv" ? "tv" : "movie";
+  }
+  if (override.isAnime !== undefined) {
+    next.isAnime = Boolean(override.isAnime);
+  }
+  if (override.external_detail_url) {
+    next.external_detail_url = String(override.external_detail_url || "").trim();
+  }
+  return next;
+}
+
+function mergeAdminCustomEntries(entries, adminData) {
+  const base = Array.isArray(entries) ? entries.slice() : [];
+  const custom = Array.isArray(adminData?.custom) ? adminData.custom.slice() : [];
+  if (custom.length === 0) {
+    return base;
+  }
+  const customPrepared = custom.map((entry) => applyAdminOverride(entry, adminData)).filter(Boolean);
+  const merged = [];
+  const seen = new Set();
+  const all = customPrepared.concat(base);
+  all.forEach((entry) => {
+    if (!entry || typeof entry !== "object") {
+      return;
+    }
+    const key = buildSupplementalSemanticKey(entry) || String(entry.id || "");
+    if (!key || seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    merged.push(entry);
+  });
+  return merged;
 }
 
 function hashSha256(value) {
@@ -5711,6 +5961,156 @@ function scoreNakiosSearchEntry(entry, queryTitleKey, normalizedType, safeYear) 
   return score;
 }
 
+function extractMetaContent(html, key) {
+  const safeKey = String(key || "").trim();
+  if (!safeKey) {
+    return "";
+  }
+  const regex = new RegExp(
+    `<meta[^>]+(?:property|name)=["']${safeKey}["'][^>]*content=["']([^"']+)["'][^>]*>`,
+    "i"
+  );
+  const match = String(html || "").match(regex);
+  return String(match?.[1] || "").trim();
+}
+
+function extractTagText(html, tag) {
+  const safeTag = String(tag || "").trim();
+  if (!safeTag) {
+    return "";
+  }
+  const regex = new RegExp(`<${safeTag}[^>]*>([^<]+)</${safeTag}>`, "i");
+  const match = String(html || "").match(regex);
+  return String(match?.[1] || "").trim();
+}
+
+function normalizeAdminCustomEntry(entry) {
+  if (!entry || typeof entry !== "object") {
+    return null;
+  }
+  const title = String(entry.title || "").trim();
+  if (!title) {
+    return null;
+  }
+  const type = String(entry.type || "").toLowerCase() === "tv" ? "tv" : "movie";
+  const titleKey = normalizeTitleKey(entry.titleKey || title);
+  const year = toInt(entry.year, 0, 0, 2099);
+  const externalKey = String(entry.external_key || entry.externalKey || "").trim();
+  const externalDetailUrl = String(entry.external_detail_url || entry.externalDetailUrl || "").trim();
+  const poster =
+    String(entry.large_poster_path || entry.small_poster_path || entry.poster || entry.cover || "").trim() || "";
+  const backdrop =
+    String(entry.wallpaper_poster_path || entry.backdrop || entry.poster_backdrop || poster).trim() || poster;
+  const rawKey = externalKey || `admin:${titleKey}:${type}:${year || "0"}`;
+  const id = toInt(entry.id, 0, 0, 999999999) || buildSupplementalMediaId("admin", rawKey);
+  const releaseDate = String(entry.release_date || entry.releaseDate || "").trim();
+  const normalized = {
+    id,
+    type,
+    title,
+    titleKey,
+    year,
+    isAnime: Boolean(entry.isAnime),
+    runtime: Number(entry.runtime || 0) || null,
+    release_date: releaseDate || null,
+    end_date: String(entry.end_date || "").trim() || null,
+    overview: String(entry.overview || "").trim(),
+    detailUrl: String(entry.detailUrl || entry.external_detail_url || externalDetailUrl || "").trim(),
+    pageUrl: String(entry.pageUrl || entry.external_detail_url || externalDetailUrl || "").trim(),
+    lang: String(entry.lang || entry.language || "VF").trim() || "VF",
+    language: String(entry.language || entry.lang || "VF").trim() || "VF",
+    small_poster_path: poster,
+    large_poster_path: poster,
+    wallpaper_poster_path: backdrop || poster,
+    external_provider: ZENIX_EXTERNAL_PROVIDER,
+    external_key: rawKey,
+    external_detail_url: externalDetailUrl,
+    external_tmdb_id: toInt(entry.external_tmdb_id || entry.tmdbId, 0, 0, 999999999) || 0,
+    availability_status: normalizeNakiosAvailabilityStatus(entry.availability_status || entry.external_status || "") || "",
+    external_status: normalizeNakiosAvailabilityStatus(entry.availability_status || entry.external_status || "") || "",
+    supplemental_rank: Number(entry.supplemental_rank || 0),
+    supplemental_date: String(entry.supplemental_date || entry.release_date || "").trim(),
+    providerLabel: String(entry.providerLabel || "Zenix").trim(),
+  };
+  if (!normalized.supplemental_rank) {
+    normalized.supplemental_rank = scoreSupplementalCandidate(normalized);
+  }
+  return normalized;
+}
+
+function buildAdminCustomEntryFromNakios(detail, mediaType) {
+  if (!detail || typeof detail !== "object") {
+    return null;
+  }
+  const normalizedType = String(mediaType || "").toLowerCase() === "tv" ? "tv" : "movie";
+  const title =
+    String(detail?.title || detail?.name || detail?.original_title || detail?.original_name || "").trim();
+  if (!title) {
+    return null;
+  }
+  const releaseDateRaw =
+    String(
+      normalizedType === "tv"
+        ? detail?.first_air_date || detail?.release_date || ""
+        : detail?.release_date || detail?.first_air_date || ""
+    ).trim();
+  const year = toInt(parseYearFromText(releaseDateRaw), 0, 0, 2099);
+  const poster = toNakiosTmdbPosterUrl(detail?.poster_path || "");
+  const backdrop = toNakiosTmdbBackdropUrl(detail?.backdrop_path || "", detail?.poster_path || "");
+  const tmdbId = toInt(detail?.id, 0, 0, 999999999);
+  const externalKey = `${normalizedType}:${tmdbId || normalizeTitleKey(title)}`;
+  return normalizeAdminCustomEntry({
+    type: normalizedType,
+    title,
+    year,
+    release_date: releaseDateRaw,
+    overview: String(detail?.overview || "").trim(),
+    small_poster_path: poster,
+    large_poster_path: poster,
+    wallpaper_poster_path: backdrop || poster,
+    external_key: externalKey,
+    external_tmdb_id: tmdbId,
+    external_detail_url: "",
+    providerLabel: ZENIX_BRAND_LABEL,
+  });
+}
+
+function buildAdminCustomEntryFromAnimeSama(catalogUrl, html) {
+  const safeUrl = sanitizeAnimeSamaCatalogUrl(catalogUrl || "");
+  if (!safeUrl) {
+    return null;
+  }
+  const titleRaw =
+    extractTagText(html, "h1") ||
+    extractMetaContent(html, "og:title") ||
+    extractTagText(html, "title") ||
+    "";
+  let title = String(titleRaw || "").replace(/\s*\|\s*anime-sama.*$/i, "").trim();
+  if (!title) {
+    const parsed = new URL(safeUrl);
+    const slug = String(parsed.pathname || "").split("/").filter(Boolean).pop() || "";
+    title = slugToReadableTitle(slug || "");
+  }
+  if (!title) {
+    return null;
+  }
+  const poster =
+    extractMetaContent(html, "og:image") ||
+    extractMetaContent(html, "twitter:image") ||
+    "";
+  return normalizeAdminCustomEntry({
+    type: "tv",
+    title,
+    isAnime: true,
+    small_poster_path: poster,
+    large_poster_path: poster,
+    wallpaper_poster_path: poster,
+    external_key: `anime:${normalizeTitleKey(title)}`,
+    external_detail_url: safeUrl,
+    providerLabel: ZENIX_BRAND_LABEL,
+  });
+}
+
 async function resolveNakiosSearchEntry(title, mediaType, year = 0) {
   const safeTitle = String(title || "").trim();
   if (safeTitle.length < 2) {
@@ -5825,7 +6225,11 @@ async function resolveNakiosSourcesByTmdbId(mediaType, tmdbId, season = 1, episo
 
 async function loadSupplementalCatalogEntries(force = false, options = {}) {
   const rows = await loadNakiosCatalogEntries(force, options);
-  supplementalCatalogCache.entries = Array.isArray(rows) ? rows : [];
+  const adminData = loadAdminData();
+  const baseRows = Array.isArray(rows) ? rows : [];
+  const overridden = baseRows.map((entry) => applyAdminOverride(entry, adminData)).filter(Boolean);
+  const merged = mergeAdminCustomEntries(overridden, adminData);
+  supplementalCatalogCache.entries = merged;
   supplementalCatalogCache.loadedAt = Date.now();
   supplementalCatalogCache.inFlight = null;
   return supplementalCatalogCache.entries;
@@ -5881,7 +6285,8 @@ function buildSupplementalCalendarItems(entries, month, year, limit = SUPPLEMENT
     }
 
     const provider = String(entry?.external_provider || "").trim().toLowerCase();
-    const type = String(entry?.type || "").toLowerCase() === "tv" ? "serie" : "film";
+    const isAnime = Boolean(entry?.isAnime);
+    const type = isAnime ? "anime" : String(entry?.type || "").toLowerCase() === "tv" ? "serie" : "film";
     let availabilityStatus = normalizeNakiosAvailabilityStatus(
       entry?.availability_status || entry?.external_status || entry?.status
     );
@@ -8301,6 +8706,380 @@ async function handleSuggestionSubmit(req, res, requestUrl) {
   }
 }
 
+async function handleAnnouncement(req, res, requestUrl) {
+  if (requestUrl.pathname !== "/api/announcement") {
+    return false;
+  }
+  if (req.method !== "GET") {
+    sendJson(res, 405, { error: "Method Not Allowed" });
+    return true;
+  }
+  const data = loadAdminData();
+  const active = getActiveAnnouncement(data);
+  sendJson(res, 200, { data: active || null });
+  return true;
+}
+
+function normalizeAdminOverridePatch(raw) {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+  const patch = {};
+  if (raw.title) {
+    patch.title = String(raw.title || "").trim();
+  }
+  if (raw.overview) {
+    patch.overview = String(raw.overview || "").trim();
+  }
+  if (raw.poster) {
+    patch.poster = String(raw.poster || "").trim();
+  }
+  if (raw.backdrop) {
+    patch.backdrop = String(raw.backdrop || "").trim();
+  }
+  if (raw.release_date) {
+    patch.release_date = String(raw.release_date || "").trim();
+  }
+  if (raw.availability_status) {
+    patch.availability_status = normalizeNakiosAvailabilityStatus(raw.availability_status) || "";
+  }
+  if (raw.type) {
+    patch.type = String(raw.type || "").toLowerCase() === "tv" ? "tv" : "movie";
+  }
+  if (raw.isAnime !== undefined) {
+    patch.isAnime = Boolean(raw.isAnime);
+  }
+  if (raw.external_detail_url) {
+    patch.external_detail_url = String(raw.external_detail_url || "").trim();
+  }
+  if (raw.hidden !== undefined) {
+    patch.hidden = Boolean(raw.hidden);
+  }
+  return Object.keys(patch).length > 0 ? patch : null;
+}
+
+async function handleAdminSession(req, res, requestUrl) {
+  if (requestUrl.pathname !== "/api/admin/session") {
+    return false;
+  }
+  if (req.method !== "GET") {
+    sendJson(res, 405, { error: "Method Not Allowed" });
+    return true;
+  }
+  sendJson(res, 200, { ok: isAdminAuthenticated(req) });
+  return true;
+}
+
+async function handleAdminLogin(req, res, requestUrl) {
+  if (requestUrl.pathname !== "/api/admin/login") {
+    return false;
+  }
+  if (req.method !== "POST") {
+    sendJson(res, 405, { error: "Method Not Allowed" });
+    return true;
+  }
+  if (!ADMIN_PASSWORD) {
+    sendJson(res, 503, { error: "Admin disabled" });
+    return true;
+  }
+  const ip = getRemoteAddress(req);
+  if (!isAdminLoginAllowed(ip)) {
+    sendJson(res, 429, { error: "Too many attempts" });
+    return true;
+  }
+  let body = null;
+  try {
+    body = await readJsonBody(req, 4096);
+  } catch {
+    sendJson(res, 400, { error: "Invalid JSON" });
+    return true;
+  }
+  const password = String(body?.password || "");
+  if (!timingSafeEqualStrings(password, ADMIN_PASSWORD)) {
+    sendJson(res, 401, { error: "Unauthorized" });
+    return true;
+  }
+  const token = crypto.randomBytes(32).toString("hex");
+  adminSessions.set(token, {
+    createdAt: Date.now(),
+    expiresAt: Date.now() + ADMIN_SESSION_TTL_MS,
+    ip,
+    userAgent: String(req.headers["user-agent"] || ""),
+  });
+  setAdminCookie(res, token);
+  sendJson(res, 200, { ok: true });
+  return true;
+}
+
+async function handleAdminLogout(req, res, requestUrl) {
+  if (requestUrl.pathname !== "/api/admin/logout") {
+    return false;
+  }
+  if (req.method !== "POST") {
+    sendJson(res, 405, { error: "Method Not Allowed" });
+    return true;
+  }
+  const session = getAdminSession(req);
+  if (session) {
+    for (const [token, row] of adminSessions.entries()) {
+      if (row === session) {
+        adminSessions.delete(token);
+        break;
+      }
+    }
+  }
+  clearAdminCookie(res);
+  sendJson(res, 200, { ok: true });
+  return true;
+}
+
+async function handleAdminData(req, res, requestUrl) {
+  if (requestUrl.pathname !== "/api/admin/data") {
+    return false;
+  }
+  if (req.method !== "GET") {
+    sendJson(res, 405, { error: "Method Not Allowed" });
+    return true;
+  }
+  if (!isAdminAuthenticated(req)) {
+    sendJson(res, 401, { error: "Unauthorized" });
+    return true;
+  }
+  const data = loadAdminData(true);
+  sendJson(res, 200, { data });
+  return true;
+}
+
+async function handleAdminAnnouncement(req, res, requestUrl) {
+  if (requestUrl.pathname !== "/api/admin/announcement") {
+    return false;
+  }
+  if (req.method !== "POST") {
+    sendJson(res, 405, { error: "Method Not Allowed" });
+    return true;
+  }
+  if (!isAdminAuthenticated(req)) {
+    sendJson(res, 401, { error: "Unauthorized" });
+    return true;
+  }
+  let body = null;
+  try {
+    body = await readJsonBody(req, 8192);
+  } catch {
+    sendJson(res, 400, { error: "Invalid JSON" });
+    return true;
+  }
+  const message = String(body?.message || "").trim();
+  const enabled = Boolean(body?.enabled);
+  const durationHours = Number(body?.durationHours || 0);
+  const expiresAt = enabled && durationHours > 0 ? Date.now() + durationHours * 3600 * 1000 : 0;
+  const data = loadAdminData(true);
+  data.announcement = {
+    message,
+    enabled: Boolean(enabled && message),
+    expiresAt,
+    updatedAt: new Date().toISOString(),
+  };
+  saveAdminData(data);
+  sendJson(res, 200, { ok: true, data: data.announcement });
+  return true;
+}
+
+function parseAdminImportUrl(input) {
+  const raw = String(input || "").trim();
+  if (!raw) {
+    return null;
+  }
+  let parsed = null;
+  try {
+    parsed = new URL(raw, "https://zenix.best");
+  } catch {
+    return null;
+  }
+  const host = String(parsed.hostname || "").toLowerCase();
+  const pathName = String(parsed.pathname || "").toLowerCase();
+  if (host.endsWith("nakios.site")) {
+    const match = pathName.match(/\/(movie|movies|film|serie|series|tv)\/(?<id>\d+)/i);
+    if (!match) {
+      return null;
+    }
+    const id = toInt(match.groups?.id, 0, 0, 999999999);
+    if (id <= 0) {
+      return null;
+    }
+    const typeToken = String(match[1] || "").toLowerCase();
+    const mediaType = typeToken === "serie" || typeToken === "series" || typeToken === "tv" ? "tv" : "movie";
+    return { provider: "nakios", mediaType, tmdbId: id };
+  }
+  if (/anime-sama\.(tv|to)$/i.test(host)) {
+    const safe = sanitizeAnimeSamaCatalogUrl(parsed.href);
+    if (!safe) {
+      return null;
+    }
+    return { provider: "anime-sama", catalogUrl: safe };
+  }
+  return null;
+}
+
+async function handleAdminImport(req, res, requestUrl) {
+  if (requestUrl.pathname !== "/api/admin/import") {
+    return false;
+  }
+  if (req.method !== "POST") {
+    sendJson(res, 405, { error: "Method Not Allowed" });
+    return true;
+  }
+  if (!isAdminAuthenticated(req)) {
+    sendJson(res, 401, { error: "Unauthorized" });
+    return true;
+  }
+  let body = null;
+  try {
+    body = await readJsonBody(req, 8192);
+  } catch {
+    sendJson(res, 400, { error: "Invalid JSON" });
+    return true;
+  }
+  const url = String(body?.url || "").trim();
+  const parsed = parseAdminImportUrl(url);
+  if (!parsed) {
+    sendJson(res, 400, { error: "Unsupported URL" });
+    return true;
+  }
+  let entry = null;
+  if (parsed.provider === "nakios") {
+    const target =
+      parsed.mediaType === "tv"
+        ? `${NAKIOS_API_BASE}/api/series/${parsed.tmdbId}`
+        : `${NAKIOS_API_BASE}/api/movies/${parsed.tmdbId}`;
+    const response = await fetchRemote(target, NAKIOS_FETCH_HEADERS);
+    if (response.status >= 200 && response.status < 300) {
+      const detail = parseJsonSafe(response.body);
+      entry = buildAdminCustomEntryFromNakios(detail, parsed.mediaType);
+    }
+  } else if (parsed.provider === "anime-sama") {
+    const response = await fetchRemoteText(parsed.catalogUrl, "text/html", {
+      "Accept-Language": DEFAULT_ACCEPT_LANGUAGE,
+    });
+    if (response.status >= 200 && response.status < 300) {
+      entry = buildAdminCustomEntryFromAnimeSama(parsed.catalogUrl, response.body || "");
+    }
+  }
+  if (!entry) {
+    sendJson(res, 404, { error: "Import failed" });
+    return true;
+  }
+  const data = loadAdminData(true);
+  const custom = Array.isArray(data.custom) ? data.custom.slice() : [];
+  const existingIndex = custom.findIndex(
+    (row) => String(row?.external_key || "") === String(entry.external_key || "")
+  );
+  if (existingIndex >= 0) {
+    custom[existingIndex] = entry;
+  } else {
+    custom.unshift(entry);
+  }
+  data.custom = custom;
+  saveAdminData(data);
+  sendJson(res, 200, { ok: true, data: entry });
+  return true;
+}
+
+async function handleAdminOverride(req, res, requestUrl) {
+  if (requestUrl.pathname !== "/api/admin/override") {
+    return false;
+  }
+  if (req.method !== "POST") {
+    sendJson(res, 405, { error: "Method Not Allowed" });
+    return true;
+  }
+  if (!isAdminAuthenticated(req)) {
+    sendJson(res, 401, { error: "Unauthorized" });
+    return true;
+  }
+  let body = null;
+  try {
+    body = await readJsonBody(req, 8192);
+  } catch {
+    sendJson(res, 400, { error: "Invalid JSON" });
+    return true;
+  }
+  const id = toInt(body?.id, 0, 0, 999999999);
+  const externalKey = String(body?.external_key || body?.externalKey || "").trim();
+  if (id <= 0 && !externalKey) {
+    sendJson(res, 400, { error: "Missing id or external_key" });
+    return true;
+  }
+  const patch = normalizeAdminOverridePatch(body?.patch || body);
+  if (!patch) {
+    sendJson(res, 400, { error: "No changes" });
+    return true;
+  }
+  const data = loadAdminData(true);
+  if (id > 0) {
+    data.overrides.byId[String(id)] = patch;
+  }
+  if (externalKey) {
+    data.overrides.byExternalKey[externalKey] = patch;
+  }
+  saveAdminData(data);
+  sendJson(res, 200, { ok: true });
+  return true;
+}
+
+async function handleAdminOverrideDelete(req, res, requestUrl) {
+  if (requestUrl.pathname !== "/api/admin/override") {
+    return false;
+  }
+  if (req.method !== "DELETE") {
+    return false;
+  }
+  if (!isAdminAuthenticated(req)) {
+    sendJson(res, 401, { error: "Unauthorized" });
+    return true;
+  }
+  const id = toInt(requestUrl.searchParams.get("id"), 0, 0, 999999999);
+  const externalKey = String(requestUrl.searchParams.get("external_key") || "").trim();
+  if (id <= 0 && !externalKey) {
+    sendJson(res, 400, { error: "Missing id or external_key" });
+    return true;
+  }
+  const data = loadAdminData(true);
+  if (id > 0) {
+    delete data.overrides.byId[String(id)];
+  }
+  if (externalKey) {
+    delete data.overrides.byExternalKey[externalKey];
+  }
+  saveAdminData(data);
+  sendJson(res, 200, { ok: true });
+  return true;
+}
+
+async function handleAdminCustomDelete(req, res, requestUrl) {
+  if (requestUrl.pathname !== "/api/admin/custom") {
+    return false;
+  }
+  if (req.method !== "DELETE") {
+    sendJson(res, 405, { error: "Method Not Allowed" });
+    return true;
+  }
+  if (!isAdminAuthenticated(req)) {
+    sendJson(res, 401, { error: "Unauthorized" });
+    return true;
+  }
+  const id = toInt(requestUrl.searchParams.get("id"), 0, 0, 999999999);
+  if (id <= 0) {
+    sendJson(res, 400, { error: "Missing id" });
+    return true;
+  }
+  const data = loadAdminData(true);
+  data.custom = Array.isArray(data.custom) ? data.custom.filter((row) => Number(row?.id || 0) !== id) : [];
+  saveAdminData(data);
+  sendJson(res, 200, { ok: true });
+  return true;
+}
+
 async function fetchAnimePlanningPage() {
   const upstream = await fetchRemoteText(ANIME_PLANNING_URL, "text/html");
   if (upstream.status < 200 || upstream.status >= 300) {
@@ -8997,7 +9776,7 @@ function resolveCacheControl(filePath, ext) {
   return "public, max-age=31536000, immutable";
 }
 
-function streamFile(req, res, filePath) {
+function streamFile(req, res, filePath, extraHeaders = null) {
   fs.stat(filePath, (err, stats) => {
     if (err || !stats.isFile()) {
       send404(res);
@@ -9008,6 +9787,13 @@ function streamFile(req, res, filePath) {
     const contentType = MIME[ext] || "application/octet-stream";
     const cacheControl = resolveCacheControl(filePath, ext);
     const range = req.headers.range;
+    const baseHeaders = {
+      "Content-Type": contentType,
+      "Cache-Control": cacheControl,
+    };
+    if (extraHeaders && typeof extraHeaders === "object") {
+      Object.assign(baseHeaders, extraHeaders);
+    }
 
     if (range) {
       const match = /^bytes=(\d*)-(\d*)$/.exec(range);
@@ -9032,21 +9818,19 @@ function streamFile(req, res, filePath) {
       }
 
       res.writeHead(206, {
-        "Content-Type": contentType,
+        ...baseHeaders,
         "Content-Range": `bytes ${start}-${end}/${stats.size}`,
         "Accept-Ranges": "bytes",
         "Content-Length": end - start + 1,
-        "Cache-Control": cacheControl,
       });
       fs.createReadStream(filePath, { start, end }).pipe(res);
       return;
     }
 
     res.writeHead(200, {
-      "Content-Type": contentType,
+      ...baseHeaders,
       "Content-Length": stats.size,
       "Accept-Ranges": "bytes",
-      "Cache-Control": cacheControl,
     });
     fs.createReadStream(filePath).pipe(res);
   });
@@ -9099,6 +9883,66 @@ const server = http.createServer((req, res) => {
     })
     .then((handledWebhookStatus) => {
       if (handledWebhookStatus) {
+        return true;
+      }
+      return handleAnnouncement(req, res, requestUrl);
+    })
+    .then((handledAnnouncement) => {
+      if (handledAnnouncement) {
+        return true;
+      }
+      return handleAdminSession(req, res, requestUrl);
+    })
+    .then((handledAdminSession) => {
+      if (handledAdminSession) {
+        return true;
+      }
+      return handleAdminLogin(req, res, requestUrl);
+    })
+    .then((handledAdminLogin) => {
+      if (handledAdminLogin) {
+        return true;
+      }
+      return handleAdminLogout(req, res, requestUrl);
+    })
+    .then((handledAdminLogout) => {
+      if (handledAdminLogout) {
+        return true;
+      }
+      return handleAdminData(req, res, requestUrl);
+    })
+    .then((handledAdminData) => {
+      if (handledAdminData) {
+        return true;
+      }
+      return handleAdminAnnouncement(req, res, requestUrl);
+    })
+    .then((handledAdminAnnouncement) => {
+      if (handledAdminAnnouncement) {
+        return true;
+      }
+      return handleAdminImport(req, res, requestUrl);
+    })
+    .then((handledAdminImport) => {
+      if (handledAdminImport) {
+        return true;
+      }
+      return handleAdminOverrideDelete(req, res, requestUrl);
+    })
+    .then((handledAdminOverrideDelete) => {
+      if (handledAdminOverrideDelete) {
+        return true;
+      }
+      return handleAdminOverride(req, res, requestUrl);
+    })
+    .then((handledAdminOverride) => {
+      if (handledAdminOverride) {
+        return true;
+      }
+      return handleAdminCustomDelete(req, res, requestUrl);
+    })
+    .then((handledAdminCustomDelete) => {
+      if (handledAdminCustomDelete) {
         return true;
       }
       return handleSuggestionSubmit(req, res, requestUrl);
@@ -9158,6 +10002,8 @@ const server = http.createServer((req, res) => {
 
       if (pathname === "/") {
         pathname = "/index.html";
+      } else if (pathname === "/admin" || pathname === "/admin/") {
+        pathname = "/admin.html";
       }
 
       const filePath = safeLocalPath(pathname);
@@ -9169,7 +10015,9 @@ const server = http.createServer((req, res) => {
 
       fs.stat(filePath, (err, stats) => {
         if (!err && stats.isFile()) {
-          streamFile(req, res, filePath);
+          const extraHeaders =
+            pathname === "/admin.html" ? { "X-Robots-Tag": "noindex, nofollow" } : null;
+          streamFile(req, res, filePath, extraHeaders);
           return;
         }
 
