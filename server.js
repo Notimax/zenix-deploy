@@ -1274,13 +1274,13 @@ function getAdminSession(req) {
 function setAdminCookie(res, token, ttlMs = ADMIN_SESSION_TTL_MS) {
   const maxAge = Math.max(60, Math.floor(ttlMs / 1000));
   res.setHeader("Set-Cookie", [
-    `${ADMIN_COOKIE_NAME}=${token}; HttpOnly; Secure; SameSite=Strict; Path=/admin; Max-Age=${maxAge}`,
+    `${ADMIN_COOKIE_NAME}=${token}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=${maxAge}`,
   ]);
 }
 
 function clearAdminCookie(res) {
   res.setHeader("Set-Cookie", [
-    `${ADMIN_COOKIE_NAME}=; HttpOnly; Secure; SameSite=Strict; Path=/admin; Max-Age=0`,
+    `${ADMIN_COOKIE_NAME}=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0`,
   ]);
 }
 

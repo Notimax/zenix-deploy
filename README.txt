@@ -764,6 +764,9 @@ LATEST ADMIN GATE + EXTERNAL SEARCH FALLBACK (2026-03-12, c202)
 - External playback can now query internal search to find a playable Purstream candidate when Nakios has no sources
   (helps titles like "Go Karts" if they exist in the main catalog).
 
+LATEST ADMIN COOKIE FIX (2026-03-12, c203)
+- Admin session cookie now uses `Path=/` so `/api/admin/*` can see it (fixes "login does nothing").
+
 VPS ACCESS (ADKYNET) - OPERATIONAL NOTES (2026-03-12)
 - VPS IP: 185.218.21.29
 - SSH user: root (no "ubuntu" user on this VPS)
