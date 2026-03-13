@@ -530,3 +530,8 @@ Last update: 2026-03-11
 ## c215 follow-up (2026-03-13)
 - Fixed `isRecommendationView` scope in `renderAll()` to prevent JS crash on load.
 - Cache-bust updated to `20260313-c215`.
+
+## c216 follow-up (2026-03-13)
+- Gate issuance now uses a shared promise so parallel API calls wait for the token.
+- Prevents initial 403 cascades that left the UI empty.
+- Cache-bust updated to `20260313-c216`.

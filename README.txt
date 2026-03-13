@@ -858,3 +858,8 @@ LATEST JS PARSE FIX (2026-03-13, c214)
 LATEST RECOMMENDATION VIEW FIX (2026-03-13, c215)
 - Fixed `isRecommendationView` ReferenceError in `renderAll()` that halted JS boot.
 - Cache-bust bumped to `20260313-c215`.
+
+LATEST GATE CONCURRENCY FIX (2026-03-13, c216)
+- Gate token issuance is now awaited by concurrent API calls (prevents 403 bursts on load).
+- Fix restores initial catalog rendering and popups when gate is enabled.
+- Cache-bust bumped to `20260313-c216`.

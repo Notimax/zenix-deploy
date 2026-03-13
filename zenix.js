@@ -428,6 +428,7 @@ const state = {
   adblockProbeInFlight: false,
   gateReady: false,
   gateIssueInFlight: false,
+  gateIssuePromise: null,
   gateLastIssuedAt: 0,
   themeFilters: {
     movie: new Set(),
@@ -3643,58 +3644,64 @@ async function refreshGateToken(options = {}) {
   if (!force && state.gateLastIssuedAt && now - state.gateLastIssuedAt < GATE_REFRESH_COOLDOWN_MS) {
     return state.gateReady;
   }
-  if (state.gateIssueInFlight) {
-    return state.gateReady;
+  if (state.gateIssueInFlight && state.gateIssuePromise) {
+    return state.gateIssuePromise;
   }
   state.gateIssueInFlight = true;
-  try {
-    const challenge = await fetchJson(GATE_CHALLENGE_PATH, {
-      timeoutMs: 4500,
-      retryDelays: [],
-      noCache: true,
-    });
-    const nonce = String(challenge?.nonce || "");
-    const scriptUrl = String(challenge?.script || "");
-    if (!nonce || !scriptUrl) {
-      throw new Error("Gate challenge invalide");
-    }
-    const proof = await loadGateProofScript(scriptUrl, nonce);
-    if (!proof) {
-      applyAdblockDetectionState(true, { manual: Boolean(options.manual) });
-      setAdblockGateStatus(
-        "Bloqueur de pub detecte. Desactive-le puis clique sur 'Verifier de nouveau'.",
-        false
-      );
-      return false;
-    }
-    const response = await fetch(GATE_ISSUE_PATH, {
-      method: "POST",
-      credentials: "same-origin",
-      headers: {
-        "Content-Type": "application/json; charset=utf-8",
-      },
-      body: JSON.stringify({ nonce, proof }),
-    });
-    if (!response.ok) {
-      if (response.status === 403) {
+  state.gateIssuePromise = (async () => {
+    try {
+      const challenge = await fetchJson(GATE_CHALLENGE_PATH, {
+        timeoutMs: 4500,
+        retryDelays: [],
+        noCache: true,
+      });
+      const nonce = String(challenge?.nonce || "");
+      const scriptUrl = String(challenge?.script || "");
+      if (!nonce || !scriptUrl) {
+        throw new Error("Gate challenge invalide");
+      }
+      const proof = await loadGateProofScript(scriptUrl, nonce);
+      if (!proof) {
         applyAdblockDetectionState(true, { manual: Boolean(options.manual) });
         setAdblockGateStatus(
           "Bloqueur de pub detecte. Desactive-le puis clique sur 'Verifier de nouveau'.",
           false
         );
+        return false;
+      }
+      const response = await fetch(GATE_ISSUE_PATH, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/json; charset=utf-8",
+        },
+        body: JSON.stringify({ nonce, proof }),
+      });
+      if (!response.ok) {
+        if (response.status === 403) {
+          applyAdblockDetectionState(true, { manual: Boolean(options.manual) });
+          setAdblockGateStatus(
+            "Bloqueur de pub detecte. Desactive-le puis clique sur 'Verifier de nouveau'.",
+            false
+          );
+        }
+        return false;
+      }
+      state.gateReady = true;
+      state.gateLastIssuedAt = Date.now();
+      return true;
+    } catch (error) {
+      if (options.manual) {
+        setAdblockGateStatus("Verification pub impossible pour le moment. Reessaie.", true);
       }
       return false;
     }
-    state.gateReady = true;
-    state.gateLastIssuedAt = Date.now();
-    return true;
-  } catch (error) {
-    if (options.manual) {
-      setAdblockGateStatus("Verification pub impossible pour le moment. Reessaie.", true);
-    }
-    return false;
+  })();
+  try {
+    return await state.gateIssuePromise;
   } finally {
     state.gateIssueInFlight = false;
+    state.gateIssuePromise = null;
   }
 }
 
