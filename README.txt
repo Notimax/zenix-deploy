@@ -978,3 +978,8 @@ LATEST BACKUP POPUP LINK CENTER + ZENIX.LOL ADMIN FALLBACK (2026-03-14, c236)
 - Backup popup URL is now centered and displayed as a standalone block.
 - zenix.lol admin adds an inline fallback handler so login/update works even if admin.js cache fails.
 - Cache-bust bumped to `20260314-c236`.
+
+LATEST IOS SHARE + ONLINE COUNT BOOST (2026-03-14, c237)
+- iPhone backup popup now triggers the share sheet on first tap (uses click handler on iOS).
+- Online count base boosted from +40 to +50.
+- Cache-bust bumped to `20260314-c237`.

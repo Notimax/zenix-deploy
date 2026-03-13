@@ -649,3 +649,8 @@ Last update: 2026-03-11
 - Backup popup URL is now centered as a standalone block.
 - zenix.lol admin gets an inline fallback so login/update works even if admin.js fails to load.
 - Cache-bust updated to `20260314-c236`.
+
+## c237 follow-up (2026-03-14)
+- iPhone backup popup now triggers the share sheet on first tap (uses click handler on iOS).
+- Online count base boosted to +50.
+- Cache-bust updated to `20260314-c237`.

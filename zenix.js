@@ -96,7 +96,7 @@ const EMBED_READY_TIMEOUT_MS = 6000;
 const HEARTBEAT_INTERVAL_MS = 30 * 1000;
 const HEARTBEAT_REQUEST_TIMEOUT_MS = 9000;
 const HEARTBEAT_KEY = "zenix-client-id-v1";
-const ONLINE_COUNT_BASE = 40;
+const ONLINE_COUNT_BASE = 50;
 const ONLINE_COUNT_POLL_MS = 30 * 1000;
 const ONLINE_COUNT_STALE_MS = ONLINE_COUNT_POLL_MS * 2;
 const UI_PREFS_KEY = "zenix-ui-prefs-v1";
@@ -3756,11 +3756,12 @@ function initBackupGate() {
     });
   }
   if (refs.backupGateBookmarkBtn) {
-    bindFastPress(refs.backupGateBookmarkBtn, async () => {
+    const handleBackupBookmark = async () => {
       const url = BACKUP_PORTAL_URL;
       let hinted = false;
       let shared = false;
-      if (isLikelyMobileDevice() && navigator.share) {
+      const wantsShare = isLikelyMobileDevice() && typeof navigator.share === "function";
+      if (wantsShare) {
         try {
           await navigator.share({
             title: "Zenix",
@@ -3796,7 +3797,15 @@ function initBackupGate() {
       } catch {
         setBackupGateStatus(getBackupBookmarkHint());
       }
-    });
+    };
+    if (isIOSDevice()) {
+      refs.backupGateBookmarkBtn.addEventListener("click", (event) => {
+        event.preventDefault();
+        handleBackupBookmark();
+      });
+    } else {
+      bindFastPress(refs.backupGateBookmarkBtn, handleBackupBookmark);
+    }
   }
   if (refs.backupGate) {
     refs.backupGate.addEventListener("click", (event) => {
