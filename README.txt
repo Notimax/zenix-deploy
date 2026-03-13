@@ -928,3 +928,8 @@ LATEST PREVIEW + QUALITY RULE (2026-03-13, c228)
 - Card preview now supports HLS sources (desktop only).
 - Quality badges default to Full HD/4K via global rule when no playback success is cached.
 - Cache-bust bumped to `20260313-c228`.
+
+LATEST BACKUP POPUP + VITRINE (2026-03-13, c229)
+- Added a backup-domain popup on zenix.best (shows zenix.lol once per day/session).
+- New static vitrine project in `site/zenix-lol-vitrine` with configurable active URL.
+- Cache-bust bumped to `20260313-c229`.

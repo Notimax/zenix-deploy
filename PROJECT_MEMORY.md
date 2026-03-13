@@ -600,3 +600,8 @@ Last update: 2026-03-11
 - Card preview now accepts HLS sources (desktop only, hls.js when needed).
 - Quality badge defaults to Full HD/4K via global rule if no playback success exists.
 - Cache-bust updated to `20260313-c228`.
+
+## c229 follow-up (2026-03-13)
+- Added backup-domain popup on zenix.best (zenix.lol, once per day/session).
+- Added a static vitrine project at `site/zenix-lol-vitrine` with editable `config.js`.
+- Cache-bust updated to `20260313-c229`.

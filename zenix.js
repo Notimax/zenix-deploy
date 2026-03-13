@@ -109,6 +109,11 @@ const SOURCE_SUCCESS_KEY = "zenix-source-success-v1";
 const ITEM_QUALITY_KEY = "zenix-item-quality-v1";
 const DISCORD_PROMPT_SESSION_KEY = "zenix-discord-prompt-session-v1";
 const DISCORD_INVITE_URL = "https://discord.gg/xydTB8VmZT";
+const BACKUP_PROMPT_SESSION_KEY = "zenix-backup-prompt-session-v1";
+const BACKUP_PROMPT_STORAGE_KEY = "zenix-backup-prompt-last-v1";
+const BACKUP_PROMPT_TTL_MS = 24 * 60 * 60 * 1000;
+const BACKUP_PROMPT_DELAY_MS = 2400;
+const BACKUP_PORTAL_URL = "https://zenix.lol";
 const hlsLanguageProbeCache = new Map();
 const RECENT_SEARCHES_LIMIT = 8;
 const SCROLL_RESTORE_MAX = 8000;
@@ -456,6 +461,8 @@ const state = {
   themePrefetchInFlight: false,
   discordPromptReady: false,
   discordGateVisible: false,
+  backupPromptReady: false,
+  backupGateVisible: false,
   recommendation: {
     step: 0,
     answers: {},
@@ -587,6 +594,12 @@ const refs = {
   discordGate: document.getElementById("discordGate"),
   discordJoinBtn: document.getElementById("discordJoinBtn"),
   discordLaterBtn: document.getElementById("discordLaterBtn"),
+  backupGate: document.getElementById("backupGate"),
+  backupGateCloseBtn: document.getElementById("backupGateCloseBtn"),
+  backupGateBookmarkBtn: document.getElementById("backupGateBookmarkBtn"),
+  backupGateOkBtn: document.getElementById("backupGateOkBtn"),
+  backupGateUrl: document.getElementById("backupGateUrl"),
+  backupGateStatus: document.getElementById("backupGateStatus"),
 
   catalogSection: document.getElementById("catalogSection"),
   catalogTitle: document.getElementById("catalogTitle"),
@@ -1400,6 +1413,7 @@ async function init() {
   initExternalNavigationGuard();
   initAdblockGuard();
   initDiscordGate();
+  initBackupGate();
   loadAnnouncement();
   refreshSuggestionClientTimestamp();
   hydrateLanguagePrefsMap();
@@ -1509,6 +1523,7 @@ async function init() {
   await completeStartupSplash(splashStartedAt);
   state.discordPromptReady = true;
   maybeShowDiscordGate({ delayMs: 420 });
+  maybeShowBackupGate({ delayMs: BACKUP_PROMPT_DELAY_MS });
   initFloatingNotificationGuard();
 }
 
@@ -3613,6 +3628,136 @@ function initDiscordGate() {
   if (refs.discordLaterBtn) {
     bindFastPress(refs.discordLaterBtn, () => {
       setDiscordGateVisible(false);
+    });
+  }
+}
+
+function hasBackupPromptSession() {
+  try {
+    return sessionStorage.getItem(BACKUP_PROMPT_SESSION_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function hasBackupPromptRecent() {
+  try {
+    const last = Number(localStorage.getItem(BACKUP_PROMPT_STORAGE_KEY) || 0);
+    return Number.isFinite(last) && last > 0 && Date.now() - last < BACKUP_PROMPT_TTL_MS;
+  } catch {
+    return false;
+  }
+}
+
+function markBackupPromptSeen() {
+  try {
+    sessionStorage.setItem(BACKUP_PROMPT_SESSION_KEY, "1");
+  } catch {
+    // ignore
+  }
+  try {
+    localStorage.setItem(BACKUP_PROMPT_STORAGE_KEY, String(Date.now()));
+  } catch {
+    // ignore
+  }
+}
+
+function setBackupGateVisible(visible) {
+  if (!refs.backupGate) {
+    return;
+  }
+  const nextVisible = Boolean(visible);
+  refs.backupGate.hidden = !nextVisible;
+  state.backupGateVisible = nextVisible;
+  document.body.classList.toggle("backup-locked", nextVisible);
+  if (nextVisible) {
+    markBackupPromptSeen();
+  }
+}
+
+function setBackupGateStatus(message = "") {
+  if (!refs.backupGateStatus) {
+    return;
+  }
+  const text = String(message || "").trim();
+  if (!text) {
+    refs.backupGateStatus.hidden = true;
+    refs.backupGateStatus.textContent = "";
+    return;
+  }
+  refs.backupGateStatus.hidden = false;
+  refs.backupGateStatus.textContent = text;
+}
+
+function maybeShowBackupGate(options = {}) {
+  if (!refs.backupGate || !state.backupPromptReady) {
+    return;
+  }
+  if (state.adblockDetected || !refs.adblockGate?.hidden) {
+    return;
+  }
+  if (state.discordGateVisible) {
+    return;
+  }
+  if (hasBackupPromptSession() || hasBackupPromptRecent()) {
+    return;
+  }
+  if (state.backupGateVisible) {
+    return;
+  }
+  const delayMs = Math.max(0, Number(options.delayMs || 0));
+  if (delayMs > 0) {
+    window.setTimeout(() => {
+      maybeShowBackupGate({ delayMs: 0 });
+    }, delayMs);
+    return;
+  }
+  setBackupGateVisible(true);
+}
+
+function initBackupGate() {
+  state.backupPromptReady = true;
+  if (refs.backupGateUrl) {
+    refs.backupGateUrl.textContent = BACKUP_PORTAL_URL;
+  }
+  if (refs.backupGateCloseBtn) {
+    bindFastPress(refs.backupGateCloseBtn, () => {
+      setBackupGateVisible(false);
+    });
+  }
+  if (refs.backupGateOkBtn) {
+    bindFastPress(refs.backupGateOkBtn, () => {
+      setBackupGateVisible(false);
+    });
+  }
+  if (refs.backupGateBookmarkBtn) {
+    bindFastPress(refs.backupGateBookmarkBtn, async () => {
+      const url = BACKUP_PORTAL_URL;
+      let hinted = false;
+      try {
+        if (window.sidebar && typeof window.sidebar.addPanel === "function") {
+          window.sidebar.addPanel("Zenix", url, "");
+          hinted = true;
+        } else if (window.external && typeof window.external.AddFavorite === "function") {
+          window.external.AddFavorite(url, "Zenix");
+          hinted = true;
+        }
+      } catch {
+        // ignore
+      }
+      try {
+        await copyText(url);
+        setBackupGateStatus(hinted ? "Lien copie. Ajoute-le a tes favoris." : "Lien copie. Ctrl+D / Cmd+D pour ajouter.");
+      } catch {
+        setBackupGateStatus("Ajoute manuellement via Ctrl+D / Cmd+D.");
+      }
+    });
+  }
+  if (refs.backupGate) {
+    refs.backupGate.addEventListener("click", (event) => {
+      if (event.target === refs.backupGate) {
+        setBackupGateVisible(false);
+      }
     });
   }
 }
