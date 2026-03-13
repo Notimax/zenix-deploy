@@ -572,3 +572,6 @@ Last update: 2026-03-11
 ## c223 follow-up (2026-03-13)
 - Desktop submenu now opens again with overflow visible and no blur/backdrop.
 - Cache-bust updated to `20260313-c223`.
+
+## c224 follow-up (2026-03-13)
+- Admin custom delete now supports external_key fallback so "Supprimer" works even when the id is missing.

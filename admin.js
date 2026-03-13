@@ -315,6 +315,22 @@ function resolveOverrideTarget(item) {
   return null;
 }
 
+function buildCustomDeleteUrl(entry) {
+  if (!entry) return "";
+  const id = Number(entry.id || 0);
+  const externalKey = String(entry.external_key || "").trim();
+  if (id > 0 && externalKey) {
+    return `/api/admin/custom?id=${id}&external_key=${encodeURIComponent(externalKey)}`;
+  }
+  if (id > 0) {
+    return `/api/admin/custom?id=${id}`;
+  }
+  if (externalKey) {
+    return `/api/admin/custom?external_key=${encodeURIComponent(externalKey)}`;
+  }
+  return "";
+}
+
 function isHiddenOverride(target) {
   if (!target) return false;
   if (target.id && state.overridesById) {
@@ -426,7 +442,12 @@ async function handleSelectedShow() {
 async function handleSelectedDelete() {
   const item = state.selectedItem;
   if (!item || !item.customEntry) return;
-  await apiFetch(`/api/admin/custom?id=${item.customEntry.id}`, { method: "DELETE" });
+  const url = buildCustomDeleteUrl(item.customEntry);
+  if (!url) {
+    if (refs.selectedStatus) refs.selectedStatus.textContent = "Suppression impossible.";
+    return;
+  }
+  await apiFetch(url, { method: "DELETE" });
   if (refs.selectedStatus) refs.selectedStatus.textContent = "Supprime.";
   if (refs.customStatus) refs.customStatus.textContent = "Suppression terminee.";
   setSelectedItem(null);
@@ -522,7 +543,12 @@ function renderCustomList(items) {
     if (deleteBtn) {
       deleteBtn.addEventListener("click", async () => {
         try {
-          await apiFetch(`/api/admin/custom?id=${entry.id}`, { method: "DELETE" });
+          const url = buildCustomDeleteUrl(entry);
+          if (!url) {
+            if (refs.customStatus) refs.customStatus.textContent = "Suppression impossible.";
+            return;
+          }
+          await apiFetch(url, { method: "DELETE" });
           if (refs.customStatus) refs.customStatus.textContent = "Suppression terminee.";
           await loadData();
         } catch (err) {

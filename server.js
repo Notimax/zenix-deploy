@@ -10297,14 +10297,27 @@ async function handleAdminCustomDelete(req, res, requestUrl) {
     return true;
   }
   const id = toInt(requestUrl.searchParams.get("id"), 0, 0, 999999999);
-  if (id <= 0) {
-    sendJson(res, 400, { error: "Missing id" });
+  const externalKey = String(requestUrl.searchParams.get("external_key") || "").trim();
+  if (id <= 0 && !externalKey) {
+    sendJson(res, 400, { error: "Missing id or external_key" });
     return true;
   }
   const data = loadAdminData(true);
-  data.custom = Array.isArray(data.custom) ? data.custom.filter((row) => Number(row?.id || 0) !== id) : [];
+  let rows = Array.isArray(data.custom) ? data.custom : [];
+  let removed = false;
+  if (id > 0) {
+    const next = rows.filter((row) => Number(row?.id || 0) !== id);
+    removed = removed || next.length !== rows.length;
+    rows = next;
+  }
+  if (externalKey) {
+    const next = rows.filter((row) => String(row?.external_key || "").trim() !== externalKey);
+    removed = removed || next.length !== rows.length;
+    rows = next;
+  }
+  data.custom = rows;
   saveAdminData(data);
-  sendJson(res, 200, { ok: true });
+  sendJson(res, 200, { ok: true, removed });
   return true;
 }
 async function handleRepairSources(req, res, requestUrl) {
