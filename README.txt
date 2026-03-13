@@ -791,6 +791,13 @@ LATEST SHARE + PENDING RESCUE + ADMIN LIVE SEARCH (2026-03-12, c208)
 - Added public Filmer2 search endpoint: `/api/filmer2-search`.
 - Admin search is now live (debounced) with Auto-fix + Selection actions; IDs are auto-filled when you pick a result.
 
+LATEST REPAIR ENDPOINTS + FILMER2 FALLBACK (2026-03-12, c210)
+- Added `/api/repair-sources` and `/api/repair-store` endpoints so the player "R?paration" button persists new sources.
+- Admin data now stores `repairs` entries with TTL pruning.
+- Episode playback now forces external rescue after repeated source failures (helps broken readers like Young Sherlock).
+- Filmer2 search retries without year to improve match rate on tricky titles.
+- Cache-bust bumped to `20260312-c210`.
+
 VPS ACCESS (ADKYNET) - OPERATIONAL NOTES (2026-03-12)
 - VPS IP: 185.218.21.29
 - SSH user: root (no "ubuntu" user on this VPS)
@@ -825,3 +832,14 @@ DEPLOY FLOW (VPS)
 NGINX PROXY (current)
 - HTTP -> Node on 127.0.0.1:4173
 - HTTPS handled by Certbot (auto-renew via systemd timer)
+
+LATEST PROVIDER MASKING (2026-03-13, c211)
+- Added neutral endpoints for public use:
+  - /api/zenix-source (replaces nakios/filmer2 endpoints in frontend)
+  - /api/zenix-seasons (replaces nakios/filmer2 seasons in frontend)
+  - /api/zenix-anime-source + /api/zenix-anime-seasons aliases
+- Calendar + supplemental payloads sanitized:
+  - provider keys renamed to `primary` / `anime` / `supplemental`
+  - `sourceLinks` removed, external detail URLs/keys stripped
+  - provider labels normalized to `Zenix`
+- Anime planning cards use neutral `source: "anime"` and safe keys (no upstream URLs in payload).

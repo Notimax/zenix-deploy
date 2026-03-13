@@ -6304,3 +6304,237 @@ body.discord-locked .back-to-top {
     gap: 10px;
   }
 }
+
+/* --- Recommendation view + nav dropdowns (c209) --- */
+.main-nav {
+  align-items: center;
+}
+
+.nav-group {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.nav-pill-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.nav-pill-toggle::after {
+  content: "▾";
+  font-size: 0.65rem;
+  opacity: 0.7;
+  transform: translateY(-1px);
+}
+
+.nav-group.active > .nav-pill {
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.24);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.nav-submenu {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  min-width: 190px;
+  padding: 10px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(10, 12, 18, 0.92);
+  backdrop-filter: blur(16px);
+  box-shadow: 0 18px 46px rgba(0, 0, 0, 0.35);
+  display: grid;
+  gap: 6px;
+  opacity: 0;
+  transform: translateY(-8px);
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  z-index: 60;
+}
+
+.nav-group:hover .nav-submenu,
+.nav-group:focus-within .nav-submenu,
+.nav-group.is-open .nav-submenu {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.nav-subitem {
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  color: #d8dbea;
+  font: inherit;
+  font-size: 0.86rem;
+  text-align: left;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+.nav-subitem:hover,
+.nav-subitem.active {
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.recommendation-section {
+  display: grid;
+  gap: 12px;
+}
+
+.recommendation-shell {
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(16, 18, 28, 0.7);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+  padding: 18px;
+}
+
+.recommendation-progress {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.recommendation-progress-bar {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: linear-gradient(90deg, rgba(118, 171, 255, 0.9), rgba(255, 255, 255, 0.85));
+  transition: width 0.28s ease;
+}
+
+.recommendation-quiz {
+  margin-top: 16px;
+  display: grid;
+  gap: 14px;
+}
+
+.recommendation-step {
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-size: 0.68rem;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.recommendation-question {
+  margin: 0;
+  font-size: 1.35rem;
+}
+
+.recommendation-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+}
+
+.recommendation-option {
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.04);
+  color: #f6f7ff;
+  padding: 12px 14px;
+  text-align: left;
+  cursor: pointer;
+  transition: transform 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+}
+
+.recommendation-option:hover {
+  transform: translateY(-2px);
+  border-color: rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.recommendation-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.recommendation-results {
+  margin-top: 18px;
+}
+
+.recommendation-results-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.recommendation-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 14px;
+}
+
+.recommendation-card {
+  border-radius: 16px;
+  overflow: hidden;
+  background: rgba(12, 13, 20, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  display: grid;
+  gap: 10px;
+  padding-bottom: 12px;
+}
+
+.recommendation-card img {
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  object-fit: cover;
+}
+
+.recommendation-card-body {
+  padding: 0 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.recommendation-card-title {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.recommendation-card-meta {
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.65);
+}
+
+.player-repair-section {
+  display: grid;
+  gap: 6px;
+}
+
+.player-repair-status {
+  margin: 0;
+  font-size: 0.78rem;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.player-repair-section .btn.is-loading {
+  position: relative;
+  pointer-events: none;
+  opacity: 0.85;
+}
+
+@media (max-width: 900px) {
+  .nav-submenu {
+    left: 10px;
+    right: 10px;
+    min-width: unset;
+  }
+  .recommendation-shell {
+    padding: 16px;
+  }
+  .recommendation-options {
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  }
+}

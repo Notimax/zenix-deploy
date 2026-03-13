@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="fr">
 <head>
   <meta charset="UTF-8" />
@@ -67,10 +67,10 @@
       "logo": "https://zenix.best/android-chrome-512x512.png"
     }
   </script>
-    <link id="zenixStylesheet" rel="stylesheet" href="/zenix.css?v=20260312-c205" onerror="window.__zenixCssRetry && window.__zenixCssRetry()" />
+    <link id="zenixStylesheet" rel="stylesheet" href="/zenix.css?v=20260313-c211" onerror="window.__zenixCssRetry && window.__zenixCssRetry()" />
     <script>
       (function () {
-        var cssHref = "/zenix.css?v=20260312-c205";
+        var cssHref = "/zenix.css?v=20260313-c211";
         var maxRetries = 2;
         function hasCss() {
           var sheets = document.styleSheets || [];
@@ -111,7 +111,7 @@
         });
       })();
     </script>
-    <script defer src="/zenix.js?v=20260312-c205"></script>
+    <script defer src="/zenix.js?v=20260313-c211"></script>
 </head>
 <body>
   <div class="startup-splash" id="startupSplash" aria-hidden="true">
@@ -135,17 +135,44 @@
     </a>
 
     <div class="main-nav-shell">
-      <nav class="main-nav" aria-label="Navigation principale">
+            <nav class="main-nav" aria-label="Navigation principale">
         <button class="nav-pill active" data-view="all" type="button">Accueil</button>
-        <button class="nav-pill" data-view="calendar" type="button">Calendrier</button>
-        <button class="nav-pill" data-view="latest" type="button">Nouveautes</button>
-        <button class="nav-pill" data-view="popular" type="button">Populaires</button>
-        <button class="nav-pill" data-view="top" type="button">Top du jour</button>
         <button class="nav-pill" data-view="movie" type="button">Films</button>
         <button class="nav-pill" data-view="tv" type="button">Series</button>
         <button class="nav-pill" data-view="anime" type="button">Anime</button>
-        <button class="nav-pill" data-view="list" type="button">Ma liste</button>
-        <button class="nav-pill" data-view="info" type="button">Info</button>
+        <div class="nav-group" data-nav-group="discover">
+          <button
+            class="nav-pill nav-pill-toggle"
+            type="button"
+            aria-haspopup="true"
+            aria-expanded="false"
+            data-nav-toggle="discover"
+          >
+            Decouvrir
+          </button>
+          <div class="nav-submenu" role="menu" aria-label="Decouvrir">
+            <button class="nav-subitem" type="button" role="menuitem" data-view="calendar">Calendrier</button>
+            <button class="nav-subitem" type="button" role="menuitem" data-view="latest">Nouveautes</button>
+            <button class="nav-subitem" type="button" role="menuitem" data-view="popular">Populaires</button>
+            <button class="nav-subitem" type="button" role="menuitem" data-view="top">Top du jour</button>
+            <button class="nav-subitem" type="button" role="menuitem" data-view="list">Ma liste</button>
+            <button class="nav-subitem" type="button" role="menuitem" data-view="recommendation">Recommandation</button>
+          </div>
+        </div>
+        <div class="nav-group" data-nav-group="info">
+          <button
+            class="nav-pill nav-pill-toggle"
+            type="button"
+            aria-haspopup="true"
+            aria-expanded="false"
+            data-nav-toggle="info"
+          >
+            Infos
+          </button>
+          <div class="nav-submenu" role="menu" aria-label="Infos">
+            <button class="nav-subitem" type="button" role="menuitem" data-view="info">Info</button>
+          </div>
+        </div>
         <span class="nav-active-indicator" id="navActiveIndicator" aria-hidden="true"></span>
       </nav>
       <div class="nav-overflow" id="navOverflow">
@@ -258,6 +285,33 @@
         <p>Ta selection perso, prete a lancer.</p>
       </div>
       <div class="catalog-grid" id="listGrid"></div>
+    </section>
+    <section class="recommendation-section" id="recommendationSection" hidden>
+      <div class="section-head">
+        <h2>Recommandation</h2>
+        <p>Reponds a 5 questions pour trouver quoi regarder.</p>
+      </div>
+      <div class="recommendation-shell">
+        <div class="recommendation-progress">
+          <span class="recommendation-progress-bar" id="recommendationProgressBar" aria-hidden="true"></span>
+        </div>
+        <div class="recommendation-quiz" id="recommendationQuiz">
+          <p class="recommendation-step" id="recommendationStepLabel">Question 1/5</p>
+          <h3 class="recommendation-question" id="recommendationQuestion">Choisis un format</h3>
+          <div class="recommendation-options" id="recommendationOptions"></div>
+          <div class="recommendation-actions">
+            <button class="btn btn-soft btn-compact" id="recommendationBackBtn" type="button">Retour</button>
+            <button class="btn btn-ghost btn-compact" id="recommendationResetBtn" type="button">Recommencer</button>
+          </div>
+        </div>
+        <div class="recommendation-results" id="recommendationResults" hidden>
+          <div class="recommendation-results-head">
+            <p class="recommendation-step" id="recommendationResultLabel">Suggestions</p>
+            <button class="btn btn-soft btn-compact" id="recommendationRestartBtn" type="button">Relancer</button>
+          </div>
+          <div class="recommendation-grid" id="recommendationGrid"></div>
+        </div>
+      </div>
     </section>
 
     <section class="continue" id="continueSection" hidden>
@@ -580,6 +634,10 @@
                 <button class="btn btn-soft btn-compact" id="playerSourceApplyBtn" type="button" hidden>Appliquer</button>
               </div>
             </div>
+            <div class="player-side-section player-repair-section">
+              <button class="btn btn-soft btn-compact" id="playerRepairBtn" type="button">Reparation</button>
+              <p class="player-repair-status" id="playerRepairStatus" aria-live="polite"></p>
+            </div>
             <div class="player-side-section">
               <label class="field" for="playerSpeedSelect">
                 Vitesse
@@ -707,3 +765,4 @@
   <button class="back-to-top" id="backToTopBtn" type="button" hidden aria-label="Remonter en haut">Haut</button>
 </body>
 </html>
+

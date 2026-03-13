@@ -282,6 +282,13 @@ const NAKIOS_SEASONS_CACHE_MS = Math.max(
   5 * 60 * 1000,
   Number(process.env.NAKIOS_SEASONS_CACHE_MS || 6 * 60 * 60 * 1000)
 );
+const REPAIR_STORE_TTL_MS = Math.max(
+  15 * 60 * 1000,
+  Number(process.env.REPAIR_STORE_TTL_MS || 6 * 60 * 60 * 1000)
+);
+const REPAIR_STORE_MAX_ENTRIES = Math.max(50, toInt(process.env.REPAIR_STORE_MAX_ENTRIES, 400, 50, 4000));
+const REPAIR_STORE_MAX_SOURCES = Math.max(6, toInt(process.env.REPAIR_STORE_MAX_SOURCES, 40, 6, 120));
+const REPAIR_RATE_LIMIT_MS = Math.max(10 * 1000, Number(process.env.REPAIR_RATE_LIMIT_MS || 60 * 1000));
 const SUGGESTIONS_EMAIL_TO =
   normalizeSuggestionEmail(process.env.SUGGESTIONS_EMAIL_TO || "seekosint@gmail.com") || "seekosint@gmail.com";
 const SUGGESTIONS_RELAY_BASE = String(process.env.SUGGESTIONS_RELAY_BASE || "https://formsubmit.co/ajax")
@@ -329,6 +336,7 @@ const animeSibnetCache = new Map();
 const animeSeasonsCache = new Map();
 const nakiosSeasonsCache = new Map();
 const nakiosSeasonsInFlight = new Map();
+const repairRateLimit = new Map();
 const pidoovDetailCache = new Map();
 const pidoovLookupCache = new Map();
 const nakiosLookupCache = new Map();
@@ -1136,6 +1144,141 @@ function readJsonBody(req, maxBytes = 8192) {
   });
 }
 
+function buildRepairKey(mediaId, mediaType, season, episode) {
+  const id = toInt(mediaId, 0, 0, 999999999);
+  if (!id) {
+    return "";
+  }
+  const type = String(mediaType || "").toLowerCase() === "tv" ? "tv" : "movie";
+  const safeSeason = toInt(season, 1, 1, 500);
+  const safeEpisode = toInt(episode, 1, 1, 50000);
+  return `${id}:${type}:${safeSeason}:${safeEpisode}`;
+}
+function parseRepairKey(input) {
+  const raw = String(input || "").trim();
+  if (!raw) {
+    return null;
+  }
+  const parts = raw.split(":");
+  if (parts.length < 4) {
+    return null;
+  }
+  const [idPart, typePart, seasonPart, episodePart] = parts;
+  const id = toInt(idPart, 0, 0, 999999999);
+  if (!id) {
+    return null;
+  }
+  const type = String(typePart || "").toLowerCase();
+  if (type !== "tv" && type !== "movie") {
+    return null;
+  }
+  const safeSeason = toInt(seasonPart, 1, 1, 500);
+  const safeEpisode = toInt(episodePart, 1, 1, 50000);
+  return {
+    id,
+    type,
+    season: safeSeason,
+    episode: safeEpisode,
+    key: buildRepairKey(id, type, safeSeason, safeEpisode),
+  };
+}
+
+
+function normalizeRepairSource(row) {
+  const rawUrl = String(row?.stream_url || row?.url || "").trim();
+  if (!rawUrl) {
+    return null;
+  }
+  const parsed = parseSafeRemoteUrl(rawUrl);
+  if (!parsed) {
+    return null;
+  }
+  const streamUrl = parsed.href;
+  const language = normalizePidoovLanguage(row?.language || row?.lang || row?.name || "") || "VF";
+  const quality = sanitizeToken(String(row?.quality || "HD"), 16) || "HD";
+  const rawFormat = sanitizeToken(String(row?.format || "").toLowerCase(), 10);
+  const format =
+    rawFormat === "hls" || rawFormat === "mp4" || rawFormat === "dash" || rawFormat === "webm" || rawFormat === "embed"
+      ? rawFormat
+      : /\.m3u8(?:$|\?)/i.test(streamUrl)
+        ? "hls"
+        : /\.mp4(?:$|\?)/i.test(streamUrl)
+          ? "mp4"
+          : "embed";
+  const sourceName =
+    sanitizeToken(String(row?.source_name || row?.name || ZENIX_BRAND_LABEL), 46) || ZENIX_BRAND_LABEL;
+  const priority = toInt(row?.priority, 0, 0, 1000);
+  return {
+    stream_url: streamUrl,
+    source_name: sourceName,
+    quality,
+    language,
+    format,
+    priority,
+  };
+}
+
+function normalizeRepairSources(list) {
+  const rows = Array.isArray(list) ? list : [];
+  const dedupe = new Set();
+  const out = [];
+  rows.forEach((row) => {
+    const normalized = normalizeRepairSource(row);
+    if (!normalized) {
+      return;
+    }
+    const key = normalized.stream_url;
+    if (!key || dedupe.has(key)) {
+      return;
+    }
+    dedupe.add(key);
+    out.push(normalized);
+  });
+  return out.slice(0, REPAIR_STORE_MAX_SOURCES);
+}
+
+function loadRepairStore() {
+  const data = loadAdminData(true);
+  if (!data.repairs || typeof data.repairs !== "object") {
+    data.repairs = {};
+  }
+  return data;
+}
+
+function pruneRepairStore(data) {
+  if (!data || typeof data !== "object" || !data.repairs) {
+    return;
+  }
+  const now = Date.now();
+  Object.entries(data.repairs).forEach(([key, entry]) => {
+    const updatedAt = Number(entry?.updatedAt || 0);
+    if (!updatedAt || now - updatedAt > REPAIR_STORE_TTL_MS) {
+      delete data.repairs[key];
+    }
+  });
+  const keys = Object.keys(data.repairs);
+  if (keys.length <= REPAIR_STORE_MAX_ENTRIES) {
+    return;
+  }
+  keys
+    .sort((a, b) => Number(data.repairs[b]?.updatedAt || 0) - Number(data.repairs[a]?.updatedAt || 0))
+    .slice(REPAIR_STORE_MAX_ENTRIES)
+    .forEach((key) => {
+      delete data.repairs[key];
+    });
+}
+
+function isRepairAllowed(ip, key, now = Date.now()) {
+  const safeIp = sanitizeToken(ip || "0.0.0.0", 64) || "0.0.0.0";
+  const bucket = `${safeIp}:${key}`;
+  const last = Number(repairRateLimit.get(bucket) || 0);
+  if (last && now - last < REPAIR_RATE_LIMIT_MS) {
+    return false;
+  }
+  repairRateLimit.set(bucket, now);
+  return true;
+}
+
 function toBase64Url(input) {
   return Buffer.from(input)
     .toString("base64")
@@ -1206,13 +1349,15 @@ function buildDefaultAdminData() {
       byId: {},
       byExternalKey: {},
     },
+    repairs: {},
   };
 }
 
 function normalizeAdminData(raw) {
   const base = buildDefaultAdminData();
   if (!raw || typeof raw !== "object") {
-    return base;
+      base.repairs = raw.repairs && typeof raw.repairs === 'object' ? raw.repairs : {};
+return base;
   }
   const ann = raw.announcement || {};
   base.announcement = {
@@ -5891,6 +6036,60 @@ async function fetchFilmer2Detail(detailUrl) {
   });
   return detail;
 }
+async function resolveFilmer2DetailByTitle(title, mediaType, year = 0) {
+  const safeTitle = String(title || "").trim();
+  if (safeTitle.length < 2) {
+    return null;
+  }
+  const queryKey = normalizeTitleKey(safeTitle);
+  if (!queryKey) {
+    return null;
+  }
+  const normalizedType = mediaType === "tv" ? "tv" : mediaType === "movie" ? "movie" : "";
+  let rows = [];
+  try {
+    rows = await loadFilmer2CatalogEntries();
+  } catch {
+    rows = [];
+  }
+  const candidates = Array.isArray(rows)
+    ? rows
+        .filter((row) => {
+          if (!row) {
+            return false;
+          }
+          if (normalizedType) {
+            const rowType = normalizeSupplementalMediaType(row?.type || row?.mediaType || "");
+            if (rowType !== normalizedType) {
+              return false;
+            }
+          }
+          const titleKey = normalizeTitleKey(row?.title || "");
+          return Boolean(titleKey) && (titleKey.includes(queryKey) || queryKey.includes(titleKey));
+        })
+        .map((row) => ({
+          title: row?.title || "",
+          type: row?.type || "movie",
+          year: row?.external_year || row?.year || 0,
+          url: row?.external_detail_url || row?.externalDetailUrl || "",
+        }))
+        .filter((row) => row.title && row.url)
+    : [];
+  if (candidates.length === 0) {
+    return null;
+  }
+  const scored = candidates
+    .map((row) => ({
+      row,
+      score: scoreFilmer2SearchEntry(row, queryKey, normalizedType, year),
+    }))
+    .sort((left, right) => right.score - left.score);
+  const best = scored[0]?.row || null;
+  if (!best || !best.url) {
+    return null;
+  }
+  return fetchFilmer2Detail(best.url);
+}
 
 async function loadFilmer2CatalogEntries(force = false) {
   const now = Date.now();
@@ -6752,8 +6951,8 @@ function buildSupplementalCalendarItems(entries, month, year, limit = SUPPLEMENT
       availabilityStatus = "pending";
     }
     mapped.push({
-      source: provider || "provider",
-      key: `supp-${provider}-${entry.id}-${dateIso}`,
+      source: "supplemental",
+      key: `supp-${entry.id}-${dateIso}`,
       dateIso,
       dayNumber: itemDay,
       mediaId: Number(entry?.id || 0),
@@ -6763,12 +6962,12 @@ function buildSupplementalCalendarItems(entries, month, year, limit = SUPPLEMENT
       backdrop: String(entry?.wallpaper_poster_path || entry?.large_poster_path || entry?.small_poster_path || "").trim(),
       season: Number(entry?.external_season || 0),
       episode: Number(entry?.external_episode || 0),
-      supplemental: String(entry?.external_label || provider || "Provider"),
+      supplemental: ZENIX_BRAND_LABEL,
       categories: [],
-      url: String(entry?.external_detail_url || "").trim(),
+      url: "",
       languageHint: String(entry?.external_language || entry?.language || "").trim(),
       hasDetails: false,
-      provider: provider || "provider",
+      provider: ZENIX_EXTERNAL_PROVIDER,
       availabilityStatus,
       externalStatus: availabilityStatus,
       isPendingUpload: availabilityStatus === "pending",
@@ -6854,7 +7053,7 @@ function parsePurstreamCalendar(payload, month, year) {
     }
     semanticDedupe.add(semanticKey);
     items.push({
-      source: "purstream",
+      source: "primary",
       key,
       dateIso,
       dayNumber,
@@ -6868,7 +7067,7 @@ function parsePurstreamCalendar(payload, month, year) {
       episode: Number(movie.episode || 0),
       poster: String(posters.large || posters.small || posters.wallpaper || ""),
       categories: Array.isArray(movie.categories) ? movie.categories : [],
-      url: `${PURSTREAM_WEB_BASE}/calendar`,
+      url: "",
     });
   }
 
@@ -6924,8 +7123,8 @@ function parseAnimeCardsFromBlock(block, dayName, dateLabel, fallbackYear, limit
       : `https://anime-sama.tv${href.startsWith("/") ? href : `/${href}`}`;
 
     rows.push({
-      source: "anime-sama",
-      key: `${dayName}|${dateLabel}|${absoluteUrl}|${title}`,
+      source: "anime",
+      key: `anime-${dayName}|${dateLabel}|${normalizeTitleKey(title)}`,
       dayName,
       dateLabel,
       dateIso: parseAnimeDateLabelToIso(dateLabel, fallbackYear),
@@ -6933,7 +7132,7 @@ function parseAnimeCardsFromBlock(block, dayName, dateLabel, fallbackYear, limit
       type,
       language,
       poster: src,
-      url: absoluteUrl,
+      url: "",
     });
   }
 
@@ -7010,7 +7209,10 @@ function isAnimeSamaCalendarEntry(entry) {
   if (!entry || typeof entry !== "object") {
     return false;
   }
-  const sourceHint = normalizeTitleKey(entry?.source || entry?.supplemental || entry?.provider || "");
+  const sourceHint = normalizeTitleKey(entry?.source || entry?.supplemental || entry?.provider || entry?.origin || "");
+  if (sourceHint === "anime") {
+    return true;
+  }
   if (sourceHint.includes("anime sama") || sourceHint.includes("animesama")) {
     return true;
   }
@@ -9670,9 +9872,9 @@ async function handleAdminSearch(req, res, requestUrl) {
   sendJson(res, 200, {
     ok: true,
     query,
-    purstream: purstreamPayload || null,
-    nakios: nakiosPayload || null,
-    filmer2: filmer2Results,
+    primary: purstreamPayload || null,
+    external: nakiosPayload || null,
+    supplemental: filmer2Results,
   });
   return true;
 }
@@ -9732,7 +9934,7 @@ async function handleFilmer2Search(req, res, requestUrl) {
     .sort((left, right) => right.score - left.score);
   const best = scored[0]?.row || null;
   sendJson(res, 200, {
-    apiVersion: "zenix-filmer2-search-v1",
+    apiVersion: "zenix-search-v1",
     type: "success",
     data: {
       query,
@@ -10092,6 +10294,73 @@ async function handleAdminCustomDelete(req, res, requestUrl) {
   sendJson(res, 200, { ok: true });
   return true;
 }
+async function handleRepairSources(req, res, requestUrl) {
+  if (requestUrl.pathname !== "/api/repair-sources") {
+    return false;
+  }
+  if (req.method !== "GET") {
+    sendJson(res, 405, { error: "Method Not Allowed" });
+    return true;
+  }
+  const parsed = parseRepairKey(requestUrl.searchParams.get("key"));
+  if (!parsed || !parsed.key) {
+    sendJson(res, 400, { error: "Invalid key" });
+    return true;
+  }
+  const data = loadRepairStore();
+  pruneRepairStore(data);
+  const entry = data.repairs && typeof data.repairs === "object" ? data.repairs[parsed.key] : null;
+  const sources = normalizeRepairSources(entry?.sources || []);
+  sendJson(res, 200, {
+    ok: true,
+    data: {
+      key: parsed.key,
+      sources,
+      updatedAt: Number(entry?.updatedAt || 0),
+    },
+  });
+  return true;
+}
+
+async function handleRepairStore(req, res, requestUrl) {
+  if (requestUrl.pathname !== "/api/repair-store") {
+    return false;
+  }
+  if (req.method !== "POST") {
+    sendJson(res, 405, { error: "Method Not Allowed" });
+    return true;
+  }
+  const body = await readJsonBody(req, 8192);
+  const parsed = parseRepairKey(body?.key);
+  if (!parsed || !parsed.key) {
+    sendJson(res, 400, { error: "Invalid key" });
+    return true;
+  }
+  const sources = normalizeRepairSources(body?.sources || []);
+  if (sources.length === 0) {
+    sendJson(res, 200, { ok: false, error: "No sources" });
+    return true;
+  }
+  const ip = getRemoteAddress(req);
+  if (!isRepairAllowed(ip, parsed.key)) {
+    sendJson(res, 429, { error: "Rate limited" });
+    return true;
+  }
+  const data = loadRepairStore(true);
+  data.repairs = data.repairs && typeof data.repairs === "object" ? data.repairs : {};
+  data.repairs[parsed.key] = {
+    sources,
+    updatedAt: Date.now(),
+  };
+  pruneRepairStore(data);
+  saveAdminData(data);
+  sendJson(res, 200, {
+    ok: true,
+    data: { key: parsed.key, count: sources.length },
+  });
+  return true;
+}
+
 
 async function fetchAnimePlanningPage() {
   const upstream = await fetchRemoteText(ANIME_PLANNING_URL, "text/html");
@@ -10099,6 +10368,63 @@ async function fetchAnimePlanningPage() {
     throw new Error("Anime planning unavailable");
   }
   return upstream.body;
+}
+function sanitizePublicEntry(entry) {
+  if (!entry || typeof entry !== "object") {
+    return entry;
+  }
+  const next = { ...entry };
+  next.external_provider = ZENIX_EXTERNAL_PROVIDER;
+  next.externalProvider = ZENIX_EXTERNAL_PROVIDER;
+  next.external_label = ZENIX_BRAND_LABEL;
+  next.externalLabel = ZENIX_BRAND_LABEL;
+  next.external_source = "";
+  next.externalSource = "";
+  next.external_detail_url = "";
+  next.externalDetailUrl = "";
+  next.external_key = "";
+  next.externalKey = "";
+  if ("detailUrl" in next) {
+    next.detailUrl = "";
+  }
+  if ("pageUrl" in next) {
+    next.pageUrl = "";
+  }
+  if (typeof next.provider === "string") {
+    const provider = next.provider.toLowerCase();
+    if (
+      provider.includes("purstream") ||
+      provider.includes("nakios") ||
+      provider.includes("anime-sama") ||
+      provider.includes("animesama") ||
+      provider.includes("filmer2")
+    ) {
+      next.provider = ZENIX_EXTERNAL_PROVIDER;
+    }
+  }
+  if (typeof next.source === "string") {
+    const source = next.source.toLowerCase();
+    if (
+      source.includes("purstream") ||
+      source.includes("nakios") ||
+      source.includes("anime-sama") ||
+      source.includes("animesama") ||
+      source.includes("filmer2")
+    ) {
+      next.source = "zenix";
+    }
+  }
+  if (typeof next.supplemental === "string") {
+    if (/purstream|nakios|anime-sama|animesama|filmer2/i.test(next.supplemental)) {
+      next.supplemental = ZENIX_BRAND_LABEL;
+    }
+  }
+  if (typeof next.url === "string") {
+    if (/purstream|nakios|anime-sama|animesama|filmer2/i.test(next.url)) {
+      next.url = "";
+    }
+  }
+  return next;
 }
 
 async function handleCalendarOverview(req, res, requestUrl) {
@@ -10207,7 +10533,20 @@ async function handleCalendarOverview(req, res, requestUrl) {
       return true;
     }
 
-    const merged = buildMergedCalendar(purstream.items, anime.items, supplemental.items);
+    const primaryItems = Array.isArray(purstream.items)
+      ? purstream.items.map(sanitizePublicEntry)
+      : [];
+    const animeItems = Array.isArray(anime.items) ? anime.items.map(sanitizePublicEntry) : [];
+    const animeDays = Array.isArray(anime.days)
+      ? anime.days.map((day) => ({
+          ...day,
+          items: Array.isArray(day.items) ? day.items.map(sanitizePublicEntry) : [],
+        }))
+      : [];
+    const supplementalItems = Array.isArray(supplemental.items)
+      ? supplemental.items.map(sanitizePublicEntry)
+      : [];
+    const merged = buildMergedCalendar(primaryItems, animeItems, supplementalItems).map(sanitizePublicEntry);
 
     const payload = {
       apiVersion: "zenix-calendar-v1",
@@ -10216,31 +10555,26 @@ async function handleCalendarOverview(req, res, requestUrl) {
         generatedAt: new Date().toISOString(),
         month,
         year,
-        purstream: {
+        primary: {
           month: purstream.month,
           year: purstream.year,
           monthName: purstream.monthName,
-          count: purstream.items.length,
-          items: purstream.items,
+          count: primaryItems.length,
+          items: primaryItems,
         },
-        animeSama: {
-          count: anime.items.length,
-          days: anime.days,
-          items: anime.items,
+        anime: {
+          count: animeItems.length,
+          days: animeDays,
+          items: animeItems,
         },
         supplemental: {
-          count: supplemental.items.length,
-          items: supplemental.items,
+          count: supplementalItems.length,
+          items: supplementalItems,
         },
         mergedCount: merged.length,
         merged,
-        sourceLinks: {
-          purstream: `${PURSTREAM_WEB_BASE}/calendar`,
-          animeSama: ANIME_PLANNING_URL,
-          nakios: NAKIOS_BASE,
-        },
         providerStatus: {
-          catalog: purstreamResult.status === "fulfilled",
+          primary: purstreamResult.status === "fulfilled",
           anime: animeResult.status === "fulfilled",
           supplemental: supplementalResult.status === "fulfilled",
         },
@@ -10315,15 +10649,15 @@ async function handleCatalogSupplemental(req, res, requestUrl) {
         ),
       });
     }
+    if (Array.isArray(pageData.data)) {
+      pageData.data = pageData.data.map(sanitizePublicEntry);
+    }
     sendJson(res, 200, {
       apiVersion: "zenix-supplemental-catalog-v1",
       type: "success",
       data: {
         generatedAt: new Date().toISOString(),
         items: pageData,
-        providers: {
-          nakios: NAKIOS_BASE,
-        },
       },
     });
     return true;
@@ -10337,7 +10671,9 @@ async function handleCatalogSupplemental(req, res, requestUrl) {
 }
 
 async function handleAnimeSibnet(req, res, requestUrl) {
-  if (requestUrl.pathname !== "/api/anime-sibnet") {
+  const isLegacy = requestUrl.pathname === "/api/anime-sibnet";
+  const isZenix = requestUrl.pathname === "/api/zenix-anime-source";
+  if (!isLegacy && !isZenix) {
     return false;
   }
   if (req.method !== "GET") {
@@ -10362,10 +10698,26 @@ async function handleAnimeSibnet(req, res, requestUrl) {
     const data = await resolveAnimeSibnetSource(title, season, episode, language, {
       catalogUrl: catalogUrlParam,
     });
+    const sources = Array.isArray(data?.sources)
+      ? data.sources.map((entry) => ({
+          ...entry,
+          source_name: ZENIX_BRAND_LABEL,
+        }))
+      : [];
+    const publicData = {
+      title: data.title,
+      season: data.season,
+      episode: data.episode,
+      requestedLanguage: data.requestedLanguage,
+      language: data.language,
+      matchedRequestedLanguage: data.matchedRequestedLanguage,
+      sourceUrl: data.sourceUrl,
+      sources,
+    };
     sendJson(res, 200, {
-      apiVersion: "zenix-anime-sibnet-v1",
+      apiVersion: "zenix-anime-source-v1",
       type: "success",
-      data,
+      data: publicData,
     });
     return true;
   } catch (error) {
@@ -10373,7 +10725,7 @@ async function handleAnimeSibnet(req, res, requestUrl) {
     const status =
       reason.includes("not found") || reason.includes("unavailable") || reason.includes("missing") ? 404 : 502;
     sendJson(res, status, {
-      error: "Anime sibnet unavailable",
+      error: "Anime source unavailable",
       reason: sanitizeToken(String(error?.message || ""), 120),
     });
     return true;
@@ -10381,7 +10733,9 @@ async function handleAnimeSibnet(req, res, requestUrl) {
 }
 
 async function handleAnimeSeasons(req, res, requestUrl) {
-  if (requestUrl.pathname !== "/api/anime-seasons") {
+  const isLegacy = requestUrl.pathname === "/api/anime-seasons";
+  const isZenix = requestUrl.pathname === "/api/zenix-anime-seasons";
+  if (!isLegacy && !isZenix) {
     return false;
   }
   if (req.method !== "GET") {
@@ -10410,7 +10764,6 @@ async function handleAnimeSeasons(req, res, requestUrl) {
       data: {
         title,
         language: data.language,
-        catalogUrl: data.catalogUrl,
         items: data.seasons,
       },
     });
@@ -10422,6 +10775,71 @@ async function handleAnimeSeasons(req, res, requestUrl) {
     });
     return true;
   }
+}
+
+async function handleZenixSeasons(req, res, requestUrl) {
+  if (requestUrl.pathname !== "/api/zenix-seasons") {
+    return false;
+  }
+  if (req.method !== "GET") {
+    sendJson(res, 405, { error: "Method Not Allowed" });
+    return true;
+  }
+  let tmdbId = toInt(requestUrl.searchParams.get("tmdbId"), 0, 0, 999999999);
+  const title = String(requestUrl.searchParams.get("title") || "").trim();
+  const year = toInt(requestUrl.searchParams.get("year"), 0, 0, 2099);
+  const typeParam = String(requestUrl.searchParams.get("type") || "tv").toLowerCase();
+  const mediaType = typeParam === "movie" ? "movie" : "tv";
+
+  if (tmdbId <= 0 && title.length >= 2) {
+    try {
+      tmdbId = await resolveNakiosTmdbIdBySearch(title, mediaType, year);
+    } catch {
+      tmdbId = 0;
+    }
+  }
+
+  if (tmdbId > 0) {
+    const seasons = await fetchNakiosSeasonsByTmdbId(tmdbId);
+    sendJson(res, 200, {
+      apiVersion: "zenix-seasons-v1",
+      type: "success",
+      data: {
+        tmdbId,
+        items: seasons,
+      },
+    });
+    return true;
+  }
+
+  if (title.length < 2) {
+    sendJson(res, 200, {
+      apiVersion: "zenix-seasons-v1",
+      type: "success",
+      data: {
+        tmdbId: 0,
+        items: [],
+      },
+    });
+    return true;
+  }
+
+  let detail = null;
+  try {
+    detail = await resolveFilmer2DetailByTitle(title, mediaType, year);
+  } catch {
+    detail = null;
+  }
+  const seasons = Array.isArray(detail?.seasons) ? detail.seasons : [];
+  sendJson(res, 200, {
+    apiVersion: "zenix-seasons-v1",
+    type: "success",
+    data: {
+      tmdbId: 0,
+      items: seasons,
+    },
+  });
+  return true;
 }
 
 async function handleFilmer2Seasons(req, res, requestUrl) {
@@ -10439,12 +10857,12 @@ async function handleFilmer2Seasons(req, res, requestUrl) {
   }
   const detail = await fetchFilmer2Detail(url);
   if (!detail) {
-    sendJson(res, 404, { error: "Filmer2 detail unavailable" });
+    sendJson(res, 404, { error: "Source unavailable" });
     return true;
   }
   const seasons = Array.isArray(detail.seasons) ? detail.seasons : [];
   sendJson(res, 200, {
-    apiVersion: "zenix-filmer2-seasons-v1",
+    apiVersion: "zenix-seasons-v1",
     type: "success",
     data: {
       title: detail.title,
@@ -10478,7 +10896,7 @@ async function handleNakiosSeasons(req, res, requestUrl) {
 
   if (tmdbId <= 0) {
     sendJson(res, 200, {
-      apiVersion: "zenix-nakios-seasons-v1",
+      apiVersion: "zenix-seasons-v1",
       type: "success",
       data: {
         tmdbId: 0,
@@ -10490,11 +10908,108 @@ async function handleNakiosSeasons(req, res, requestUrl) {
 
   const seasons = await fetchNakiosSeasonsByTmdbId(tmdbId);
   sendJson(res, 200, {
-    apiVersion: "zenix-nakios-seasons-v1",
+    apiVersion: "zenix-seasons-v1",
     type: "success",
     data: {
       tmdbId,
       items: seasons,
+    },
+  });
+  return true;
+}
+
+async function handleZenixSource(req, res, requestUrl) {
+  if (requestUrl.pathname !== "/api/zenix-source") {
+    return false;
+  }
+  if (req.method !== "GET") {
+    sendJson(res, 405, { error: "Method Not Allowed" });
+    return true;
+  }
+
+  const mediaType = String(requestUrl.searchParams.get("type") || "movie").toLowerCase() === "tv" ? "tv" : "movie";
+  const title = String(requestUrl.searchParams.get("title") || "").trim();
+  const year = toInt(requestUrl.searchParams.get("year"), 0, 0, 2099);
+  const season = toInt(requestUrl.searchParams.get("season"), 1, 1, 500);
+  const episode = toInt(requestUrl.searchParams.get("episode"), 1, 1, 50000);
+  let tmdbId = toInt(requestUrl.searchParams.get("tmdbId"), 0, 0, 999999999);
+
+  if (tmdbId <= 0) {
+    if (title.length < 2) {
+      sendJson(res, 200, {
+        apiVersion: "zenix-source-v1",
+        type: "success",
+        data: {
+          title,
+          mediaType,
+          year,
+          season: mediaType === "tv" ? season : 1,
+          episode: mediaType === "tv" ? episode : 1,
+          tmdbId: 0,
+          count: 0,
+          sources: [],
+        },
+      });
+      return true;
+    }
+    try {
+      tmdbId = await resolveNakiosTmdbIdBySearch(title, mediaType, year);
+    } catch {
+      tmdbId = 0;
+    }
+  }
+
+  let sources = [];
+  if (tmdbId > 0) {
+    try {
+      sources = await resolveNakiosSourcesByTmdbId(mediaType, tmdbId, season, episode);
+    } catch {
+      sources = [];
+    }
+  }
+
+  if (sources.length === 0 && title.length >= 2) {
+    let detail = null;
+    try {
+      detail = await resolveFilmer2DetailByTitle(title, mediaType, year);
+    } catch {
+      detail = null;
+    }
+    const dedupe = new Set();
+    const filmerSources = Array.isArray(detail?.sources)
+      ? detail.sources
+          .map((src, index) => {
+            const streamUrl = String(src || "").trim();
+            if (!streamUrl || dedupe.has(streamUrl)) {
+              return null;
+            }
+            dedupe.add(streamUrl);
+            return {
+              stream_url: streamUrl,
+              source_name: ZENIX_BRAND_LABEL,
+              quality: "HD",
+              language: "VF",
+              format: inferOwnedSourceFormat(streamUrl, "mp4"),
+              priority: 320 - Math.min(40, index * 4),
+            };
+          })
+          .filter(Boolean)
+      : [];
+    sources = filmerSources;
+  }
+
+  sendJson(res, 200, {
+    apiVersion: "zenix-source-v1",
+    type: "success",
+    data: {
+      title,
+      mediaType,
+      year,
+      season: mediaType === "tv" ? season : 1,
+      episode: mediaType === "tv" ? episode : 1,
+      tmdbId: tmdbId > 0 ? tmdbId : 0,
+      count: sources.length,
+      sources,
     },
   });
   return true;
@@ -10515,7 +11030,7 @@ async function handleFilmer2Source(req, res, requestUrl) {
   }
   const detail = await fetchFilmer2Detail(url);
   if (!detail) {
-    sendJson(res, 404, { error: "Filmer2 detail unavailable" });
+    sendJson(res, 404, { error: "Source unavailable" });
     return true;
   }
   const dedupe = new Set();
@@ -10539,7 +11054,7 @@ async function handleFilmer2Source(req, res, requestUrl) {
         .filter(Boolean)
     : [];
   sendJson(res, 200, {
-    apiVersion: "zenix-filmer2-source-v1",
+    apiVersion: "zenix-source-v1",
     type: "success",
     data: {
       title: detail.title,
@@ -10615,7 +11130,7 @@ async function handleNakiosSource(req, res, requestUrl) {
     return true;
   } catch (error) {
     sendJson(res, 502, {
-      error: "Nakios source unavailable",
+      error: "Source unavailable",
       reason: sanitizeToken(String(error?.message || ""), 120),
     });
     return true;
@@ -11108,6 +11623,18 @@ const server = http.createServer((req, res) => {
       if (handledAdminCustomDelete) {
         return true;
       }
+      return handleRepairSources(req, res, requestUrl);
+    })
+    .then((handledRepairSources) => {
+      if (handledRepairSources) {
+        return true;
+      }
+      return handleRepairStore(req, res, requestUrl);
+    })
+    .then((handledRepairStore) => {
+      if (handledRepairStore) {
+        return true;
+      }
       return handleSuggestionSubmit(req, res, requestUrl);
     })
     .then((handledSuggestions) => {
@@ -11138,6 +11665,12 @@ const server = http.createServer((req, res) => {
       if (handledAnimeSeasons) {
         return true;
       }
+      return handleZenixSeasons(req, res, requestUrl);
+    })
+    .then((handledZenixSeasons) => {
+      if (handledZenixSeasons) {
+        return true;
+      }
       return handleFilmer2Seasons(req, res, requestUrl);
     })
     .then((handledFilmer2Seasons) => {
@@ -11154,6 +11687,12 @@ const server = http.createServer((req, res) => {
     })
     .then((handledAnimeSibnet) => {
       if (handledAnimeSibnet) {
+        return true;
+      }
+      return handleZenixSource(req, res, requestUrl);
+    })
+    .then((handledZenixSource) => {
+      if (handledZenixSource) {
         return true;
       }
       return handleFilmer2Source(req, res, requestUrl);

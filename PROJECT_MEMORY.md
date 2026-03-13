@@ -500,3 +500,18 @@ Last update: 2026-03-11
 - Local brute matrix (F1 + Mercredi, 2026-03-11) with gate disabled:
   - Source: `__tmp_brut_f1_mercredi_matrix_result_local_c207.json`
   - Summary: total 8, passed 8, failed 0, `/api/media/*/sheet` 404 count: 0
+## c210 follow-up (2026-03-12)
+- Added `/api/repair-sources` + `/api/repair-store` endpoints to persist player repair results.
+- Admin data now preserves `repairs` entries (TTL pruning in server).
+- Episode playback forces external rescue after repeated source failures.
+- Filmer2 search retries without year for better title matching.
+- Cache-bust updated to `20260312-c210`.
+
+
+## c211 follow-up (2026-03-13)
+- Public API masking hardening:
+  - new neutral endpoints `/api/zenix-source` and `/api/zenix-seasons` (frontend uses these)
+  - anime aliases `/api/zenix-anime-source` and `/api/zenix-anime-seasons`
+  - calendar payload uses `primary`/`anime`/`supplemental` keys, `sourceLinks` removed
+  - external detail URLs/keys stripped from calendar + supplemental payloads via `sanitizePublicEntry`
+  - anime planning cards now use neutral `source: "anime"` keys (no upstream URLs in payload)
