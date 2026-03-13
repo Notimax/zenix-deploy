@@ -568,3 +568,7 @@ Last update: 2026-03-11
 ## c222 follow-up (2026-03-13)
 - Nav submenu backdrop/sheet now only activate on mobile, preventing desktop blur.
 - Cache-bust updated to `20260313-c222`.
+
+## c223 follow-up (2026-03-13)
+- Desktop submenu now opens again with overflow visible and no blur/backdrop.
+- Cache-bust updated to `20260313-c223`.

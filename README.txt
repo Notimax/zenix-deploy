@@ -896,3 +896,7 @@ LATEST MOBILE SUBMENU FAILSAFE (2026-03-13, c221)
 LATEST DESKTOP SUBMENU BLUR FIX (2026-03-13, c222)
 - Nav backdrop/sheet now only activate on mobile; desktop clicks no longer show blur.
 - Cache-bust bumped to `20260313-c222`.
+
+LATEST DESKTOP SUBMENU RESTORE (2026-03-13, c223)
+- Desktop submenu now opens again (overflow visible without blur/backdrop).
+- Cache-bust bumped to `20260313-c223`.

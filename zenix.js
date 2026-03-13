@@ -867,12 +867,12 @@ function openNavGroup(group) {
     toggle.setAttribute("aria-expanded", "true");
   }
   const isMobileNav = isCompactViewport();
+  if (refs.mainNav) {
+    refs.mainNav.classList.add("submenu-open");
+  }
   if (isMobileNav) {
     state.navSubmenuOpen = true;
     document.body.classList.add("nav-submenu-open");
-    if (refs.mainNav) {
-      refs.mainNav.classList.add("submenu-open");
-    }
     if (refs.navSubmenuBackdrop) {
       refs.navSubmenuBackdrop.hidden = false;
     }
@@ -886,9 +886,6 @@ function openNavGroup(group) {
   } else {
     state.navSubmenuOpen = false;
     document.body.classList.remove("nav-submenu-open");
-    if (refs.mainNav) {
-      refs.mainNav.classList.remove("submenu-open");
-    }
     if (refs.navSubmenuBackdrop) {
       refs.navSubmenuBackdrop.hidden = true;
     }
