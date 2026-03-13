@@ -1649,7 +1649,10 @@ async function isTitleOnPurstream(title, type, year = 0) {
       return false;
     }
     const rowKey = normalizeTitleKey(row.title || "");
-    if (!rowKey || rowKey !== titleKey) {
+    if (!rowKey) {
+      return false;
+    }
+    if (rowKey !== titleKey && !rowKey.includes(titleKey) && !titleKey.includes(rowKey)) {
       return false;
     }
     if (!safeYear) {
