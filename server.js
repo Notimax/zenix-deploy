@@ -329,6 +329,15 @@ const RENDEZVOUS_STATIC_SOURCES_FILE = path.resolve(
     ? String(process.env.RENDEZVOUS_STATIC_SOURCES_FILE || "").trim()
     : String(process.env.RENDEZVOUS_STATIC_SOURCES_FILE || "rendezvous-static-sources.json").trim()
 );
+const YOUTUBE_PLAYLIST_CACHE_MS = Math.max(
+  10 * 60 * 1000,
+  Number(process.env.YOUTUBE_PLAYLIST_CACHE_MS || 20 * 60 * 1000)
+);
+const YOUTUBE_FETCH_HEADERS = {
+  Referer: "https://www.youtube.com/",
+  "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
+  Cookie: "CONSENT=YES+cb.20210328-17-p0.en+FX+410",
+};
 const proxyCache = new Map();
 const calendarCache = new Map();
 const ANIME_SEASONS_CACHE_MS = 1000 * 60 * 20;
@@ -403,6 +412,7 @@ const nakiosAvailabilityCache = new Map();
 const nakiosAvailabilityInFlight = new Map();
 const supplementalCoverCache = new Map();
 const supplementalCoverInFlight = new Map();
+const youtubePlaylistCache = new Map();
 const analyticsClients = new Map();
 const analyticsEvents = [];
 const analyticsGeoCache = new Map();
@@ -6548,6 +6558,303 @@ function extractTagText(html, tag) {
   return String(match?.[1] || "").trim();
 }
 
+function parseYoutubePlaylistId(input) {
+  const raw = String(input || "").trim();
+  if (!raw) {
+    return "";
+  }
+  const idMatch = raw.match(/^(?:PL|UU|LL|OLAK5uy|RD|UL)[A-Za-z0-9_-]+$/i);
+  if (idMatch) {
+    return idMatch[0];
+  }
+  let parsed = null;
+  try {
+    parsed = new URL(raw, "https://www.youtube.com/");
+  } catch {
+    return "";
+  }
+  const host = String(parsed.hostname || "").toLowerCase();
+  if (!/(youtube\.com|youtu\.be)/i.test(host)) {
+    return "";
+  }
+  const listParam = String(parsed.searchParams.get("list") || "").trim();
+  if (listParam) {
+    return listParam;
+  }
+  return "";
+}
+
+function extractBalancedJson(html, startIndex) {
+  const input = String(html || "");
+  if (!input || startIndex < 0) {
+    return "";
+  }
+  let start = -1;
+  const stack = [];
+  let inString = false;
+  let escaped = false;
+  let quoteChar = "";
+  for (let i = startIndex; i < input.length; i += 1) {
+    const char = input[i];
+    if (start < 0) {
+      if (char === "{" || char === "[") {
+        start = i;
+        stack.push(char);
+      }
+      continue;
+    }
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (char === "\\") {
+        escaped = true;
+        continue;
+      }
+      if (char === quoteChar) {
+        inString = false;
+      }
+      continue;
+    }
+    if (char === "\"" || char === "'") {
+      inString = true;
+      quoteChar = char;
+      continue;
+    }
+    if (char === "{" || char === "[") {
+      stack.push(char);
+      continue;
+    }
+    if (char === "}" || char === "]") {
+      stack.pop();
+      if (stack.length === 0) {
+        return input.slice(start, i + 1);
+      }
+    }
+  }
+  return "";
+}
+
+function extractJsonAssignment(html, token) {
+  const input = String(html || "");
+  if (!input || !token) {
+    return null;
+  }
+  const markers = [
+    `var ${token} =`,
+    `let ${token} =`,
+    `const ${token} =`,
+    `${token} =`,
+    `window[\"${token}\"] =`,
+    `window['${token}'] =`,
+  ];
+  for (const marker of markers) {
+    const index = input.indexOf(marker);
+    if (index < 0) {
+      continue;
+    }
+    const jsonText = extractBalancedJson(input, index + marker.length);
+    if (!jsonText) {
+      continue;
+    }
+    const parsed = parseJsonSafe(jsonText);
+    if (parsed && typeof parsed === "object") {
+      return parsed;
+    }
+  }
+  return null;
+}
+
+function pickLargestThumbnail(thumbnails) {
+  const rows = Array.isArray(thumbnails) ? thumbnails : [];
+  if (rows.length === 0) {
+    return "";
+  }
+  let best = rows[0];
+  rows.forEach((row) => {
+    if (!row) {
+      return;
+    }
+    const width = Number(row.width || 0);
+    const height = Number(row.height || 0);
+    const bestWidth = Number(best?.width || 0);
+    const bestHeight = Number(best?.height || 0);
+    if (width * height > bestWidth * bestHeight) {
+      best = row;
+    }
+  });
+  return String(best?.url || "").trim();
+}
+
+function findYoutubePlaylistTitle(data) {
+  if (!data || typeof data !== "object") {
+    return "";
+  }
+  const candidates = [
+    data?.metadata?.playlistMetadataRenderer?.title,
+    data?.header?.playlistHeaderRenderer?.title?.simpleText,
+    data?.header?.playlistHeaderRenderer?.title?.runs?.[0]?.text,
+    data?.header?.playlistHeaderRenderer?.playlistTitle?.simpleText,
+    data?.header?.playlistHeaderRenderer?.playlistTitle?.runs?.[0]?.text,
+  ];
+  for (const candidate of candidates) {
+    const text = String(candidate || "").trim();
+    if (text) {
+      return text;
+    }
+  }
+  return "";
+}
+
+function findYoutubePlaylistVideos(data) {
+  const videos = [];
+  const stack = [data];
+  while (stack.length > 0) {
+    const node = stack.pop();
+    if (!node) {
+      continue;
+    }
+    if (Array.isArray(node)) {
+      for (let i = 0; i < node.length; i += 1) {
+        stack.push(node[i]);
+      }
+      continue;
+    }
+    if (typeof node !== "object") {
+      continue;
+    }
+    if (node.playlistVideoRenderer) {
+      videos.push(node.playlistVideoRenderer);
+      continue;
+    }
+    for (const value of Object.values(node)) {
+      if (value && typeof value === "object") {
+        stack.push(value);
+      }
+    }
+  }
+  return videos;
+}
+
+async function fetchYoutubePlaylistInfo(playlistId, force = false) {
+  const key = String(playlistId || "").trim();
+  if (!key) {
+    return null;
+  }
+  const now = Date.now();
+  const cached = youtubePlaylistCache.get(key);
+  if (!force && cached && cached.data && cached.expiresAt > now) {
+    return cached.data;
+  }
+  if (cached && cached.inFlight) {
+    return cached.inFlight;
+  }
+
+  const task = (async () => {
+    const url = `https://www.youtube.com/playlist?list=${encodeURIComponent(key)}&hl=fr&gl=FR`;
+    const response = await fetchRemoteText(url, "text/html", YOUTUBE_FETCH_HEADERS);
+    if (response.status < 200 || response.status >= 300) {
+      return null;
+    }
+    const html = String(response.body || "");
+    const initialData = extractJsonAssignment(html, "ytInitialData");
+    if (!initialData) {
+      return null;
+    }
+    const playlistTitle = findYoutubePlaylistTitle(initialData);
+    const videos = findYoutubePlaylistVideos(initialData);
+    const items = videos
+      .map((entry) => {
+        const videoId = String(entry?.videoId || "").trim();
+        if (!videoId) {
+          return null;
+        }
+        const title =
+          String(entry?.title?.runs?.[0]?.text || entry?.title?.simpleText || "").trim() || "Episode";
+        const indexRaw = String(entry?.index?.simpleText || "").trim();
+        const index = toInt(indexRaw, 0, 0, 50000);
+        const thumb = pickLargestThumbnail(entry?.thumbnail?.thumbnails || []);
+        return {
+          videoId,
+          title,
+          index: index > 0 ? index : 0,
+          thumbnail: thumb,
+        };
+      })
+      .filter(Boolean);
+    if (items.length === 0) {
+      return null;
+    }
+    const poster = pickLargestThumbnail(
+      [
+        ...items
+          .map((entry) => entry?.thumbnail)
+          .filter((value) => typeof value === "string" && value.length > 0)
+          .map((url) => ({ url })),
+      ]
+    );
+    return {
+      id: key,
+      url,
+      title: playlistTitle || "Playlist YouTube",
+      poster: poster || items[0].thumbnail || "",
+      items,
+    };
+  })();
+
+  youtubePlaylistCache.set(key, {
+    data: cached?.data || null,
+    expiresAt: now + YOUTUBE_PLAYLIST_CACHE_MS,
+    inFlight: task,
+  });
+  try {
+    const data = await task;
+    youtubePlaylistCache.set(key, {
+      data,
+      expiresAt: Date.now() + YOUTUBE_PLAYLIST_CACHE_MS,
+      inFlight: null,
+    });
+    return data;
+  } catch {
+    youtubePlaylistCache.set(key, {
+      data: cached?.data || null,
+      expiresAt: Date.now() + YOUTUBE_PLAYLIST_CACHE_MS,
+      inFlight: null,
+    });
+    return null;
+  }
+}
+
+function buildYoutubePlaylistSeasons(info) {
+  if (!info || !Array.isArray(info.items)) {
+    return [];
+  }
+  const episodes = info.items.map((entry, idx) => ({
+    season: 1,
+    episode: Number(entry.index || idx + 1),
+    name: String(entry.title || `Episode ${idx + 1}`).trim(),
+    runtime: 0,
+    airDate: "",
+    isSoon: false,
+  }));
+  return episodes.length > 0 ? [{ season: 1, episodes }] : [];
+}
+
+function buildYoutubeEmbedUrl(videoId) {
+  const safe = String(videoId || "").trim();
+  if (!safe) {
+    return "";
+  }
+  const params = new URLSearchParams({
+    autoplay: "1",
+    playsinline: "1",
+    rel: "0",
+    modestbranding: "1",
+  });
+  return `https://www.youtube.com/embed/${safe}?${params.toString()}`;
+}
+
 function normalizeAdminCustomEntry(entry) {
   if (!entry || typeof entry !== "object") {
     return null;
@@ -6698,6 +7005,103 @@ function buildAdminCustomEntryFromFilmer2(detail, mediaType) {
     external_detail_url: String(detail?.url || "").trim(),
     providerLabel: ZENIX_BRAND_LABEL,
   });
+}
+
+function extractYoutubePlaylistIdFromKey(externalKey) {
+  const raw = String(externalKey || "").trim();
+  if (!raw) {
+    return "";
+  }
+  const prefix = "youtube:playlist:";
+  if (raw.startsWith(prefix)) {
+    return raw.slice(prefix.length).trim();
+  }
+  return "";
+}
+
+async function buildAdminCustomEntryFromYoutubePlaylist(playlistId) {
+  const safeId = parseYoutubePlaylistId(playlistId);
+  if (!safeId) {
+    return null;
+  }
+  const info = await fetchYoutubePlaylistInfo(safeId);
+  if (!info) {
+    return null;
+  }
+  const title = String(info.title || "").trim() || "Playlist YouTube";
+  const poster = String(info.poster || "").trim();
+  const externalKey = `youtube:playlist:${safeId}`;
+  const today = new Date().toISOString().slice(0, 10);
+  return normalizeAdminCustomEntry({
+    type: "tv",
+    title,
+    year: toInt(parseYearFromText(today), 0, 0, 2099),
+    release_date: today,
+    overview: "",
+    small_poster_path: poster,
+    large_poster_path: poster,
+    wallpaper_poster_path: poster,
+    external_key: externalKey,
+    external_detail_url: info.url || "",
+    providerLabel: ZENIX_BRAND_LABEL,
+    language: "VO",
+    lang: "VO",
+    availability_status: "available",
+    external_status: "available",
+  });
+}
+
+function resolveYoutubeAdminEntry(options = {}) {
+  const title = String(options.title || "").trim();
+  const mediaType = String(options.mediaType || "").toLowerCase();
+  const externalKeyParam = String(options.externalKey || "").trim();
+  const mediaId = toInt(options.mediaId, 0, 0, 999999999);
+  const adminData = loadAdminData();
+  const custom = Array.isArray(adminData?.custom) ? adminData.custom : [];
+  let entry = null;
+
+  if (externalKeyParam) {
+    entry = custom.find((row) => String(row?.external_key || row?.externalKey || "") === externalKeyParam) || null;
+  }
+  if (!entry && mediaId > 0) {
+    entry = custom.find((row) => Number(row?.id || 0) === mediaId) || null;
+  }
+  if (!entry && title) {
+    const key = normalizeTitleKey(title);
+    if (key) {
+      entry = custom.find((row) => normalizeTitleKey(row?.title || "") === key) || null;
+    }
+  }
+
+  if (!entry) {
+    return null;
+  }
+  const resolved = applyAdminOverride(entry, adminData);
+  if (!resolved) {
+    return null;
+  }
+  const entryType = String(resolved?.type || "").toLowerCase() === "tv" ? "tv" : "movie";
+  if (mediaType && mediaType !== entryType) {
+    return null;
+  }
+  const externalKey = String(resolved?.external_key || "").trim();
+  if (!externalKey.startsWith("youtube:playlist:")) {
+    return null;
+  }
+  return resolved;
+}
+
+function pickYoutubePlaylistItem(info, episode) {
+  if (!info || !Array.isArray(info.items) || info.items.length === 0) {
+    return null;
+  }
+  const target = Math.max(1, Number(episode || 1));
+  const direct = info.items.find((entry) => Number(entry?.index || 0) === target);
+  if (direct) {
+    return direct;
+  }
+  const fallbackIndex = Math.min(info.items.length - 1, Math.max(0, target - 1));
+  return info.items[fallbackIndex] || null;
 }
 
 async function resolveNakiosSearchEntry(title, mediaType, year = 0) {
@@ -9758,6 +10162,13 @@ function parseAdminImportUrl(input) {
     const mediaType = match[1].toLowerCase() === "tv" ? "tv" : "movie";
     return { provider: "filmer2", mediaType, detailUrl: parsed.href };
   }
+  if (/youtube\.com|youtu\.be/i.test(host)) {
+    const playlistId = parseYoutubePlaylistId(parsed.href);
+    if (!playlistId) {
+      return null;
+    }
+    return { provider: "youtube", playlistId };
+  }
   return null;
 }
 
@@ -9809,6 +10220,8 @@ async function handleAdminImport(req, res, requestUrl) {
     if (detail) {
       entry = buildAdminCustomEntryFromFilmer2(detail, parsed.mediaType);
     }
+  } else if (parsed.provider === "youtube") {
+    entry = await buildAdminCustomEntryFromYoutubePlaylist(parsed.playlistId);
   }
   if (!entry) {
     sendJson(res, 404, { error: "Import failed" });
@@ -10827,6 +11240,29 @@ async function handleZenixSeasons(req, res, requestUrl) {
   const year = toInt(requestUrl.searchParams.get("year"), 0, 0, 2099);
   const typeParam = String(requestUrl.searchParams.get("type") || "tv").toLowerCase();
   const mediaType = typeParam === "movie" ? "movie" : "tv";
+  const externalKeyParam = String(requestUrl.searchParams.get("externalKey") || "").trim();
+  const mediaId = toInt(requestUrl.searchParams.get("mediaId"), 0, 0, 999999999);
+
+  const youtubeEntry = resolveYoutubeAdminEntry({
+    title,
+    mediaType,
+    externalKey: externalKeyParam,
+    mediaId,
+  });
+  if (youtubeEntry) {
+    const playlistId = extractYoutubePlaylistIdFromKey(youtubeEntry.external_key);
+    const info = await fetchYoutubePlaylistInfo(playlistId);
+    const items = buildYoutubePlaylistSeasons(info);
+    sendJson(res, 200, {
+      apiVersion: "zenix-seasons-v1",
+      type: "success",
+      data: {
+        tmdbId: 0,
+        items,
+      },
+    });
+    return true;
+  }
 
   if (tmdbId <= 0 && title.length >= 2) {
     try {
@@ -10970,7 +11406,49 @@ async function handleZenixSource(req, res, requestUrl) {
   const year = toInt(requestUrl.searchParams.get("year"), 0, 0, 2099);
   const season = toInt(requestUrl.searchParams.get("season"), 1, 1, 500);
   const episode = toInt(requestUrl.searchParams.get("episode"), 1, 1, 50000);
+  const externalKeyParam = String(requestUrl.searchParams.get("externalKey") || "").trim();
+  const mediaId = toInt(requestUrl.searchParams.get("mediaId"), 0, 0, 999999999);
   let tmdbId = toInt(requestUrl.searchParams.get("tmdbId"), 0, 0, 999999999);
+
+  const youtubeEntry = resolveYoutubeAdminEntry({
+    title,
+    mediaType,
+    externalKey: externalKeyParam,
+    mediaId,
+  });
+  if (youtubeEntry) {
+    const playlistId = extractYoutubePlaylistIdFromKey(youtubeEntry.external_key);
+    const info = await fetchYoutubePlaylistInfo(playlistId);
+    const match = pickYoutubePlaylistItem(info, episode);
+    const embedUrl = match ? buildYoutubeEmbedUrl(match.videoId) : "";
+    const sources = embedUrl
+      ? [
+          {
+            stream_url: embedUrl,
+            source_name: ZENIX_BRAND_LABEL,
+            quality: "HD",
+            language: String(youtubeEntry?.language || youtubeEntry?.lang || "VO").trim() || "VO",
+            format: "embed",
+            priority: 260,
+          },
+        ]
+      : [];
+    sendJson(res, 200, {
+      apiVersion: "zenix-source-v1",
+      type: "success",
+      data: {
+        title: String(youtubeEntry?.title || title || "").trim(),
+        mediaType,
+        year,
+        season: mediaType === "tv" ? season : 1,
+        episode: mediaType === "tv" ? episode : 1,
+        tmdbId: 0,
+        count: sources.length,
+        sources,
+      },
+    });
+    return true;
+  }
 
   if (tmdbId <= 0) {
     if (title.length < 2) {

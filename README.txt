@@ -918,3 +918,8 @@ LATEST SOURCE BADGES + PREVIEW (2026-03-13, c226)
 - Cards show a quality badge (HD / Full HD / 4K) based on successful playback.
 - Desktop hover preview plays a silent 10s clip when a direct MP4/WebM preview is available.
 - Cache-bust bumped to `20260313-c226`.
+
+LATEST YOUTUBE PLAYLIST SUPPORT (2026-03-13, c227)
+- Admin import now accepts YouTube playlist URLs.
+- Zenix seasons + sources now resolve YouTube playlist entries for TV items.
+- Playlist episodes map to S1E1.. and return a YouTube embed source.
