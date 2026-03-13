@@ -939,3 +939,9 @@ LATEST GATE TOKEN HEADER FALLBACK (2026-03-13, c230)
 - API calls include X-Zenix-Gate header when available.
 - Server now accepts gate tokens from header if cookie is missing.
 - Cache-bust bumped to `20260313-c230`.
+
+LATEST BACKUP POPUP SEQUENCING + BOOKMARK UX (2026-03-13, c231)
+- Backup popup now waits for the Discord prompt to close (no collision).
+- Mobile backup popup uses share sheet when available and provides device-specific bookmark hints.
+- Backup URL is a clickable link and opens in a new tab.
+- Cache-bust bumped to `20260313-c231`.

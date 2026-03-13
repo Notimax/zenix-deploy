@@ -611,3 +611,9 @@ Last update: 2026-03-11
 - Frontend sends `X-Zenix-Gate` header when a token is available.
 - Server accepts header token when cookie is missing (keeps adblock gate intact).
 - Cache-bust updated to `20260313-c230`.
+
+## c231 follow-up (2026-03-13)
+- Backup popup now waits for Discord prompt to close (no collision).
+- Backup popup supports share sheet on mobile and shows device-specific bookmark hints.
+- Backup URL rendered as a clickable link (opens zenix.lol).
+- Cache-bust updated to `20260313-c231`.

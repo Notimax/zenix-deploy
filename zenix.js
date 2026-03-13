@@ -1525,7 +1525,7 @@ async function init() {
   await completeStartupSplash(splashStartedAt);
   state.discordPromptReady = true;
   maybeShowDiscordGate({ delayMs: 420 });
-  maybeShowBackupGate({ delayMs: BACKUP_PROMPT_DELAY_MS });
+  scheduleBackupAfterDiscord(BACKUP_PROMPT_DELAY_MS);
   initFloatingNotificationGuard();
 }
 
@@ -3625,11 +3625,13 @@ function initDiscordGate() {
     bindFastPress(refs.discordJoinBtn, () => {
       setDiscordGateVisible(false);
       window.open(DISCORD_INVITE_URL, "_blank", "noopener,noreferrer");
+      scheduleBackupAfterDiscord(600);
     });
   }
   if (refs.discordLaterBtn) {
     bindFastPress(refs.discordLaterBtn, () => {
       setDiscordGateVisible(false);
+      scheduleBackupAfterDiscord(600);
     });
   }
 }
@@ -3717,10 +3719,28 @@ function maybeShowBackupGate(options = {}) {
   setBackupGateVisible(true);
 }
 
+function scheduleBackupAfterDiscord(delayMs = BACKUP_PROMPT_DELAY_MS) {
+  const waitMs = Math.max(0, Number(delayMs || 0));
+  window.setTimeout(() => {
+    if (state.discordGateVisible) {
+      scheduleBackupAfterDiscord(700);
+      return;
+    }
+    if (!hasDiscordPromptSession() && state.discordPromptReady) {
+      scheduleBackupAfterDiscord(700);
+      return;
+    }
+    maybeShowBackupGate({ delayMs: 0 });
+  }, waitMs);
+}
+
 function initBackupGate() {
   state.backupPromptReady = true;
   if (refs.backupGateUrl) {
     refs.backupGateUrl.textContent = BACKUP_PORTAL_URL;
+    if (refs.backupGateUrl.tagName === "A") {
+      refs.backupGateUrl.href = BACKUP_PORTAL_URL;
+    }
   }
   if (refs.backupGateCloseBtn) {
     bindFastPress(refs.backupGateCloseBtn, () => {
@@ -3736,22 +3756,42 @@ function initBackupGate() {
     bindFastPress(refs.backupGateBookmarkBtn, async () => {
       const url = BACKUP_PORTAL_URL;
       let hinted = false;
-      try {
-        if (window.sidebar && typeof window.sidebar.addPanel === "function") {
-          window.sidebar.addPanel("Zenix", url, "");
+      let shared = false;
+      if (isLikelyMobileDevice() && navigator.share) {
+        try {
+          await navigator.share({
+            title: "Zenix",
+            text: "Lien officiel Zenix",
+            url,
+          });
+          shared = true;
           hinted = true;
-        } else if (window.external && typeof window.external.AddFavorite === "function") {
-          window.external.AddFavorite(url, "Zenix");
-          hinted = true;
+        } catch {
+          // ignore share failures
         }
-      } catch {
-        // ignore
+      }
+      if (!shared) {
+        try {
+          if (window.sidebar && typeof window.sidebar.addPanel === "function") {
+            window.sidebar.addPanel("Zenix", url, "");
+            hinted = true;
+          } else if (window.external && typeof window.external.AddFavorite === "function") {
+            window.external.AddFavorite(url, "Zenix");
+            hinted = true;
+          }
+        } catch {
+          // ignore
+        }
+      }
+      if (!shared) {
+        openBackupPortal();
       }
       try {
         await copyText(url);
-        setBackupGateStatus(hinted ? "Lien copie. Ajoute-le a tes favoris." : "Lien copie. Ctrl+D / Cmd+D pour ajouter.");
+        const hint = getBackupBookmarkHint();
+        setBackupGateStatus(hinted ? `Lien partage/copie. ${hint}` : `Lien copie. ${hint}`);
       } catch {
-        setBackupGateStatus("Ajoute manuellement via Ctrl+D / Cmd+D.");
+        setBackupGateStatus(getBackupBookmarkHint());
       }
     });
   }
@@ -4084,6 +4124,28 @@ function isLikelyMobileDevice() {
     return true;
   }
   return isCompactViewport();
+}
+
+function isIOSDevice() {
+  return /(iphone|ipod|ipad)/i.test(String(navigator.userAgent || ""));
+}
+
+function getBackupBookmarkHint() {
+  if (isLikelyMobileDevice()) {
+    if (isIOSDevice()) {
+      return "Sur iPhone: Partager > Ajouter a l'ecran d'accueil ou Ajouter aux favoris.";
+    }
+    return "Sur Android: menu ⋮ > Ajouter aux favoris ou Ajouter a l'ecran d'accueil.";
+  }
+  return "Sur PC: Ctrl+D / Cmd+D pour ajouter aux favoris.";
+}
+
+function openBackupPortal() {
+  try {
+    window.open(BACKUP_PORTAL_URL, "_blank", "noopener,noreferrer");
+  } catch {
+    // ignore
+  }
 }
 
 function shouldBoostCoverLoading() {
