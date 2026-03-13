@@ -3706,9 +3706,6 @@ function maybeShowBackupGate(options = {}) {
   if (state.discordGateVisible) {
     return;
   }
-  if (hasBackupPromptSession() || hasBackupPromptRecent()) {
-    return;
-  }
   if (state.backupGateVisible) {
     return;
   }

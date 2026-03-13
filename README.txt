@@ -964,3 +964,7 @@ LATEST ADMIN SUGGESTIONS + ANNOUNCE MGMT + ZENIX.LOL ADMIN (2026-03-13, c233)
 - zenix.lol admin now uses a password-only login screen, stores the password in session,
   and shows the panel after login (no mixed password+URL page).
 - Admin assets cache-bust bumped to `20260313-c233`.
+
+LATEST BACKUP POPUP ALWAYS-ON (2026-03-13, c234)
+- Backup popup (zenix.lol) now shows on every site visit (still after Discord prompt).
+- Cache-bust bumped to `20260313-c234`.

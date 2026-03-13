@@ -635,3 +635,7 @@ Last update: 2026-03-11
 - Admin UI includes a Suggestions panel (validate/refuse/next).
 - zenix.lol admin now uses a password-only login screen and shows the panel after login.
 - Admin assets cache-bust updated to `20260313-c233`.
+
+## c234 follow-up (2026-03-13)
+- Backup popup (zenix.lol) now shows on every visit (still after Discord prompt).
+- Cache-bust updated to `20260313-c234`.
