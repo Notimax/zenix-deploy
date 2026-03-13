@@ -880,6 +880,7 @@ function openNavGroup(group) {
     document.body.style.setProperty("--nav-submenu-top", `${top}px`);
   }
   if (isCompactViewport()) {
+    ensureNavSubmenuSheet();
     openMobileNavSubmenu(group);
   }
 }
@@ -889,7 +890,8 @@ function openMobileNavSubmenu(group) {
     return;
   }
   const items = Array.from(group.querySelectorAll(".nav-subitem[data-view]"));
-  if (items.length === 0) {
+  const fallbackItems = getNavGroupFallbackItems(group);
+  if (items.length === 0 && fallbackItems.length === 0) {
     refs.navSubmenuSheet.hidden = true;
     return;
   }
@@ -899,8 +901,11 @@ function openMobileNavSubmenu(group) {
     refs.navSubmenuTitle.textContent = String(title || "").trim() || "Menu";
   }
   const fragment = document.createDocumentFragment();
-  items.forEach((item) => {
-    const view = String(item.dataset.view || "").trim();
+  const rows = items.length > 0
+    ? items.map((item) => ({ view: String(item.dataset.view || "").trim(), label: item.textContent || "" }))
+    : fallbackItems;
+  rows.forEach((row) => {
+    const view = String(row.view || "").trim();
     if (!view) {
       return;
     }
@@ -908,11 +913,68 @@ function openMobileNavSubmenu(group) {
     button.type = "button";
     button.className = "nav-submenu-sheet-item";
     button.dataset.view = view;
-    button.textContent = item.textContent || view;
+    button.textContent = String(row.label || view);
     fragment.appendChild(button);
   });
   refs.navSubmenuList.appendChild(fragment);
   refs.navSubmenuSheet.hidden = false;
+  refs.navSubmenuSheet.style.display = "grid";
+}
+
+function getNavGroupFallbackItems(group) {
+  const key = String(group?.dataset?.navGroup || "").trim().toLowerCase();
+  if (key !== "discover") {
+    return [];
+  }
+  return [
+    { view: "calendar", label: "Calendrier" },
+    { view: "latest", label: "Nouveautes" },
+    { view: "popular", label: "Populaires" },
+    { view: "top", label: "Top du jour" },
+    { view: "list", label: "Ma liste" },
+    { view: "recommendation", label: "Recommandation" },
+  ];
+}
+
+function ensureNavSubmenuSheet() {
+  if (refs.navSubmenuSheet && refs.navSubmenuList && refs.navSubmenuTitle && refs.navSubmenuCloseBtn) {
+    return;
+  }
+  const sheet = document.createElement("div");
+  sheet.className = "nav-submenu-sheet";
+  sheet.id = "navSubmenuSheet";
+  sheet.hidden = true;
+  sheet.setAttribute("role", "dialog");
+  sheet.setAttribute("aria-modal", "true");
+  sheet.setAttribute("aria-label", "Navigation");
+  sheet.innerHTML = `
+    <div class="nav-submenu-sheet-head">
+      <span id="navSubmenuTitle">Menu</span>
+      <button class="nav-submenu-sheet-close" id="navSubmenuCloseBtn" type="button">Fermer</button>
+    </div>
+    <div class="nav-submenu-sheet-list" id="navSubmenuList"></div>
+  `;
+  document.body.appendChild(sheet);
+  refs.navSubmenuSheet = sheet;
+  refs.navSubmenuTitle = sheet.querySelector("#navSubmenuTitle");
+  refs.navSubmenuCloseBtn = sheet.querySelector("#navSubmenuCloseBtn");
+  refs.navSubmenuList = sheet.querySelector("#navSubmenuList");
+  if (refs.navSubmenuCloseBtn) {
+    bindFastPress(refs.navSubmenuCloseBtn, () => {
+      closeNavGroups();
+    });
+  }
+  if (refs.navSubmenuList) {
+    refs.navSubmenuList.addEventListener("click", (event) => {
+      const target = event.target instanceof HTMLElement ? event.target.closest(".nav-submenu-sheet-item[data-view]") : null;
+      if (!(target instanceof HTMLElement)) {
+        return;
+      }
+      const view = String(target.dataset.view || "all");
+      closeNavGroups();
+      handleViewSelection(view);
+    });
+  }
 }
 
 function toggleNavGroup(group) {

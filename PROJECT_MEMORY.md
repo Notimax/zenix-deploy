@@ -559,3 +559,8 @@ Last update: 2026-03-11
 - Mobile nav dropdowns now use a dedicated sheet with explicit list items.
 - Default nav submenu is hidden on mobile to avoid blank overlay.
 - Cache-bust updated to `20260313-c220`.
+
+## c221 follow-up (2026-03-13)
+- Nav submenu sheet is now created dynamically if missing (cached HTML safe).
+- Discover fallback list injected when submenu items are missing.
+- Cache-bust updated to `20260313-c221`.

@@ -887,3 +887,8 @@ LATEST MOBILE SUBMENU FIX (2026-03-13, c220)
 - Nav dropdowns now render inside a dedicated mobile sheet with list items.
 - Default navbar submenu is hidden on mobile to avoid empty blur state.
 - Cache-bust bumped to `20260313-c220`.
+
+LATEST MOBILE SUBMENU FAILSAFE (2026-03-13, c221)
+- Nav submenu sheet is now created dynamically if missing (handles cached HTML).
+- Discover fallback list injected if no items are found.
+- Cache-bust bumped to `20260313-c221`.
