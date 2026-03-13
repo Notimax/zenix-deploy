@@ -933,3 +933,9 @@ LATEST BACKUP POPUP + VITRINE (2026-03-13, c229)
 - Added a backup-domain popup on zenix.best (shows zenix.lol once per day/session).
 - New static vitrine project in `site/zenix-lol-vitrine` with configurable active URL.
 - Cache-bust bumped to `20260313-c229`.
+
+LATEST GATE TOKEN HEADER FALLBACK (2026-03-13, c230)
+- Gate tokens now returned by /api/gate/issue and stored in localStorage as a fallback when cookies are blocked.
+- API calls include X-Zenix-Gate header when available.
+- Server now accepts gate tokens from header if cookie is missing.
+- Cache-bust bumped to `20260313-c230`.

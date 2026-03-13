@@ -236,6 +236,7 @@ const GATE_CHALLENGE_PATH = "/api/gate/challenge";
 const GATE_ISSUE_PATH = "/api/gate/issue";
 const GATE_PROOF_TIMEOUT_MS = 3200;
 const GATE_REFRESH_COOLDOWN_MS = 6 * 60 * 1000;
+const GATE_TOKEN_KEY = "zenix-gate-token-v1";
 const UI_THEME_ORDER = ["cine", "minimal", "neon"];
 const runtimeEnv = detectRuntimeEnvironment();
 
@@ -452,7 +453,8 @@ const state = {
   gateIssueInFlight: false,
   gateIssuePromise: null,
   gateLastIssuedAt: 0,
-  themeFilters: {
+    gateToken: loadGateToken(),
+themeFilters: {
     movie: new Set(),
     tv: new Set(),
     anime: new Set(),
@@ -3872,7 +3874,10 @@ function applyAdblockDetectionState(blocked, options = {}) {
   state.adblockDetected = nextBlocked;
   setAdblockGateVisible(nextBlocked);
   if (nextBlocked) {
-    setAdblockGateStatus(
+    state.gateReady = false;
+    state.gateToken = "";
+    saveGateToken("");
+setAdblockGateStatus(
       "Desactive ton bloqueur de pub pour continuer, puis clique sur 'Verifier de nouveau'.",
       false
     );
@@ -4026,7 +4031,21 @@ async function refreshGateToken(options = {}) {
             false
           );
         }
+        state.gateReady = false;
+        state.gateToken = "";
+        saveGateToken("");
         return false;
+      }
+      let payload = null;
+      try {
+        payload = await response.json();
+      } catch {
+        payload = null;
+      }
+      const token = String(payload?.token || "");
+      if (token) {
+        state.gateToken = token;
+        saveGateToken(token);
       }
       state.gateReady = true;
       state.gateLastIssuedAt = Date.now();
@@ -4035,6 +4054,7 @@ async function refreshGateToken(options = {}) {
       if (options.manual) {
         setAdblockGateStatus("Verification pub impossible pour le moment. Reessaie.", true);
       }
+      state.gateReady = false;
       return false;
     }
   })();
@@ -17172,6 +17192,26 @@ function saveItemQualityMap(map) {
   }
 }
 
+function loadGateToken() {
+  try {
+    return String(localStorage.getItem(GATE_TOKEN_KEY) || "");
+  } catch {
+    return "";
+  }
+}
+
+function saveGateToken(token) {
+  try {
+    if (!token) {
+      localStorage.removeItem(GATE_TOKEN_KEY);
+      return;
+    }
+    localStorage.setItem(GATE_TOKEN_KEY, String(token));
+  } catch {
+    // ignore private mode/quota
+  }
+}
+
 function loadUiPrefs() {
   const defaults = {
     compactCards: false,
@@ -17774,6 +17814,7 @@ async function fetchJson(url, options = {}) {
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
+      const gateToken = state.gateToken;
       const response = await fetch(url, {
         method,
         mode: "cors",
@@ -17781,6 +17822,7 @@ async function fetchJson(url, options = {}) {
         signal: controller.signal,
         headers: {
           Accept: "application/json",
+          ...(gateToken ? { "X-Zenix-Gate": gateToken } : {}),
           ...(options.headers || {}),
         },
         ...(options.cache ? { cache: options.cache } : {}),

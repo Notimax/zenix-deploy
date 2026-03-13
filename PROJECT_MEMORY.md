@@ -605,3 +605,9 @@ Last update: 2026-03-11
 - Added backup-domain popup on zenix.best (zenix.lol, once per day/session).
 - Added a static vitrine project at `site/zenix-lol-vitrine` with editable `config.js`.
 - Cache-bust updated to `20260313-c229`.
+
+## c230 follow-up (2026-03-13)
+- Gate token is now returned by `/api/gate/issue` and stored in localStorage for clients that block cookies.
+- Frontend sends `X-Zenix-Gate` header when a token is available.
+- Server accepts header token when cookie is missing (keeps adblock gate intact).
+- Cache-bust updated to `20260313-c230`.

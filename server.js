@@ -5163,6 +5163,20 @@ function sanitizeSupplementalTitle(value) {
   return title || String(value || "").trim();
 }
 
+function getGateHeaderToken(req) {
+  const raw = req.headers["x-zenix-gate"];
+  const header = Array.isArray(raw) ? String(raw[0] || "") : String(raw || "");
+  return sanitizeToken(header, 2048);
+}
+
+function getGateToken(req) {
+  const cookieToken = getGateCookie(req);
+  if (cookieToken) {
+    return cookieToken;
+  }
+  return getGateHeaderToken(req);
+}
+
 function cleanSearchTitle(value) {
   let title = String(value || "").trim();
   if (!title) {
@@ -9438,7 +9452,7 @@ async function handleGateGuard(req, res, requestUrl) {
   if (String(req.method || "").toUpperCase() === "OPTIONS") {
     return false;
   }
-  const token = getGateCookie(req);
+  const token = getGateToken(req);
   if (token && verifyGateToken(token, req)) {
     return false;
   }
@@ -9502,7 +9516,7 @@ async function handleGateIssue(req, res, requestUrl) {
   gateChallenges.delete(nonce);
   const token = buildGateToken(entry.fingerprint, GATE_TOKEN_TTL_MS);
   setGateCookie(res, token, GATE_TOKEN_TTL_MS);
-  sendJson(res, 200, { ok: true, expiresInMs: GATE_TOKEN_TTL_MS });
+  sendJson(res, 200, { ok: true, token: token, expiresInMs: GATE_TOKEN_TTL_MS });
   return true;
 }
 
