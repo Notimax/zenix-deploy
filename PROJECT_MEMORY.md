@@ -575,3 +575,4 @@ Last update: 2026-03-11
 
 ## c224 follow-up (2026-03-13)
 - Admin custom delete now supports external_key fallback so "Supprimer" works even when the id is missing.
+- Admin assets now include a cache-bust param to force admin.js refresh under long cache headers.

@@ -903,3 +903,4 @@ LATEST DESKTOP SUBMENU RESTORE (2026-03-13, c223)
 
 LATEST ADMIN CUSTOM DELETE FIX (2026-03-13, c224)
 - Admin custom delete now supports `external_key` fallback, so the Supprimer button works even when IDs are missing.
+- Admin assets now use a cache-bust param so updated admin.js loads despite long cache headers.
