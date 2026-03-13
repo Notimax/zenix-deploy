@@ -521,6 +521,8 @@ const refs = {
   navGroups: Array.from(document.querySelectorAll(".nav-group[data-nav-group]")),
   navToggles: Array.from(document.querySelectorAll("[data-nav-toggle]")),
   navSubItems: Array.from(document.querySelectorAll(".nav-subitem[data-view]")),
+  navSubmenuBackdrop: document.getElementById("navSubmenuBackdrop"),
+  topbar: document.querySelector(".topbar"),
   mobileTabs: Array.from(document.querySelectorAll(".mobile-tab[data-mobile-view]")),
   quickLinks: Array.from(document.querySelectorAll(".quick-link[data-view-jump]")),
   filterChips: document.getElementById("filterChips"),
@@ -841,6 +843,9 @@ function closeNavGroups(except = null) {
     if (refs.mainNav) {
       refs.mainNav.classList.remove("submenu-open");
     }
+    if (refs.navSubmenuBackdrop) {
+      refs.navSubmenuBackdrop.hidden = true;
+    }
   }
 }
 
@@ -858,6 +863,14 @@ function openNavGroup(group) {
   document.body.classList.add("nav-submenu-open");
   if (refs.mainNav) {
     refs.mainNav.classList.add("submenu-open");
+  }
+  if (refs.navSubmenuBackdrop) {
+    refs.navSubmenuBackdrop.hidden = false;
+  }
+  if (refs.topbar) {
+    const rect = refs.topbar.getBoundingClientRect();
+    const top = Math.max(56, Math.round(rect.bottom + 8));
+    document.body.style.setProperty("--nav-submenu-top", `${top}px`);
   }
 }
 
@@ -1587,6 +1600,12 @@ function bindEvents() {
       const view = String(target.dataset.view || "all");
       closeNavOverflowMenu();
       handleViewSelection(view);
+    });
+  }
+
+  if (refs.navSubmenuBackdrop) {
+    bindFastPress(refs.navSubmenuBackdrop, () => {
+      closeNavGroups();
     });
   }
 

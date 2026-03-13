@@ -877,3 +877,8 @@ LATEST MOBILE NAV + HERO TUNING (2026-03-13, c218)
 - Nav submenu overflow unclipped at topbar level on mobile.
 - Hero carousel hidden on phone to avoid auto-scrolling cards at top of categories.
 - Cache-bust bumped to `20260313-c218`.
+
+LATEST MOBILE SUBMENU SHEET (2026-03-13, c219)
+- Added a dedicated mobile backdrop and fixed-position submenu sheet for nav dropdowns.
+- Dropdowns now open reliably on iPhone with proper overlay and tap-to-close.
+- Cache-bust bumped to `20260313-c219`.

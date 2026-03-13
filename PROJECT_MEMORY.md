@@ -549,3 +549,8 @@ Last update: 2026-03-11
 - Submenu overflow unclipped at topbar level on mobile.
 - Hero carousel hidden on phone to remove auto-rotating cards at top of categories.
 - Cache-bust updated to `20260313-c218`.
+
+## c219 follow-up (2026-03-13)
+- Added mobile nav submenu backdrop + fixed-position sheet for dropdowns.
+- Dropdowns now open reliably on iPhone with tap-to-close backdrop.
+- Cache-bust updated to `20260313-c219`.
