@@ -892,3 +892,7 @@ LATEST MOBILE SUBMENU FAILSAFE (2026-03-13, c221)
 - Nav submenu sheet is now created dynamically if missing (handles cached HTML).
 - Discover fallback list injected if no items are found.
 - Cache-bust bumped to `20260313-c221`.
+
+LATEST DESKTOP SUBMENU BLUR FIX (2026-03-13, c222)
+- Nav backdrop/sheet now only activate on mobile; desktop clicks no longer show blur.
+- Cache-bust bumped to `20260313-c222`.

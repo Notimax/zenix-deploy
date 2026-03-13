@@ -564,3 +564,7 @@ Last update: 2026-03-11
 - Nav submenu sheet is now created dynamically if missing (cached HTML safe).
 - Discover fallback list injected when submenu items are missing.
 - Cache-bust updated to `20260313-c221`.
+
+## c222 follow-up (2026-03-13)
+- Nav submenu backdrop/sheet now only activate on mobile, preventing desktop blur.
+- Cache-bust updated to `20260313-c222`.

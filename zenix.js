@@ -866,22 +866,35 @@ function openNavGroup(group) {
   if (toggle) {
     toggle.setAttribute("aria-expanded", "true");
   }
-  state.navSubmenuOpen = true;
-  document.body.classList.add("nav-submenu-open");
-  if (refs.mainNav) {
-    refs.mainNav.classList.add("submenu-open");
-  }
-  if (refs.navSubmenuBackdrop) {
-    refs.navSubmenuBackdrop.hidden = false;
-  }
-  if (refs.topbar) {
-    const rect = refs.topbar.getBoundingClientRect();
-    const top = Math.max(56, Math.round(rect.bottom + 8));
-    document.body.style.setProperty("--nav-submenu-top", `${top}px`);
-  }
-  if (isCompactViewport()) {
+  const isMobileNav = isCompactViewport();
+  if (isMobileNav) {
+    state.navSubmenuOpen = true;
+    document.body.classList.add("nav-submenu-open");
+    if (refs.mainNav) {
+      refs.mainNav.classList.add("submenu-open");
+    }
+    if (refs.navSubmenuBackdrop) {
+      refs.navSubmenuBackdrop.hidden = false;
+    }
+    if (refs.topbar) {
+      const rect = refs.topbar.getBoundingClientRect();
+      const top = Math.max(56, Math.round(rect.bottom + 8));
+      document.body.style.setProperty("--nav-submenu-top", `${top}px`);
+    }
     ensureNavSubmenuSheet();
     openMobileNavSubmenu(group);
+  } else {
+    state.navSubmenuOpen = false;
+    document.body.classList.remove("nav-submenu-open");
+    if (refs.mainNav) {
+      refs.mainNav.classList.remove("submenu-open");
+    }
+    if (refs.navSubmenuBackdrop) {
+      refs.navSubmenuBackdrop.hidden = true;
+    }
+    if (refs.navSubmenuSheet) {
+      refs.navSubmenuSheet.hidden = true;
+    }
   }
 }
 
