@@ -522,7 +522,7 @@ Last update: 2026-03-11
   if the JS intro flow does not complete (prevents infinite animation lock).
 - Cache-bust updated to `20260313-c212`.
 
-## c213 follow-up (2026-03-13)
-- `zenix.js` converted to UTF-8 to prevent "Invalid or unexpected token" parse
-  errors (JS was previously UTF-16 while served as UTF-8).
-- Cache-bust updated to `20260313-c213`.
+## c214 follow-up (2026-03-13)
+- Fixed `zenix.js` parse errors by normalizing UTF-8 output and cleaning invalid escaped
+  tokens in nav group logic (restores JS execution).
+- Cache-bust updated to `20260313-c214`.

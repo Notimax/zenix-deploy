@@ -827,10 +827,10 @@ function closeNavGroups(except = null) {
     if (except && group === except) {
       return;
     }
-    group.classList.remove(\"is-open\");
-    const toggle = group.querySelector(\"[data-nav-toggle]\");
+    group.classList.remove("is-open");
+    const toggle = group.querySelector("[data-nav-toggle]");
     if (toggle) {
-      toggle.setAttribute(\"aria-expanded\", \"false\");
+      toggle.setAttribute("aria-expanded", "false");
     }
   });
 }
@@ -840,10 +840,10 @@ function openNavGroup(group) {
     return;
   }
   closeNavGroups(group);
-  group.classList.add(\"is-open\");
-  const toggle = group.querySelector(\"[data-nav-toggle]\");
+  group.classList.add("is-open");
+  const toggle = group.querySelector("[data-nav-toggle]");
   if (toggle) {
-    toggle.setAttribute(\"aria-expanded\", \"true\");
+    toggle.setAttribute("aria-expanded", "true");
   }
 }
 
@@ -851,7 +851,7 @@ function toggleNavGroup(group) {
   if (!(group instanceof HTMLElement)) {
     return;
   }
-  const isOpen = group.classList.contains(\"is-open\");
+  const isOpen = group.classList.contains("is-open");
   if (isOpen) {
     closeNavGroups();
     return;
