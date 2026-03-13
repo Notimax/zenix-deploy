@@ -515,3 +515,9 @@ Last update: 2026-03-11
   - calendar payload uses `primary`/`anime`/`supplemental` keys, `sourceLinks` removed
   - external detail URLs/keys stripped from calendar + supplemental payloads via `sanitizePublicEntry`
   - anime planning cards now use neutral `source: "anime"` keys (no upstream URLs in payload)
+
+## c212 follow-up (2026-03-13)
+- Startup splash is now hidden by default in HTML.
+- Added a minimal inline failsafe to force-hide the splash and remove `startup-lock`
+  if the JS intro flow does not complete (prevents infinite animation lock).
+- Cache-bust updated to `20260313-c212`.

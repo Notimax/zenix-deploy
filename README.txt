@@ -843,3 +843,9 @@ LATEST PROVIDER MASKING (2026-03-13, c211)
   - `sourceLinks` removed, external detail URLs/keys stripped
   - provider labels normalized to `Zenix`
 - Anime planning cards use neutral `source: "anime"` and safe keys (no upstream URLs in payload).
+
+LATEST STARTUP FAILSAFE (2026-03-13, c212)
+- Startup splash is now hidden by default in HTML.
+- Added an inline unlock timer to force-hide the splash and remove `startup-lock`
+  if JS fails to complete the intro (prevents infinite animation lock).
+- Cache-bust bumped to `20260313-c212`.
