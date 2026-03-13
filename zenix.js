@@ -3697,6 +3697,9 @@ function maybeShowBackupGate(options = {}) {
   if (!refs.backupGate || !state.backupPromptReady) {
     return;
   }
+  if (!hasDiscordPromptSession()) {
+    return;
+  }
   if (state.adblockDetected || !refs.adblockGate?.hidden) {
     return;
   }
@@ -3727,6 +3730,9 @@ function scheduleBackupAfterDiscord(delayMs = BACKUP_PROMPT_DELAY_MS) {
       return;
     }
     if (!hasDiscordPromptSession() && state.discordPromptReady) {
+      if (!state.discordGateVisible) {
+        maybeShowDiscordGate({ delayMs: 0 });
+      }
       scheduleBackupAfterDiscord(700);
       return;
     }

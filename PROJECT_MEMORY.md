@@ -617,3 +617,9 @@ Last update: 2026-03-11
 - Backup popup supports share sheet on mobile and shows device-specific bookmark hints.
 - Backup URL rendered as a clickable link (opens zenix.lol).
 - Cache-bust updated to `20260313-c231`.
+
+## c232 follow-up (2026-03-13)
+- Backup popup now waits for the Discord prompt session before showing.
+- Added /api/backup-config (public GET + admin POST) with CORS for zenix.lol admin.
+- zenix.lol displays current + previous URL (previous is struck through).
+- Cache-bust updated to `20260313-c232`.

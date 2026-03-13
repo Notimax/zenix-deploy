@@ -945,3 +945,9 @@ LATEST BACKUP POPUP SEQUENCING + BOOKMARK UX (2026-03-13, c231)
 - Mobile backup popup uses share sheet when available and provides device-specific bookmark hints.
 - Backup URL is a clickable link and opens in a new tab.
 - Cache-bust bumped to `20260313-c231`.
+
+LATEST BACKUP POPUP + BACKUP CONFIG API (2026-03-13, c232)
+- Backup popup now always waits for the Discord prompt session before showing.
+- Backup config API added at /api/backup-config (public GET + admin POST) with CORS for zenix.lol.
+- zenix.lol now pulls active/previous URL from the API and shows previous link struck through.
+- Cache-bust bumped to `20260313-c232`.

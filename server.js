@@ -240,6 +240,9 @@ const ADMIN_SESSION_TTL_MS = Math.max(
   Number(process.env.ZENIX_ADMIN_SESSION_TTL_MS || 12 * 60 * 60 * 1000)
 );
 const ADMIN_DATA_FILE = path.resolve(process.env.ZENIX_ADMIN_DATA_FILE || path.join(ROOT, "admin-data.json"));
+const BACKUP_CONFIG_FILE = path.resolve(
+  process.env.ZENIX_BACKUP_CONFIG_FILE || path.join(ROOT, "backup-config.json")
+);
 const ADMIN_LOGIN_WINDOW_MS = Math.max(60 * 1000, Number(process.env.ZENIX_ADMIN_LOGIN_WINDOW_MS || 5 * 60 * 1000));
 const ADMIN_LOGIN_MAX_ATTEMPTS = Math.max(
   3,
@@ -248,6 +251,7 @@ const ADMIN_LOGIN_MAX_ATTEMPTS = Math.max(
 const adminLoginAttempts = new Map();
 const adminSessions = new Map();
 const adminDataCache = { loadedAt: 0, value: null };
+const backupConfigCache = { loadedAt: 0, value: null };
 const NAKIOS_PINNED_TITLES = [
   { title: "Go Karts", mediaType: "movie", year: 2020 },
   { title: "Minions", mediaType: "movie", year: 2015 },
@@ -1417,6 +1421,76 @@ function saveAdminData(data) {
   adminDataCache.value = normalized;
   adminDataCache.loadedAt = Date.now();
   return normalized;
+}
+
+function normalizeBackupUrl(value) {
+  let url = String(value || "").trim();
+  if (!url) {
+    return "";
+  }
+  if (!/^https?:\/\//i.test(url)) {
+    url = `https://${url.replace(/^\/+/, "")}`;
+  }
+  return url;
+}
+
+function getDefaultBackupUrl() {
+  if (CANONICAL_HOST) {
+    return `${CANONICAL_SCHEME}://${CANONICAL_HOST}`;
+  }
+  return "https://zenix.best";
+}
+
+function loadBackupConfig(force = false) {
+  const now = Date.now();
+  if (!force && backupConfigCache.value && now - backupConfigCache.loadedAt < 2000) {
+    return backupConfigCache.value;
+  }
+  let data = null;
+  try {
+    if (fs.existsSync(BACKUP_CONFIG_FILE)) {
+      const raw = fs.readFileSync(BACKUP_CONFIG_FILE, "utf-8");
+      data = parseJsonSafe(raw);
+    }
+  } catch {
+    data = null;
+  }
+  const currentUrl = normalizeBackupUrl(data?.currentUrl) || getDefaultBackupUrl();
+  const previousUrl = normalizeBackupUrl(data?.previousUrl);
+  const updatedAt = Number(data?.updatedAt || 0);
+  const normalized = { currentUrl, previousUrl, updatedAt };
+  backupConfigCache.value = normalized;
+  backupConfigCache.loadedAt = now;
+  return normalized;
+}
+
+function saveBackupConfig(next) {
+  const payload = {
+    currentUrl: normalizeBackupUrl(next?.currentUrl) || getDefaultBackupUrl(),
+    previousUrl: normalizeBackupUrl(next?.previousUrl),
+    updatedAt: Number(next?.updatedAt || Date.now()),
+  };
+  try {
+    fs.mkdirSync(path.dirname(BACKUP_CONFIG_FILE), { recursive: true });
+    const tmp = `${BACKUP_CONFIG_FILE}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(payload, null, 2), "utf-8");
+    fs.renameSync(tmp, BACKUP_CONFIG_FILE);
+  } catch {
+    // best effort
+  }
+  backupConfigCache.value = payload;
+  backupConfigCache.loadedAt = Date.now();
+  return payload;
+}
+
+function setBackupCors(res, origin) {
+  const allowed = new Set(["https://zenix.lol", "https://www.zenix.lol"]);
+  if (origin && allowed.has(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+  }
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 }
 
 function getActiveAnnouncement(data) {
@@ -9433,6 +9507,9 @@ function isGateProtectedPath(pathname) {
   if (pathname === "/api/announcement") {
     return false;
   }
+  if (pathname === "/api/backup-config") {
+    return false;
+  }
   if (pathname === "/api/suggestions") {
     return false;
   }
@@ -9967,6 +10044,63 @@ async function handleAnnouncement(req, res, requestUrl) {
   const data = loadAdminData();
   const active = getActiveAnnouncement(data);
   sendJson(res, 200, { data: active || null });
+  return true;
+}
+
+async function handleBackupConfig(req, res, requestUrl) {
+  if (requestUrl.pathname !== "/api/backup-config") {
+    return false;
+  }
+  const origin = String(req.headers.origin || "");
+  setBackupCors(res, origin);
+  if (req.method === "OPTIONS") {
+    res.writeHead(204);
+    res.end();
+    return true;
+  }
+  if (req.method === "GET") {
+    const data = loadBackupConfig();
+    sendJson(res, 200, { data });
+    return true;
+  }
+  if (req.method !== "POST") {
+    sendJson(res, 405, { error: "Method Not Allowed" });
+    return true;
+  }
+  if (!ADMIN_PASSWORD) {
+    sendJson(res, 503, { error: "Admin disabled" });
+    return true;
+  }
+  const ip = getRemoteAddress(req);
+  if (!isAdminLoginAllowed(ip)) {
+    sendJson(res, 429, { error: "Too many attempts" });
+    return true;
+  }
+  let body = null;
+  try {
+    body = await readJsonBody(req, 4096);
+  } catch {
+    sendJson(res, 400, { error: "Invalid JSON" });
+    return true;
+  }
+  const password = String(body?.password || "");
+  if (!timingSafeEqualStrings(password, ADMIN_PASSWORD)) {
+    sendJson(res, 401, { error: "Unauthorized" });
+    return true;
+  }
+  const nextUrl = normalizeBackupUrl(body?.url);
+  if (!nextUrl) {
+    sendJson(res, 400, { error: "Invalid URL" });
+    return true;
+  }
+  const existing = loadBackupConfig(true);
+  const updated = {
+    currentUrl: nextUrl,
+    previousUrl: existing.currentUrl && existing.currentUrl !== nextUrl ? existing.currentUrl : existing.previousUrl || "",
+    updatedAt: Date.now(),
+  };
+  const saved = saveBackupConfig(updated);
+  sendJson(res, 200, { ok: true, data: saved });
   return true;
 }
 
@@ -12096,6 +12230,12 @@ const server = http.createServer((req, res) => {
     })
     .then((handledAnnouncement) => {
       if (handledAnnouncement) {
+        return true;
+      }
+      return handleBackupConfig(req, res, requestUrl);
+    })
+    .then((handledBackupConfig) => {
+      if (handledBackupConfig) {
         return true;
       }
       return handleAdminSession(req, res, requestUrl);
