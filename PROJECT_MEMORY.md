@@ -639,3 +639,8 @@ Last update: 2026-03-11
 ## c234 follow-up (2026-03-13)
 - Backup popup (zenix.lol) now shows on every visit (still after Discord prompt).
 - Cache-bust updated to `20260313-c234`.
+
+## c235 follow-up (2026-03-14)
+- Backup popup link layout improved (no text overlap, better wrapping).
+- zenix.lol admin forms now never reload the page (submit blocked + button click handlers + Enter key handling).
+- Cache-bust updated to `20260313-c235`.

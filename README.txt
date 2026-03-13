@@ -968,3 +968,8 @@ LATEST ADMIN SUGGESTIONS + ANNOUNCE MGMT + ZENIX.LOL ADMIN (2026-03-13, c233)
 LATEST BACKUP POPUP ALWAYS-ON (2026-03-13, c234)
 - Backup popup (zenix.lol) now shows on every site visit (still after Discord prompt).
 - Cache-bust bumped to `20260313-c234`.
+
+LATEST BACKUP POPUP LINK LAYOUT + ZENIX.LOL ADMIN NO-REFRESH (2026-03-14, c235)
+- Backup popup link layout improved (no overlap with text, better wrapping).
+- zenix.lol admin forms now never reload the page (submit blocked + button clicks + Enter handled).
+- Cache-bust bumped to `20260313-c235`.
