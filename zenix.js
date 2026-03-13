@@ -1540,10 +1540,27 @@ function bindEvents() {
   });
 
   refs.navToggles.forEach((button) => {
-    bindFastPress(button, (event) => {
+    let lastTouchAt = 0;
+    const handler = (event) => {
       event.stopPropagation();
+      event.preventDefault();
       const group = button.closest(".nav-group");
       toggleNavGroup(group);
+    };
+    button.addEventListener(
+      "touchstart",
+      (event) => {
+        lastTouchAt = Date.now();
+        handler(event);
+      },
+      { passive: false }
+    );
+    button.addEventListener("click", (event) => {
+      if (Date.now() - lastTouchAt < 550) {
+        event.preventDefault();
+        return;
+      }
+      handler(event);
     });
   });
 
@@ -5161,10 +5178,20 @@ function animateHeroSwap() {
 }
 
 function startHeroRotation() {
+  if (isCompactViewport()) {
+    if (state.heroRotateTimer) {
+      clearInterval(state.heroRotateTimer);
+    }
+    state.heroRotateTimer = null;
+    return;
+  }
   if (state.heroRotateTimer) {
     clearInterval(state.heroRotateTimer);
   }
   state.heroRotateTimer = setInterval(() => {
+    if (isCompactViewport()) {
+      return;
+    }
     if (state.view !== "all" || !refs.playerOverlay.hidden || !refs.detailModal.hidden) {
       return;
     }
@@ -6434,6 +6461,8 @@ function renderAll() {
   const isRecommendationView = !hasQuery && state.view === "recommendation";
   const showBrowseView = !isInfoView && !isCalendarView && !isTopView && !isListView && !isRecommendationView;
 
+  const showHero = showBrowseView && !isCompactViewport();
+
   if (showBrowseView) {
     const primePool = [heroItem, ...visible].filter(Boolean);
     primeCriticalCovers(
@@ -6443,7 +6472,9 @@ function renderAll() {
     ).catch(() => {
       // best effort only
     });
-    renderHero(heroItem);
+    if (showHero) {
+      renderHero(heroItem);
+    }
     renderCommunityStats();
     renderThemeFilters();
     renderCatalog(visible);
@@ -6484,7 +6515,7 @@ function renderAll() {
 
   updateCatalogHeading(hasQuery, visible.length);
 
-  setHidden(refs.heroSection, !showBrowseView);
+  setHidden(refs.heroSection, !showHero);
   setHidden(refs.statusStrip, isInfoView || isCalendarView || isRecommendationView);
   setHidden(refs.quickLinksSection, true);
   setHidden(refs.filtersPanel, HIDE_BROWSE_PANELS || isInfoView || isCalendarView || isTopView || isListView || isRecommendationView);

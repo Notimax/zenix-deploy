@@ -4174,6 +4174,12 @@ h4 {
   overflow: visible;
 }
 
+body.nav-submenu-open .topbar,
+body.nav-submenu-open .main-nav-shell,
+body.nav-submenu-open .main-nav {
+  overflow: visible;
+}
+
 .nav-pill {
   border: 1px solid transparent;
   border-radius: 999px;

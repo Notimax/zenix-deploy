@@ -542,3 +542,10 @@ Last update: 2026-03-11
 - Pending messaging now ignores stale pending flags for older releases.
 - Mobile nav dropdowns: tap handling improved and submenu no longer clipped.
 - Cache-bust updated to `20260313-c217`.
+
+## c218 follow-up (2026-03-13)
+- Infos is now a direct nav item (no empty submenu).
+- Mobile nav toggles use touch-first handler for reliable submenu open on iPhone.
+- Submenu overflow unclipped at topbar level on mobile.
+- Hero carousel hidden on phone to remove auto-rotating cards at top of categories.
+- Cache-bust updated to `20260313-c218`.

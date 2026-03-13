@@ -870,3 +870,10 @@ LATEST GO KARTS + REPAIR + NAV FIX (2026-03-13, c217)
 - Repair/pending messaging now ignores stale pending flags for older releases.
 - Nav dropdowns now open reliably on mobile (tap + overflow unclipped).
 - Cache-bust bumped to `20260313-c217`.
+
+LATEST MOBILE NAV + HERO TUNING (2026-03-13, c218)
+- Info submenu removed (Infos is now a direct nav item).
+- Mobile nav toggles use touch-first handler for reliable submenu open on iPhone.
+- Nav submenu overflow unclipped at topbar level on mobile.
+- Hero carousel hidden on phone to avoid auto-scrolling cards at top of categories.
+- Cache-bust bumped to `20260313-c218`.
