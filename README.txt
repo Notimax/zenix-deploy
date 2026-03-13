@@ -854,3 +854,7 @@ LATEST JS PARSE FIX (2026-03-13, c214)
 - `zenix.js` normalized to UTF-8 and cleaned invalid escaped tokens that broke parsing.
 - Fix restores JS execution (nav, covers, popups, announcements).
 - Cache-bust bumped to `20260313-c214`.
+
+LATEST RECOMMENDATION VIEW FIX (2026-03-13, c215)
+- Fixed `isRecommendationView` ReferenceError in `renderAll()` that halted JS boot.
+- Cache-bust bumped to `20260313-c215`.

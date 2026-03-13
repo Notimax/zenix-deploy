@@ -6411,7 +6411,8 @@ function renderAll() {
   const isCalendarView = state.view === "calendar";
   const isListView = !hasQuery && state.view === "list";
   const isTopView = !hasQuery && state.view === "top";
-  const showBrowseView = !isInfoView && !isCalendarView && !isTopView && !isListView;
+  const isRecommendationView = !hasQuery && state.view === "recommendation";
+  const showBrowseView = !isInfoView && !isCalendarView && !isTopView && !isListView && !isRecommendationView;
 
   if (showBrowseView) {
     const primePool = [heroItem, ...visible].filter(Boolean);
