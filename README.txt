@@ -911,3 +911,10 @@ LATEST PENDING BADGE + PLAYER SPEED TUNING (2026-03-13, c225)
 - Player source ranking favors direct formats harder and penalizes embed on mobile for faster starts.
 - Playback stall thresholds tightened for quicker auto-switch.
 - Cache-bust bumped to `20260313-c225`.
+
+LATEST SOURCE BADGES + PREVIEW (2026-03-13, c226)
+- Sources show a "Lecture OK" badge after successful playback for the user.
+- Sources include a mobile compatibility indicator.
+- Cards show a quality badge (HD / Full HD / 4K) based on successful playback.
+- Desktop hover preview plays a silent 10s clip when a direct MP4/WebM preview is available.
+- Cache-bust bumped to `20260313-c226`.

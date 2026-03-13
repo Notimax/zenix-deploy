@@ -583,3 +583,10 @@ Last update: 2026-03-11
 - Player source scoring now favors direct formats more and penalizes embeds on mobile for faster starts.
 - Playback stall thresholds tightened for quicker auto-switch.
 - Cache-bust updated to `20260313-c225`.
+
+## c226 follow-up (2026-03-13)
+- Sources display a "Lecture OK" badge after successful playback (per user).
+- Sources include a mobile compatibility indicator.
+- Cards show a quality badge (HD/Full HD/4K) based on successful playback.
+- Desktop hover preview plays a silent 10s clip when a direct MP4/WebM preview is available.
+- Cache-bust updated to `20260313-c226`.

@@ -105,6 +105,8 @@ const SEARCH_SIGNALS_KEY = "zenix-search-signals-v1";
 const BROWSE_STATE_KEY = "zenix-browse-state-v1";
 const VIEW_SCROLL_KEY = "zenix-view-scroll-v1";
 const SOURCE_HOST_HEALTH_KEY = "zenix-source-health-v1";
+const SOURCE_SUCCESS_KEY = "zenix-source-success-v1";
+const ITEM_QUALITY_KEY = "zenix-item-quality-v1";
 const DISCORD_PROMPT_SESSION_KEY = "zenix-discord-prompt-session-v1";
 const DISCORD_INVITE_URL = "https://discord.gg/xydTB8VmZT";
 const hlsLanguageProbeCache = new Map();
@@ -123,6 +125,8 @@ const SUPPLEMENTAL_MEDIA_ID_MIN = 1500000000;
 const WATCH_HISTORY_MAX = 250;
 const WATCH_HISTORY_MAX_AGE_MS = 120 * 24 * 60 * 60 * 1000;
 const SOURCE_HOST_HEALTH_MAX = 140;
+const SOURCE_SUCCESS_MAX = 360;
+const SOURCE_SUCCESS_TTL_MS = 45 * 24 * 60 * 60 * 1000;
 const SOURCE_FAILURE_PENALTY = 26;
 const SOURCE_SUCCESS_BONUS = 12;
 const SOURCE_RETRY_PER_INDEX = 1;
@@ -140,6 +144,10 @@ const MOBILE_VIDEO_READY_TIMEOUT_MS = 7000;
 const MOBILE_EMBED_READY_TIMEOUT_MS = 6000;
 const EMBED_STALL_SWITCH_MS = 7000;
 const MOBILE_EMBED_STALL_SWITCH_MS = 6200;
+const PREVIEW_ENABLED = true;
+const PREVIEW_HOVER_DELAY_MS = 220;
+const PREVIEW_DURATION_MS = 10000;
+const PREVIEW_COOLDOWN_MS = 22000;
 const SKIP_INTRO_SECONDS = 85;
 const SKIP_RECAP_SECONDS = 45;
 const INTEREST_QUERY_MAX = 40;
@@ -341,6 +349,8 @@ const state = {
   sourceIndex: -1,
   sourceRetryAttempts: new Map(),
   sourceHostHealth: loadSourceHostHealth(),
+  sourceSuccessMap: loadSourceSuccessMap(),
+  itemQualityMap: loadItemQualityMap(),
   hlsLangProbeToken: 0,
   sourceLoading: false,
   sourceLoadTicket: 0,
@@ -363,6 +373,9 @@ const state = {
   streamPayloadCache: new Map(),
   streamInFlight: new Map(),
   streamPrefetchAt: new Map(),
+  previewSourceCache: new Map(),
+  previewCooldownAt: new Map(),
+  previewActive: null,
   episodePlayableCache: new Map(),
   episodePlayableInFlight: new Map(),
   seasonNameRefreshAt: new Map(),
@@ -7659,12 +7672,137 @@ function prefetchStreamForItem(item) {
       .then((payload) => {
         if (payload) {
           prefetchHlsManifestFromPayload(payload);
+          const preview = pickPreviewSource(payload);
+          if (preview && preview.url) {
+            const id = Number(item.id || 0);
+            if (!state.previewSourceCache.has(id)) {
+              state.previewSourceCache.set(id, preview);
+            }
+          }
         }
       })
       .catch(() => {
       // best effort prefetch only
       });
   });
+}
+
+function pickPreviewSource(payload) {
+  const sources = extractSources(payload);
+  if (!Array.isArray(sources) || sources.length === 0) {
+    return null;
+  }
+  const direct = sources.filter((entry) => {
+    const format = String(entry?.format || "").toLowerCase();
+    return format === "mp4" || format === "webm";
+  });
+  if (direct.length === 0) {
+    return null;
+  }
+  const sorted = sortSourcesByScore(direct);
+  const selected = sorted[0] || null;
+  if (!selected) {
+    return null;
+  }
+  return { url: String(selected.url || "").trim(), format: selected.format || "mp4" };
+}
+
+function stopCardPreview() {
+  if (!state.previewActive) {
+    return;
+  }
+  const active = state.previewActive;
+  if (active.timeoutId) {
+    clearTimeout(active.timeoutId);
+  }
+  if (active.video) {
+    try {
+      active.video.pause();
+      active.video.removeAttribute("src");
+      active.video.load();
+    } catch {
+      // ignore
+    }
+    active.video.remove();
+  }
+  if (active.thumb) {
+    active.thumb.classList.remove("is-previewing");
+  }
+  state.previewActive = null;
+}
+
+function startCardPreview(card, item, thumb) {
+  if (!PREVIEW_ENABLED || !card || !item || !thumb) {
+    return;
+  }
+  if (isLikelyMobileDevice() || state.uiPrefs?.reduceMotion) {
+    return;
+  }
+  const id = Number(item.id || 0);
+  if (id <= 0) {
+    return;
+  }
+  const cooldownUntil = Number(state.previewCooldownAt.get(id) || 0);
+  if (Date.now() < cooldownUntil) {
+    return;
+  }
+  const preview = state.previewSourceCache.get(id);
+  if (!preview || !preview.url) {
+    return;
+  }
+  stopCardPreview();
+
+  const video = document.createElement("video");
+  video.className = "card-preview-video";
+  video.muted = true;
+  video.playsInline = true;
+  video.preload = "metadata";
+  video.autoplay = true;
+  video.loop = false;
+  video.src = preview.url;
+
+  thumb.appendChild(video);
+  thumb.classList.add("is-previewing");
+
+  const timeoutId = window.setTimeout(() => {
+    stopCardPreview();
+    state.previewCooldownAt.set(id, Date.now() + PREVIEW_COOLDOWN_MS);
+  }, PREVIEW_DURATION_MS);
+
+  state.previewActive = { id, video, thumb, timeoutId };
+  video.play().catch(() => {
+    stopCardPreview();
+  });
+}
+
+function attachCardPreviewHandlers(card, item, thumb) {
+  if (!card || !item || !thumb) {
+    return;
+  }
+  if (isLikelyMobileDevice() || !PREVIEW_ENABLED) {
+    return;
+  }
+  let hoverTimer = 0;
+  const onEnter = () => {
+    if (hoverTimer) {
+      clearTimeout(hoverTimer);
+    }
+    hoverTimer = window.setTimeout(() => {
+      hoverTimer = 0;
+      startCardPreview(card, item, thumb);
+    }, PREVIEW_HOVER_DELAY_MS);
+  };
+  const onLeave = () => {
+    if (hoverTimer) {
+      clearTimeout(hoverTimer);
+      hoverTimer = 0;
+    }
+    stopCardPreview();
+  };
+  card.addEventListener("pointerenter", onEnter);
+  card.addEventListener("pointerleave", onLeave);
+  card.addEventListener("focusout", onLeave);
+  card.addEventListener("blur", onLeave);
 }
 
 function prefetchHlsManifestFromPayload(payload) {
@@ -7765,6 +7903,7 @@ function renderTopDaily() {
     const runtime = item.runtime ? toHumanRuntime(item.runtime) : item.type === "tv" ? "Episodes" : "Film";
     const year = getYear(item.releaseDate) || "-";
     const languageLabel = resolveDetailLanguageLabel(details, item.id);
+    const qualityBadge = getItemQualityBadge(item.id);
     const isPendingUpload = isPendingUploadItem(item);
     const isComingSoonRelease = !isPendingUpload && isComingSoon(item);
     const isNewRelease = !isPendingUpload && isRecentlyReleased(item, NEW_RELEASE_DAYS);
@@ -7805,6 +7944,7 @@ function renderTopDaily() {
         <button type="button" class="title-link top-title-link" data-top-open="${item.id}">${escapeHtml(item.title)}</button>
         <p class="top-meta">
           <span class="meta-pill">${escapeHtml(getItemTypeLabel(item))}</span>
+          <span class="meta-pill meta-pill-quality">${escapeHtml(qualityBadge)}</span>
           ${isPendingUpload ? '<span class="meta-pill meta-pill-waiting">En attente</span>' : ""}
           ${!isPendingUpload && isComingSoonRelease ? '<span class="meta-pill meta-pill-soon">Bientot dispo</span>' : ""}
           ${!isPendingUpload && !isComingSoonRelease && isNewRelease ? '<span class="meta-pill meta-pill-new">Nouveau</span>' : ""}
@@ -7849,6 +7989,7 @@ function renderTopDaily() {
     const play = card.querySelector(`[data-top-play="${item.id}"]`);
     const info = card.querySelector(`[data-top-info="${item.id}"]`);
     const openButtons = card.querySelectorAll(`[data-top-open="${item.id}"]`);
+    const thumb = card.querySelector(".top-thumb");
 
     if (play) {
       bindFastPress(play, () => {
@@ -8408,6 +8549,7 @@ function buildMediaCard(item, resume = false, progressEntry = null, position = 0
   const year = getYear(item.releaseDate) || "-";
   const runtime = item.runtime ? toHumanRuntime(item.runtime) : item.type === "tv" ? "Episodes" : "Film";
   const typeLabel = getItemTypeLabel(item);
+  const qualityBadge = getItemQualityBadge(item.id);
   const languageLabel = resolveDetailLanguageLabel(details, item.id);
   const favorite = isFavorite(item.id);
   const progress = progressEntry || state.progress[item.id] || null;
@@ -8464,6 +8606,7 @@ function buildMediaCard(item, resume = false, progressEntry = null, position = 0
       <button type="button" class="title-link media-title-link" data-card-open="${item.id}">${escapeHtml(item.title)}</button>
         <p class="media-meta">
         <span class="meta-pill">${escapeHtml(typeLabel)}</span>
+        <span class="meta-pill meta-pill-quality">${escapeHtml(qualityBadge)}</span>
         ${isPendingUpload ? '<span class="meta-pill meta-pill-waiting">En attente</span>' : ""}
         ${!isPendingUpload && isComingSoonRelease ? '<span class="meta-pill meta-pill-soon">Bientot dispo</span>' : ""}
         ${!isPendingUpload && !isComingSoonRelease && isNewRelease ? '<span class="meta-pill meta-pill-new">Nouveau</span>' : ""}
@@ -8489,6 +8632,7 @@ function buildMediaCard(item, resume = false, progressEntry = null, position = 0
   const fav = card.querySelector(`[data-card-fav="${item.id}"]`);
   const removeContinue = card.querySelector(`[data-card-remove-progress="${item.id}"]`);
   const openButtons = card.querySelectorAll(`[data-card-open="${item.id}"]`);
+  const thumb = card.querySelector(".media-thumb");
 
   if (play) {
     bindFastPress(play, () => {
@@ -8532,13 +8676,15 @@ function buildMediaCard(item, resume = false, progressEntry = null, position = 0
       }
     });
   }
-  openButtons.forEach((button) => {
-    bindSafeTap(button, () => {
-      openDetails(item.id).catch(() => {
-        showMessage("Impossible de charger les details.", true);
+    openButtons.forEach((button) => {
+      bindSafeTap(button, () => {
+        openDetails(item.id).catch(() => {
+          showMessage("Impossible de charger les details.", true);
+        });
       });
     });
-  });
+
+    attachCardPreviewHandlers(card, item, thumb);
 
   card.addEventListener("pointerdown", () => {
     ensureDetails(item.id)
@@ -8570,6 +8716,8 @@ function buildMediaCard(item, resume = false, progressEntry = null, position = 0
       showMessage("Impossible de charger les details.", true);
     });
   });
+
+  attachCardPreviewHandlers(card, item, thumb);
 
   return card;
 }
@@ -12749,6 +12897,144 @@ function markCurrentSourceSuccessful(index, source) {
   state.sourceRetryAttempts.delete(key);
 }
 
+function hashStringToKey(value) {
+  const raw = String(value || "");
+  if (!raw) {
+    return "";
+  }
+  let hash = 0;
+  for (let i = 0; i < raw.length; i += 1) {
+    hash = (hash << 5) - hash + raw.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash).toString(36);
+}
+
+function getSourceSuccessKey(source) {
+  if (!source) {
+    return "";
+  }
+  const host = String(source?.host || getSourceHost(source?.url || "")).trim().toLowerCase();
+  const url = String(source?.url || "").trim();
+  const hash = hashStringToKey(url);
+  if (!hash) {
+    return "";
+  }
+  return host ? `${host}|${hash}` : hash;
+}
+
+function getQualityBadgeFromSource(source) {
+  const raw = String(source?.quality || source?.resolution || source?.label || "").toLowerCase();
+  const token = raw.match(/(2160p|4k|1080p|720p|480p|360p)/i);
+  if (token) {
+    const normalized = String(token[1] || "").toLowerCase();
+    if (normalized.includes("2160") || normalized.includes("4k")) {
+      return "4K";
+    }
+    if (normalized.includes("1080")) {
+      return "Full HD";
+    }
+    return "HD";
+  }
+  if (raw.includes("full hd")) {
+    return "Full HD";
+  }
+  if (raw.includes("hd")) {
+    return "HD";
+  }
+  return "HD";
+}
+
+function getItemQualityBadge(itemId) {
+  const key = Number(itemId || 0);
+  if (key > 0 && state.itemQualityMap instanceof Map) {
+    const value = String(state.itemQualityMap.get(key) || "").trim();
+    if (value) {
+      return value;
+    }
+  }
+  return "HD";
+}
+
+function rememberSourceSuccess(source, itemId = 0) {
+  const key = getSourceSuccessKey(source);
+  if (!key) {
+    return;
+  }
+  const now = Date.now();
+  const map = state.sourceSuccessMap instanceof Map ? state.sourceSuccessMap : new Map();
+  map.set(key, { ts: now });
+  state.sourceSuccessMap = map;
+  pruneSourceSuccessMap(map);
+  saveSourceSuccessMap(map);
+
+  const id = Number(itemId || 0);
+  if (id > 0 && state.itemQualityMap instanceof Map) {
+    const badge = getQualityBadgeFromSource(source);
+    const current = String(state.itemQualityMap.get(id) || "").trim();
+    const rank = badge === "4K" ? 3 : badge === "Full HD" ? 2 : 1;
+    const currentRank = current === "4K" ? 3 : current === "Full HD" ? 2 : current ? 1 : 0;
+    if (rank > currentRank) {
+      state.itemQualityMap.set(id, badge);
+      pruneItemQualityMap(state.itemQualityMap);
+      saveItemQualityMap(state.itemQualityMap);
+    }
+  }
+}
+
+function hasSourceSuccess(source) {
+  const key = getSourceSuccessKey(source);
+  if (!key || !(state.sourceSuccessMap instanceof Map)) {
+    return false;
+  }
+  const row = state.sourceSuccessMap.get(key);
+  if (!row) {
+    return false;
+  }
+  const ts = Number(row.ts || 0);
+  if (!Number.isFinite(ts) || ts <= 0) {
+    return false;
+  }
+  if (Date.now() - ts > SOURCE_SUCCESS_TTL_MS) {
+    state.sourceSuccessMap.delete(key);
+    saveSourceSuccessMap(state.sourceSuccessMap);
+    return false;
+  }
+  return true;
+}
+
+function pruneSourceSuccessMap(map) {
+  if (!(map instanceof Map)) {
+    return;
+  }
+  const now = Date.now();
+  const entries = Array.from(map.entries()).filter(([_, value]) => {
+    const ts = Number(value?.ts || 0);
+    return Number.isFinite(ts) && ts > 0 && now - ts <= SOURCE_SUCCESS_TTL_MS;
+  });
+  if (entries.length <= SOURCE_SUCCESS_MAX) {
+    map.clear();
+    entries.forEach(([k, v]) => map.set(k, v));
+    return;
+  }
+  entries.sort((a, b) => Number(b?.[1]?.ts || 0) - Number(a?.[1]?.ts || 0));
+  map.clear();
+  entries.slice(0, SOURCE_SUCCESS_MAX).forEach(([k, v]) => map.set(k, v));
+}
+
+function pruneItemQualityMap(map) {
+  if (!(map instanceof Map)) {
+    return;
+  }
+  if (map.size <= 800) {
+    return;
+  }
+  const entries = Array.from(map.entries());
+  entries.sort((left, right) => Number(right?.[0] || 0) - Number(left?.[0] || 0));
+  map.clear();
+  entries.slice(0, 800).forEach(([key, value]) => map.set(key, value));
+}
+
 function getSourceScore(format, quality, language, index, host = "") {
   let score = 0;
   if (format === "mp4") {
@@ -12880,6 +13166,23 @@ function describeCompatibilityLabel(score) {
   return "Fragile";
 }
 
+function computeMobileCompatibilityScore(source) {
+  const base = computeSourceCompatibilityScore(source);
+  const format = String(source?.format || "").toLowerCase();
+  let score = base;
+  if (format === "embed") {
+    score -= 18;
+  } else if (format === "mp4") {
+    score += 8;
+  } else if (format === "hls") {
+    score += 5;
+  }
+  if (source?.premiumHint) {
+    score -= 4;
+  }
+  return Math.max(30, Math.min(99, Math.round(score)));
+}
+
 function renderPlayerSourceOptions() {
   if (!refs.playerSourceSelect || !refs.playerSourceApplyBtn) {
     return;
@@ -12911,6 +13214,10 @@ function renderPlayerSourceOptions() {
       const score = computeSourceCompatibilityScore(entry);
       const compatibilityLabel = describeCompatibilityLabel(score);
       const compatibilityBand = score >= 86 ? "high" : score >= 72 ? "medium" : score >= 60 ? "low" : "fragile";
+      const mobileScore = computeMobileCompatibilityScore(entry);
+      const mobileLabel = describeCompatibilityLabel(mobileScore);
+      const mobileCompatText = `Mobile ${mobileLabel} ${mobileScore}%`;
+      const okBadge = hasSourceSuccess(entry) ? '<span class="player-source-chip-meta-pill player-source-chip-ok">Lecture OK</span>' : "";
       const chip = document.createElement("button");
       chip.type = "button";
       chip.className = "player-source-chip";
@@ -12924,7 +13231,7 @@ function renderPlayerSourceOptions() {
       const quality = getSourceDisplayQuality(entry);
       const language = getSourceDisplayLanguage(entry);
       const format = String(entry?.format || "").trim().toUpperCase() || "STREAM";
-      chip.title = `Compatibilite ${score}% (${compatibilityLabel})`;
+      chip.title = `Compatibilite ${score}% (${compatibilityLabel}) | Mobile ${mobileScore}% (${mobileLabel})`;
       chip.innerHTML = `
         <span class="player-source-chip-top">
           <span class="player-source-chip-head">Source ${index + 1}</span>
@@ -12934,6 +13241,8 @@ function renderPlayerSourceOptions() {
           <span class="player-source-chip-meta-pill">${escapeHtml(language)}</span>
           <span class="player-source-chip-meta-pill">${escapeHtml(quality)}</span>
           <span class="player-source-chip-meta-pill">${escapeHtml(format)}</span>
+          <span class="player-source-chip-meta-pill player-source-chip-mobile">${escapeHtml(mobileCompatText)}</span>
+          ${okBadge}
         </span>
       `;
       bindFastPress(chip, () => {
@@ -14881,6 +15190,7 @@ function onPlayerProgress() {
     const paused = Boolean(refs.playerVideo?.paused);
     if (currentTime >= 1.2 && errorCode <= 0 && !paused) {
       markCurrentSourceSuccessful(state.sourceIndex, currentSource);
+      rememberSourceSuccess(currentSource, state.nowPlaying?.id || 0);
     }
   }
   saveNowPlayingProgress();
@@ -16533,6 +16843,90 @@ function saveSourceHostHealth(map) {
       };
     });
     localStorage.setItem(SOURCE_HOST_HEALTH_KEY, JSON.stringify(payload));
+  } catch {
+    // ignore private mode/quota
+  }
+}
+
+function loadSourceSuccessMap() {
+  try {
+    const raw = localStorage.getItem(SOURCE_SUCCESS_KEY);
+    if (!raw) {
+      return new Map();
+    }
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") {
+      return new Map();
+    }
+    const map = new Map();
+    Object.entries(parsed).forEach(([key, value]) => {
+      const ts = Number(value?.ts || 0);
+      if (!key || !Number.isFinite(ts) || ts <= 0) {
+        return;
+      }
+      map.set(String(key), { ts });
+    });
+    return map;
+  } catch {
+    return new Map();
+  }
+}
+
+function saveSourceSuccessMap(map) {
+  try {
+    const payload = {};
+    if (map instanceof Map) {
+      map.forEach((value, key) => {
+        const ts = Number(value?.ts || 0);
+        if (ts > 0) {
+          payload[String(key)] = { ts };
+        }
+      });
+    }
+    localStorage.setItem(SOURCE_SUCCESS_KEY, JSON.stringify(payload));
+  } catch {
+    // ignore private mode/quota
+  }
+}
+
+function loadItemQualityMap() {
+  try {
+    const raw = localStorage.getItem(ITEM_QUALITY_KEY);
+    if (!raw) {
+      return new Map();
+    }
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") {
+      return new Map();
+    }
+    const map = new Map();
+    Object.entries(parsed).forEach(([key, value]) => {
+      const id = Number(key || 0);
+      const label = String(value || "").trim();
+      if (!Number.isFinite(id) || id <= 0 || !label) {
+        return;
+      }
+      map.set(id, label);
+    });
+    return map;
+  } catch {
+    return new Map();
+  }
+}
+
+function saveItemQualityMap(map) {
+  try {
+    const payload = {};
+    if (map instanceof Map) {
+      map.forEach((value, key) => {
+        const id = Number(key || 0);
+        if (!Number.isFinite(id) || id <= 0) {
+          return;
+        }
+        payload[id] = String(value || "").trim();
+      });
+    }
+    localStorage.setItem(ITEM_QUALITY_KEY, JSON.stringify(payload));
   } catch {
     // ignore private mode/quota
   }
