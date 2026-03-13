@@ -576,3 +576,10 @@ Last update: 2026-03-11
 ## c224 follow-up (2026-03-13)
 - Admin custom delete now supports external_key fallback so "Supprimer" works even when the id is missing.
 - Admin assets now include a cache-bust param to force admin.js refresh under long cache headers.
+
+## c225 follow-up (2026-03-13)
+- Pending status normalization now detects Nakios suggestion/pending flags (suggestion/attente/mise en ligne).
+- Pending badge is displayed whenever a title is pending (prevents "Nouveau" on pending items).
+- Player source scoring now favors direct formats more and penalizes embeds on mobile for faster starts.
+- Playback stall thresholds tightened for quicker auto-switch.
+- Cache-bust updated to `20260313-c225`.

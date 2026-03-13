@@ -904,3 +904,10 @@ LATEST DESKTOP SUBMENU RESTORE (2026-03-13, c223)
 LATEST ADMIN CUSTOM DELETE FIX (2026-03-13, c224)
 - Admin custom delete now supports `external_key` fallback, so the Supprimer button works even when IDs are missing.
 - Admin assets now use a cache-bust param so updated admin.js loads despite long cache headers.
+
+LATEST PENDING BADGE + PLAYER SPEED TUNING (2026-03-13, c225)
+- Pending status now recognizes Nakios suggestion/pending flags (incl. suggestion/attente/mise en ligne).
+- Pending badge displays whenever a title is pending (no more "Nouveau" on pending entries).
+- Player source ranking favors direct formats harder and penalizes embed on mobile for faster starts.
+- Playback stall thresholds tightened for quicker auto-switch.
+- Cache-bust bumped to `20260313-c225`.

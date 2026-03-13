@@ -2515,6 +2515,12 @@ function toIsoDate(value) {
 }
 
 function normalizeNakiosAvailabilityStatus(value) {
+  if (value === true || value === 1) {
+    return "pending";
+  }
+  if (value === false || value === 0) {
+    return "unknown";
+  }
   const raw = normalizeTitleKey(String(value || "").trim());
   if (!raw) {
     return "unknown";
@@ -2534,6 +2540,11 @@ function normalizeNakiosAvailabilityStatus(value) {
     raw === "waiting" ||
     raw === "en attente" ||
     raw === "attente" ||
+    raw.includes("suggest") ||
+    raw.includes("miseenligne") ||
+    raw.includes("pasencoreenligne") ||
+    raw.includes("nondisponible") ||
+    raw.includes("indisponible") ||
     raw === "coming" ||
     raw === "upcoming"
   ) {

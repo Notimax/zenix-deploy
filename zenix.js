@@ -123,23 +123,23 @@ const SUPPLEMENTAL_MEDIA_ID_MIN = 1500000000;
 const WATCH_HISTORY_MAX = 250;
 const WATCH_HISTORY_MAX_AGE_MS = 120 * 24 * 60 * 60 * 1000;
 const SOURCE_HOST_HEALTH_MAX = 140;
-const SOURCE_FAILURE_PENALTY = 22;
-const SOURCE_SUCCESS_BONUS = 8;
+const SOURCE_FAILURE_PENALTY = 26;
+const SOURCE_SUCCESS_BONUS = 12;
 const SOURCE_RETRY_PER_INDEX = 1;
 const FILTER_PREMIUM_SOURCES = false;
 const AUTO_PREMIUM_FALLBACK = true;
 const PLAYBACK_GUARD_INTERVAL_MS = 1200;
-const PLAYBACK_STALL_HARD_MS = 5200;
-const PLAYBACK_STALL_PAUSED_MS = 6400;
-const PLAYBACK_STARTUP_STALL_MS = 2600;
-const PLAYBACK_STATUS_RECOVERY_MS = 1800;
-const PLAYBACK_HEALTH_FIRST_DELAY_MS = 1400;
-const PLAYBACK_HEALTH_REPEAT_DELAY_MS = 2100;
-const MOBILE_PLAYBACK_BOOTSTRAP_TIMEOUT_MS = 2600;
+const PLAYBACK_STALL_HARD_MS = 4300;
+const PLAYBACK_STALL_PAUSED_MS = 6200;
+const PLAYBACK_STARTUP_STALL_MS = 2200;
+const PLAYBACK_STATUS_RECOVERY_MS = 1500;
+const PLAYBACK_HEALTH_FIRST_DELAY_MS = 1300;
+const PLAYBACK_HEALTH_REPEAT_DELAY_MS = 1800;
+const MOBILE_PLAYBACK_BOOTSTRAP_TIMEOUT_MS = 2300;
 const MOBILE_VIDEO_READY_TIMEOUT_MS = 7000;
 const MOBILE_EMBED_READY_TIMEOUT_MS = 6000;
-const EMBED_STALL_SWITCH_MS = 8000;
-const MOBILE_EMBED_STALL_SWITCH_MS = 7000;
+const EMBED_STALL_SWITCH_MS = 7000;
+const MOBILE_EMBED_STALL_SWITCH_MS = 6200;
 const SKIP_INTRO_SECONDS = 85;
 const SKIP_RECAP_SECONDS = 45;
 const INTEREST_QUERY_MAX = 40;
@@ -7336,6 +7336,12 @@ function normalizeAvailabilityStatus(value) {
   if (value === null || value === undefined) {
     return "";
   }
+  if (value === true || value === 1) {
+    return "pending";
+  }
+  if (value === false || value === 0) {
+    return "";
+  }
   const raw = normalizeTitleKey(String(value || "").trim());
   if (!raw) {
     return "";
@@ -7358,6 +7364,11 @@ function normalizeAvailabilityStatus(value) {
     raw.includes("mise en ligne") ||
     raw.includes("pas encore en ligne") ||
     raw.includes("non disponible") ||
+    raw.includes("suggest") ||
+    raw.includes("miseenligne") ||
+    raw.includes("pasencoreenligne") ||
+    raw.includes("nondisponible") ||
+    raw.includes("indisponible") ||
     raw === "coming" ||
     raw === "upcoming"
   ) {
@@ -7754,7 +7765,7 @@ function renderTopDaily() {
     const runtime = item.runtime ? toHumanRuntime(item.runtime) : item.type === "tv" ? "Episodes" : "Film";
     const year = getYear(item.releaseDate) || "-";
     const languageLabel = resolveDetailLanguageLabel(details, item.id);
-    const isPendingUpload = isLikelyRecentPendingUpload(item);
+    const isPendingUpload = isPendingUploadItem(item);
     const isComingSoonRelease = !isPendingUpload && isComingSoon(item);
     const isNewRelease = !isPendingUpload && isRecentlyReleased(item, NEW_RELEASE_DAYS);
     const hasResume = Number(state.progress?.[item.id]?.time || 0) > 45;
@@ -8020,7 +8031,7 @@ function buildRecommendationCandidates() {
     if (isItemMostlyWatched(item)) {
       return false;
     }
-    if (isLikelyRecentPendingUpload(item)) {
+    if (isPendingUploadItem(item)) {
       return false;
     }
     return true;
@@ -8400,7 +8411,7 @@ function buildMediaCard(item, resume = false, progressEntry = null, position = 0
   const languageLabel = resolveDetailLanguageLabel(details, item.id);
   const favorite = isFavorite(item.id);
   const progress = progressEntry || state.progress[item.id] || null;
-  const isPendingUpload = isLikelyRecentPendingUpload(item);
+  const isPendingUpload = isPendingUploadItem(item);
   const isComingSoonRelease = !isPendingUpload && isComingSoon(item);
   const isNewRelease = !isPendingUpload && isRecentlyReleased(item, NEW_RELEASE_DAYS);
   const hasResume = Number(progress?.time || 0) > 45;
@@ -9910,7 +9921,7 @@ ${detailOverviewBase}`
 
   refs.detailBadges.innerHTML = "";
   const badges = [getItemTypeLabel(item)];
-  if (isLikelyRecentPendingUpload(item)) {
+  if (isPendingUploadItem(item)) {
     badges.unshift("En attente");
   }
   if (languageLabel) {
@@ -12741,17 +12752,21 @@ function markCurrentSourceSuccessful(index, source) {
 function getSourceScore(format, quality, language, index, host = "") {
   let score = 0;
   if (format === "mp4") {
-    score += 300;
-  } else if (format === "embed") {
-    score += 240;
+    score += 320;
   } else if (format === "hls") {
-    score += 260;
+    score += 290;
   } else if (format === "webm") {
-    score += 230;
+    score += 250;
   } else if (format === "dash") {
-    score += 180;
+    score += 210;
+  } else if (format === "embed") {
+    score += 160;
   } else {
-    score += 110;
+    score += 100;
+  }
+
+  if (format === "embed" && isLikelyMobileDevice()) {
+    score -= 40;
   }
 
   const qualityText = String(quality || "").toLowerCase();
