@@ -418,6 +418,7 @@ const state = {
   viewScrollPositions: loadViewScrollPositions(),
   pendingScrollRestoreView: "",
   networkOnline: navigator.onLine !== false,
+  navSubmenuOpen: false,
   cardViewportObserver: null,
   sectionRevealObserver: null,
   suggestionSubmitting: false,
@@ -834,6 +835,13 @@ function closeNavGroups(except = null) {
       toggle.setAttribute("aria-expanded", "false");
     }
   });
+  if (!except) {
+    state.navSubmenuOpen = false;
+    document.body.classList.remove("nav-submenu-open");
+    if (refs.mainNav) {
+      refs.mainNav.classList.remove("submenu-open");
+    }
+  }
 }
 
 function openNavGroup(group) {
@@ -845,6 +853,11 @@ function openNavGroup(group) {
   const toggle = group.querySelector("[data-nav-toggle]");
   if (toggle) {
     toggle.setAttribute("aria-expanded", "true");
+  }
+  state.navSubmenuOpen = true;
+  document.body.classList.add("nav-submenu-open");
+  if (refs.mainNav) {
+    refs.mainNav.classList.add("submenu-open");
   }
 }
 
@@ -1527,7 +1540,7 @@ function bindEvents() {
   });
 
   refs.navToggles.forEach((button) => {
-    button.addEventListener("click", (event) => {
+    bindFastPress(button, (event) => {
       event.stopPropagation();
       const group = button.closest(".nav-group");
       toggleNavGroup(group);
@@ -7213,6 +7226,43 @@ function isPendingUploadItem(item) {
   return getItemAvailabilityStatus(item) === "pending";
 }
 
+function isLikelyRecentPendingUpload(item) {
+  if (!item || getItemAvailabilityStatus(item) !== "pending") {
+    return false;
+  }
+  const year = getItemReleaseYear(item) || getCatalogReleaseYear(item);
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  if (year > 0 && year <= currentYear - 2) {
+    return false;
+  }
+  const dateCandidates = [
+    item?.releaseDate,
+    item?.release_date,
+    item?.firstAirDate,
+    item?.first_air_date,
+    item?.airDate,
+    item?.date,
+    item?.supplemental_date,
+  ];
+  for (const candidate of dateCandidates) {
+    const raw = String(candidate || "").trim();
+    if (!raw) {
+      continue;
+    }
+    const ts = Date.parse(raw);
+    if (!Number.isFinite(ts)) {
+      continue;
+    }
+    const ageDays = (Date.now() - ts) / (24 * 60 * 60 * 1000);
+    if (ageDays > NEW_RELEASE_DAYS * 4) {
+      return false;
+    }
+    return true;
+  }
+  return true;
+}
+
 function applyAvailabilityToItem(item, status) {
   if (!item || typeof item !== "object") {
     return false;
@@ -7523,7 +7573,7 @@ function renderTopDaily() {
     const runtime = item.runtime ? toHumanRuntime(item.runtime) : item.type === "tv" ? "Episodes" : "Film";
     const year = getYear(item.releaseDate) || "-";
     const languageLabel = resolveDetailLanguageLabel(details, item.id);
-    const isPendingUpload = isPendingUploadItem(item);
+    const isPendingUpload = isLikelyRecentPendingUpload(item);
     const isComingSoonRelease = !isPendingUpload && isComingSoon(item);
     const isNewRelease = !isPendingUpload && isRecentlyReleased(item, NEW_RELEASE_DAYS);
     const hasResume = Number(state.progress?.[item.id]?.time || 0) > 45;
@@ -7789,7 +7839,7 @@ function buildRecommendationCandidates() {
     if (isItemMostlyWatched(item)) {
       return false;
     }
-    if (isPendingUploadItem(item)) {
+    if (isLikelyRecentPendingUpload(item)) {
       return false;
     }
     return true;
@@ -8169,7 +8219,7 @@ function buildMediaCard(item, resume = false, progressEntry = null, position = 0
   const languageLabel = resolveDetailLanguageLabel(details, item.id);
   const favorite = isFavorite(item.id);
   const progress = progressEntry || state.progress[item.id] || null;
-  const isPendingUpload = isPendingUploadItem(item);
+  const isPendingUpload = isLikelyRecentPendingUpload(item);
   const isComingSoonRelease = !isPendingUpload && isComingSoon(item);
   const isNewRelease = !isPendingUpload && isRecentlyReleased(item, NEW_RELEASE_DAYS);
   const hasResume = Number(progress?.time || 0) > 45;
@@ -9668,7 +9718,7 @@ async function openDetails(id, options = {}) {
   parts.push(getItemTypeLabel(item));
   refs.detailMeta.textContent = parts.join(" - ");
 
-  const pendingOverviewNote = isPendingUploadItem(item)
+  const pendingOverviewNote = isLikelyRecentPendingUpload(item)
     ? "Contenu encore trop recent. Mise en ligne en cours."
     : "";
   const detailOverviewBase = details?.overview || "Aucune description detaillee disponible pour ce titre.";
@@ -9679,7 +9729,7 @@ ${detailOverviewBase}`
 
   refs.detailBadges.innerHTML = "";
   const badges = [getItemTypeLabel(item)];
-  if (isPendingUploadItem(item)) {
+  if (isLikelyRecentPendingUpload(item)) {
     badges.unshift("En attente");
   }
   if (languageLabel) {
@@ -10494,7 +10544,7 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
       }
     }
     if (state.sourcePool.length === 0) {
-      const pendingHint = isPendingUploadItem(selectedItem) || (isExternalItem && selectedItem?.externalProvider);
+      const pendingHint = isLikelyRecentPendingUpload(selectedItem);
       if (pendingHint) {
         markItemAvailability(selectedItem.id, "pending");
       }
@@ -10881,7 +10931,7 @@ async function runPlayerRepair() {
   }
   const sources = await collectRepairSourcesForItem(item, season, episode);
   if (!Array.isArray(sources) || sources.length === 0) {
-    const pending = isPendingUploadItem(item);
+    const pending = isLikelyRecentPendingUpload(item);
     const message = pending
       ? "Film trop recent, pas encore disponible."
       : "Aucune source exploitable pour le moment.";

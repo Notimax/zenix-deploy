@@ -535,3 +535,10 @@ Last update: 2026-03-11
 - Gate issuance now uses a shared promise so parallel API calls wait for the token.
 - Prevents initial 403 cascades that left the UI empty.
 - Cache-bust updated to `20260313-c216`.
+
+## c217 follow-up (2026-03-13)
+- Zenix-source retries Nakios lookup with cleaned title + no-year fallback when sources are empty
+  (improves Go Karts and other edge matches).
+- Pending messaging now ignores stale pending flags for older releases.
+- Mobile nav dropdowns: tap handling improved and submenu no longer clipped.
+- Cache-bust updated to `20260313-c217`.

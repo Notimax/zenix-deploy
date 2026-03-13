@@ -863,3 +863,10 @@ LATEST GATE CONCURRENCY FIX (2026-03-13, c216)
 - Gate token issuance is now awaited by concurrent API calls (prevents 403 bursts on load).
 - Fix restores initial catalog rendering and popups when gate is enabled.
 - Cache-bust bumped to `20260313-c216`.
+
+LATEST GO KARTS + REPAIR + NAV FIX (2026-03-13, c217)
+- Zenix-source lookup now retries Nakios search with a cleaned title and without year when sources are empty.
+  (Improves matches like Go Karts and avoids false "trop recent".)
+- Repair/pending messaging now ignores stale pending flags for older releases.
+- Nav dropdowns now open reliably on mobile (tap + overflow unclipped).
+- Cache-bust bumped to `20260313-c217`.

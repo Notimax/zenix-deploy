@@ -5142,6 +5142,19 @@ function sanitizeSupplementalTitle(value) {
   return title || String(value || "").trim();
 }
 
+function cleanSearchTitle(value) {
+  let title = String(value || "").trim();
+  if (!title) {
+    return "";
+  }
+  title = title
+    .replace(/\((?:19|20)\d{2}\)/g, " ")
+    .replace(/\b(?:19|20)\d{2}\b/g, " ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+  return title || String(value || "").trim();
+}
+
 function isAllowedSupplementalDetailHost(hostname) {
   const safeHost = normalizeHostName(hostname);
   if (!safeHost) {
@@ -10929,6 +10942,7 @@ async function handleZenixSource(req, res, requestUrl) {
 
   const mediaType = String(requestUrl.searchParams.get("type") || "movie").toLowerCase() === "tv" ? "tv" : "movie";
   const title = String(requestUrl.searchParams.get("title") || "").trim();
+  const cleanedTitle = cleanSearchTitle(title);
   const year = toInt(requestUrl.searchParams.get("year"), 0, 0, 2099);
   const season = toInt(requestUrl.searchParams.get("season"), 1, 1, 500);
   const episode = toInt(requestUrl.searchParams.get("episode"), 1, 1, 50000);
@@ -10954,6 +10968,12 @@ async function handleZenixSource(req, res, requestUrl) {
     }
     try {
       tmdbId = await resolveNakiosTmdbIdBySearch(title, mediaType, year);
+      if (tmdbId <= 0 && cleanedTitle && cleanedTitle !== title) {
+        tmdbId = await resolveNakiosTmdbIdBySearch(cleanedTitle, mediaType, year);
+      }
+      if (tmdbId <= 0 && year > 0) {
+        tmdbId = await resolveNakiosTmdbIdBySearch(cleanedTitle || title, mediaType, 0);
+      }
     } catch {
       tmdbId = 0;
     }
@@ -10969,9 +10989,26 @@ async function handleZenixSource(req, res, requestUrl) {
   }
 
   if (sources.length === 0 && title.length >= 2) {
+    if (year > 0) {
+      try {
+        const altTmdbId = await resolveNakiosTmdbIdBySearch(cleanedTitle || title, mediaType, 0);
+        if (altTmdbId > 0 && altTmdbId !== tmdbId) {
+          const altSources = await resolveNakiosSourcesByTmdbId(mediaType, altTmdbId, season, episode);
+          if (Array.isArray(altSources) && altSources.length > 0) {
+            sources = altSources;
+            tmdbId = altTmdbId;
+          }
+        }
+      } catch {
+        // fallback below
+      }
+    }
+  }
+
+  if (sources.length === 0 && title.length >= 2) {
     let detail = null;
     try {
-      detail = await resolveFilmer2DetailByTitle(title, mediaType, year);
+      detail = await resolveFilmer2DetailByTitle(cleanedTitle || title, mediaType, year);
     } catch {
       detail = null;
     }
