@@ -951,3 +951,16 @@ LATEST BACKUP POPUP + BACKUP CONFIG API (2026-03-13, c232)
 - Backup config API added at /api/backup-config (public GET + admin POST) with CORS for zenix.lol.
 - zenix.lol now pulls active/previous URL from the API and shows previous link struck through.
 - Cache-bust bumped to `20260313-c232`.
+
+LATEST ADMIN SUGGESTIONS + ANNOUNCE MGMT + ZENIX.LOL ADMIN (2026-03-13, c233)
+- Added 10 Nakios pinned films (Inception, Interstellar, The Dark Knight, Parasite, Dune, Blade Runner 2049, The Prestige,
+  Mad Max: Fury Road, Whiplash, Joker) to surface missing titles.
+- Admin announcement card now shows active announcement and allows deletion.
+- Added admin suggestion workflow:
+  - `/api/admin/suggestions` (GET) returns missing-title suggestions.
+  - `/api/admin/suggestions/accept` (POST) imports the title.
+  - `/api/admin/suggestions/skip` (POST) defers the suggestion for a few days.
+- Admin UI now includes a Suggestions card (validate/refuse/next).
+- zenix.lol admin now uses a password-only login screen, stores the password in session,
+  and shows the panel after login (no mixed password+URL page).
+- Admin assets cache-bust bumped to `20260313-c233`.

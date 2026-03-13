@@ -5,11 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="robots" content="noindex, nofollow" />
   <title>Zenix Admin</title>
-  <link rel="stylesheet" href="/admin.css?v=20260313-c224" />
+  <link rel="stylesheet" href="/admin.css?v=20260313-c233" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet" />
-  <script defer src="/admin.js?v=20260313-c224"></script>
+  <script defer src="/admin.js?v=20260313-c233"></script>
 </head>
 <body class="admin-body">
   <div class="admin-shell">
@@ -47,8 +47,43 @@
             <input id="annEnabled" type="checkbox" />
             <label for="annEnabled">Activer l'annonce</label>
           </div>
+          <div class="admin-selected" id="annCurrentBlock">
+            <div class="admin-item-title">Annonce active</div>
+            <div class="admin-item-meta" id="annCurrentText">Aucune annonce active.</div>
+            <div class="admin-actions">
+              <button class="admin-btn admin-danger" id="annClearBtn" type="button">Supprimer</button>
+            </div>
+          </div>
           <button class="admin-btn" id="annSaveBtn" type="button">Enregistrer</button>
           <p class="admin-muted" id="annStatus"></p>
+        </section>
+
+        <section class="admin-card" id="adminSuggestCard">
+          <h2>Suggestions manquantes</h2>
+          <p class="admin-muted">Propose des titres absents de Zenix. Valide pour ajouter, refuse pour mettre de cote.</p>
+          <div class="admin-field">
+            <label for="suggestType">Type</label>
+            <select id="suggestType">
+              <option value="movie">Films</option>
+              <option value="tv">Series</option>
+              <option value="anime">Anime</option>
+            </select>
+          </div>
+          <div class="admin-suggest" id="suggestContainer">
+            <div class="admin-suggest-cover" id="suggestPoster"></div>
+            <div class="admin-suggest-body">
+              <div class="admin-item-title" id="suggestTitle">Aucune suggestion chargee.</div>
+              <div class="admin-item-meta" id="suggestMeta"></div>
+              <div class="admin-tags" id="suggestTags"></div>
+              <div class="admin-suggest-desc" id="suggestOverview"></div>
+            </div>
+          </div>
+          <div class="admin-actions">
+            <button class="admin-btn" id="suggestAcceptBtn" type="button">Valider</button>
+            <button class="admin-btn admin-ghost" id="suggestSkipBtn" type="button">Refuser</button>
+            <button class="admin-btn admin-ghost" id="suggestNextBtn" type="button">Suivant</button>
+          </div>
+          <p class="admin-muted" id="suggestStatus"></p>
         </section>
 
         <section class="admin-card">

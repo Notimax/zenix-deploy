@@ -623,3 +623,15 @@ Last update: 2026-03-11
 - Added /api/backup-config (public GET + admin POST) with CORS for zenix.lol admin.
 - zenix.lol displays current + previous URL (previous is struck through).
 - Cache-bust updated to `20260313-c232`.
+
+## c233 follow-up (2026-03-13)
+- Added 10 extra pinned Nakios films for catalog coverage (Inception, Interstellar, The Dark Knight, Parasite, Dune,
+  Blade Runner 2049, The Prestige, Mad Max: Fury Road, Whiplash, Joker).
+- Admin announcement card now shows the active message and allows deletion.
+- Added admin suggestion workflow:
+  - `/api/admin/suggestions` (GET) returns missing-title suggestions.
+  - `/api/admin/suggestions/accept` (POST) imports the title.
+  - `/api/admin/suggestions/skip` (POST) defers the suggestion.
+- Admin UI includes a Suggestions panel (validate/refuse/next).
+- zenix.lol admin now uses a password-only login screen and shows the panel after login.
+- Admin assets cache-bust updated to `20260313-c233`.

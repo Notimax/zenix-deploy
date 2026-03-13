@@ -10,6 +10,19 @@ const refs = {
   annEnabled: document.getElementById("annEnabled"),
   annSaveBtn: document.getElementById("annSaveBtn"),
   annStatus: document.getElementById("annStatus"),
+  annCurrentText: document.getElementById("annCurrentText"),
+  annClearBtn: document.getElementById("annClearBtn"),
+  suggestType: document.getElementById("suggestType"),
+  suggestContainer: document.getElementById("suggestContainer"),
+  suggestPoster: document.getElementById("suggestPoster"),
+  suggestTitle: document.getElementById("suggestTitle"),
+  suggestMeta: document.getElementById("suggestMeta"),
+  suggestTags: document.getElementById("suggestTags"),
+  suggestOverview: document.getElementById("suggestOverview"),
+  suggestAcceptBtn: document.getElementById("suggestAcceptBtn"),
+  suggestSkipBtn: document.getElementById("suggestSkipBtn"),
+  suggestNextBtn: document.getElementById("suggestNextBtn"),
+  suggestStatus: document.getElementById("suggestStatus"),
   importUrl: document.getElementById("importUrl"),
   importBtn: document.getElementById("importBtn"),
   importStatus: document.getElementById("importStatus"),
@@ -71,6 +84,10 @@ const state = {
   customByExternalKey: new Map(),
   overridesById: {},
   overridesByExternalKey: {},
+  suggestions: {
+    queue: [],
+    loading: false,
+  },
 };
 
 function extractSearchRows(payload) {
@@ -611,6 +628,126 @@ function renderAnnouncement(data) {
     const hours = remainingMs > 0 ? Math.ceil(remainingMs / 3600000) : 0;
     refs.annDuration.value = hours > 0 ? String(hours) : "";
   }
+  const active = Boolean(ann.enabled && ann.message);
+  if (refs.annCurrentText) {
+    if (!active) {
+      refs.annCurrentText.textContent = "Aucune annonce active.";
+    } else {
+      const expiresAt = Number(ann.expiresAt || 0);
+      const expiryLabel = expiresAt ? ` (expire ${new Date(expiresAt).toLocaleString("fr-FR")})` : "";
+      refs.annCurrentText.textContent = `${ann.message}${expiryLabel}`;
+    }
+  }
+  if (refs.annClearBtn) {
+    refs.annClearBtn.disabled = !active;
+  }
+}
+
+function setSuggestStatus(message = "", isError = false) {
+  if (!refs.suggestStatus) return;
+  refs.suggestStatus.textContent = message;
+  refs.suggestStatus.style.color = isError ? "#fca5a5" : "";
+}
+
+function getCurrentSuggestion() {
+  return state.suggestions.queue.length > 0 ? state.suggestions.queue[0] : null;
+}
+
+function renderSuggestion(item) {
+  if (!refs.suggestTitle || !refs.suggestPoster || !refs.suggestMeta || !refs.suggestOverview || !refs.suggestTags) {
+    return;
+  }
+  if (!item) {
+    refs.suggestTitle.textContent = "Aucune suggestion.";
+    refs.suggestMeta.textContent = "";
+    refs.suggestOverview.textContent = "";
+    refs.suggestPoster.style.backgroundImage = "";
+    refs.suggestTags.innerHTML = "";
+    if (refs.suggestAcceptBtn) refs.suggestAcceptBtn.disabled = true;
+    if (refs.suggestSkipBtn) refs.suggestSkipBtn.disabled = true;
+    if (refs.suggestNextBtn) refs.suggestNextBtn.disabled = true;
+    return;
+  }
+  const typeLabel = item.type === "tv" ? "Serie" : item.type === "anime" ? "Anime" : "Film";
+  const metaParts = [typeLabel];
+  if (item.year) metaParts.push(String(item.year));
+  refs.suggestTitle.textContent = item.title || "Sans titre";
+  refs.suggestMeta.textContent = metaParts.join(" · ");
+  refs.suggestOverview.textContent = item.overview || "Pas de resume disponible.";
+  refs.suggestPoster.style.backgroundImage = item.poster ? `url('${item.poster}')` : "";
+  refs.suggestTags.innerHTML = "";
+  const tags = Array.isArray(item.tags) ? item.tags : [];
+  tags.forEach((tag) => {
+    const span = document.createElement("span");
+    span.className = "admin-tag";
+    span.textContent = tag;
+    refs.suggestTags.appendChild(span);
+  });
+  if (refs.suggestAcceptBtn) refs.suggestAcceptBtn.disabled = false;
+  if (refs.suggestSkipBtn) refs.suggestSkipBtn.disabled = false;
+  if (refs.suggestNextBtn) refs.suggestNextBtn.disabled = false;
+}
+
+async function loadSuggestions(reset = false) {
+  if (state.suggestions.loading) {
+    return;
+  }
+  state.suggestions.loading = true;
+  setSuggestStatus("Chargement...");
+  try {
+    const type = refs.suggestType?.value || "movie";
+    const payload = await apiFetch(`/api/admin/suggestions?type=${encodeURIComponent(type)}&limit=4`);
+    const list = Array.isArray(payload.data) ? payload.data : [];
+    state.suggestions.queue = reset ? list : list;
+    const current = getCurrentSuggestion();
+    renderSuggestion(current);
+    setSuggestStatus(current ? "" : "Aucune suggestion pour le moment.");
+  } catch (err) {
+    setSuggestStatus(err.message || "Erreur suggestions.", true);
+  } finally {
+    state.suggestions.loading = false;
+  }
+}
+
+async function handleSuggestAccept() {
+  const item = getCurrentSuggestion();
+  if (!item) return;
+  setSuggestStatus("Ajout en cours...");
+  try {
+    await apiFetch("/api/admin/suggestions/accept", {
+      method: "POST",
+      body: JSON.stringify({ key: item.key, url: item.importUrl }),
+    });
+    setSuggestStatus(`Ajoute: ${item.title}`);
+    await loadData();
+    await loadSuggestions(true);
+  } catch (err) {
+    setSuggestStatus(err.message || "Ajout impossible.", true);
+  }
+}
+
+async function handleSuggestSkip() {
+  const item = getCurrentSuggestion();
+  if (!item) return;
+  setSuggestStatus("Mis de cote...");
+  try {
+    await apiFetch("/api/admin/suggestions/skip", {
+      method: "POST",
+      body: JSON.stringify({ key: item.key }),
+    });
+    await loadSuggestions(true);
+  } catch (err) {
+    setSuggestStatus(err.message || "Action impossible.", true);
+  }
+}
+
+async function handleSuggestNext() {
+  if (state.suggestions.queue.length > 1) {
+    state.suggestions.queue.shift();
+    renderSuggestion(getCurrentSuggestion());
+    return;
+  }
+  await loadSuggestions(true);
 }
 
 async function loadData() {
@@ -646,6 +783,7 @@ async function checkSession() {
       setVisible(refs.app, true);
       setVisible(refs.logoutBtn, true);
       await loadData();
+      await loadSuggestions(true);
       return;
     }
   } catch {
@@ -693,6 +831,22 @@ async function saveAnnouncement() {
       body: JSON.stringify({ message, durationHours, enabled }),
     });
     refs.annStatus.textContent = "Annonce enregistree.";
+    await loadData();
+  } catch (err) {
+    refs.annStatus.textContent = err.message || "Erreur.";
+  }
+}
+
+async function clearAnnouncement() {
+  if (!refs.annStatus) return;
+  refs.annStatus.textContent = "";
+  try {
+    await apiFetch("/api/admin/announcement", {
+      method: "POST",
+      body: JSON.stringify({ message: "", durationHours: 0, enabled: false }),
+    });
+    refs.annStatus.textContent = "Annonce supprimee.";
+    await loadData();
   } catch (err) {
     refs.annStatus.textContent = err.message || "Erreur.";
   }
@@ -952,6 +1106,11 @@ function bindEvents() {
   if (refs.loginBtn) refs.loginBtn.addEventListener("click", handleLogin);
   if (refs.logoutBtn) refs.logoutBtn.addEventListener("click", handleLogout);
   if (refs.annSaveBtn) refs.annSaveBtn.addEventListener("click", saveAnnouncement);
+  if (refs.annClearBtn) refs.annClearBtn.addEventListener("click", clearAnnouncement);
+  if (refs.suggestType) refs.suggestType.addEventListener("change", () => loadSuggestions(true));
+  if (refs.suggestAcceptBtn) refs.suggestAcceptBtn.addEventListener("click", handleSuggestAccept);
+  if (refs.suggestSkipBtn) refs.suggestSkipBtn.addEventListener("click", handleSuggestSkip);
+  if (refs.suggestNextBtn) refs.suggestNextBtn.addEventListener("click", handleSuggestNext);
   if (refs.importBtn) refs.importBtn.addEventListener("click", handleImport);
   if (refs.overrideSaveBtn) refs.overrideSaveBtn.addEventListener("click", handleOverrideSave);
   if (refs.adminSearchBtn) refs.adminSearchBtn.addEventListener("click", () => handleAdminSearch());

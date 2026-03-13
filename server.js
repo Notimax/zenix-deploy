@@ -260,6 +260,16 @@ const NAKIOS_PINNED_TITLES = [
   { title: "Despicable Me 2", mediaType: "movie", year: 2013 },
   { title: "Despicable Me 3", mediaType: "movie", year: 2017 },
   { title: "Despicable Me 4", mediaType: "movie", year: 2024 },
+  { title: "Inception", mediaType: "movie", year: 2010 },
+  { title: "Interstellar", mediaType: "movie", year: 2014 },
+  { title: "The Dark Knight", mediaType: "movie", year: 2008 },
+  { title: "Parasite", mediaType: "movie", year: 2019 },
+  { title: "Dune", mediaType: "movie", year: 2021 },
+  { title: "Blade Runner 2049", mediaType: "movie", year: 2017 },
+  { title: "The Prestige", mediaType: "movie", year: 2006 },
+  { title: "Mad Max: Fury Road", mediaType: "movie", year: 2015 },
+  { title: "Whiplash", mediaType: "movie", year: 2014 },
+  { title: "Joker", mediaType: "movie", year: 2019 },
 ];
 const NAKIOS_PINNED_CACHE_MS = Math.max(
   15 * 60 * 1000,
@@ -293,6 +303,10 @@ const REPAIR_STORE_TTL_MS = Math.max(
 const REPAIR_STORE_MAX_ENTRIES = Math.max(50, toInt(process.env.REPAIR_STORE_MAX_ENTRIES, 400, 50, 4000));
 const REPAIR_STORE_MAX_SOURCES = Math.max(6, toInt(process.env.REPAIR_STORE_MAX_SOURCES, 40, 6, 120));
 const REPAIR_RATE_LIMIT_MS = Math.max(10 * 1000, Number(process.env.REPAIR_RATE_LIMIT_MS || 60 * 1000));
+const SUGGESTION_SKIP_TTL_MS = Math.max(
+  6 * 60 * 60 * 1000,
+  Number(process.env.SUGGESTION_SKIP_TTL_MS || 5 * 24 * 60 * 60 * 1000)
+);
 const SUGGESTIONS_EMAIL_TO =
   normalizeSuggestionEmail(process.env.SUGGESTIONS_EMAIL_TO || "seekosint@gmail.com") || "seekosint@gmail.com";
 const SUGGESTIONS_RELAY_BASE = String(process.env.SUGGESTIONS_RELAY_BASE || "https://formsubmit.co/ajax")
@@ -342,6 +356,10 @@ const YOUTUBE_FETCH_HEADERS = {
   "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
   Cookie: "CONSENT=YES+cb.20210328-17-p0.en+FX+410",
 };
+const PURSTREAM_SEARCH_CACHE_MS = Math.max(
+  60 * 1000,
+  Number(process.env.PURSTREAM_SEARCH_CACHE_MS || 10 * 60 * 1000)
+);
 const proxyCache = new Map();
 const calendarCache = new Map();
 const ANIME_SEASONS_CACHE_MS = 1000 * 60 * 20;
@@ -350,6 +368,7 @@ const animeSeasonsCache = new Map();
 const nakiosSeasonsCache = new Map();
 const nakiosSeasonsInFlight = new Map();
 const repairRateLimit = new Map();
+const purstreamSearchCache = new Map();
 const pidoovDetailCache = new Map();
 const pidoovLookupCache = new Map();
 const nakiosLookupCache = new Map();
@@ -1293,6 +1312,91 @@ function isRepairAllowed(ip, key, now = Date.now()) {
   return true;
 }
 
+function pruneSuggestionSkips(data) {
+  if (!data || typeof data !== "object") {
+    return;
+  }
+  const skips = data?.suggestions?.skips;
+  if (!skips || typeof skips !== "object") {
+    return;
+  }
+  const now = Date.now();
+  Object.entries(skips).forEach(([key, entry]) => {
+    const updatedAt = Number(entry?.updatedAt || 0);
+    if (!updatedAt || now - updatedAt > SUGGESTION_SKIP_TTL_MS) {
+      delete skips[key];
+    }
+  });
+}
+
+function buildSuggestionKey(entry) {
+  if (!entry || typeof entry !== "object") {
+    return "";
+  }
+  const provider = String(entry.provider || "").trim().toLowerCase();
+  const titleKey = normalizeTitleKey(entry.title || "");
+  const type = String(entry.type || entry.mediaType || "").trim().toLowerCase();
+  const year = toInt(entry.year, 0, 0, 2099);
+  if (provider === "nakios" && entry.tmdbId) {
+    return `nakios:${entry.tmdbId}`;
+  }
+  if (provider === "filmer2" && entry.url) {
+    return `filmer2:${toBase64Url(String(entry.url || "").trim())}`;
+  }
+  if (provider === "anime" && entry.catalogUrl) {
+    return `anime:${toBase64Url(String(entry.catalogUrl || "").trim())}`;
+  }
+  if (titleKey) {
+    return `suggest:${provider || "misc"}:${titleKey}:${type || "movie"}:${year || 0}`;
+  }
+  return "";
+}
+
+function isSuggestionSkipped(data, key) {
+  if (!data || !key) {
+    return false;
+  }
+  const skips = data?.suggestions?.skips;
+  if (!skips || typeof skips !== "object") {
+    return false;
+  }
+  const entry = skips[key];
+  if (!entry) {
+    return false;
+  }
+  const updatedAt = Number(entry?.updatedAt || 0);
+  if (!updatedAt || Date.now() - updatedAt > SUGGESTION_SKIP_TTL_MS) {
+    delete skips[key];
+    return false;
+  }
+  return true;
+}
+
+function markSuggestionSkipped(data, key, reason = "") {
+  if (!data || !key) {
+    return;
+  }
+  if (!data.suggestions || typeof data.suggestions !== "object") {
+    data.suggestions = { skips: {} };
+  }
+  if (!data.suggestions.skips || typeof data.suggestions.skips !== "object") {
+    data.suggestions.skips = {};
+  }
+  data.suggestions.skips[key] = {
+    updatedAt: Date.now(),
+    reason: String(reason || "").trim(),
+  };
+}
+
+function clearSuggestionSkip(data, key) {
+  if (!data || !key) {
+    return;
+  }
+  if (data?.suggestions?.skips && typeof data.suggestions.skips === "object") {
+    delete data.suggestions.skips[key];
+  }
+}
+
 function toBase64Url(input) {
   return Buffer.from(input)
     .toString("base64")
@@ -1364,14 +1468,16 @@ function buildDefaultAdminData() {
       byExternalKey: {},
     },
     repairs: {},
+    suggestions: {
+      skips: {},
+    },
   };
 }
 
 function normalizeAdminData(raw) {
   const base = buildDefaultAdminData();
   if (!raw || typeof raw !== "object") {
-      base.repairs = raw.repairs && typeof raw.repairs === 'object' ? raw.repairs : {};
-return base;
+    return base;
   }
   const ann = raw.announcement || {};
   base.announcement = {
@@ -1385,6 +1491,11 @@ return base;
   base.overrides = {
     byId: overrides.byId && typeof overrides.byId === "object" ? overrides.byId : {},
     byExternalKey: overrides.byExternalKey && typeof overrides.byExternalKey === "object" ? overrides.byExternalKey : {},
+  };
+  base.repairs = raw.repairs && typeof raw.repairs === "object" ? raw.repairs : {};
+  const suggestions = raw.suggestions || {};
+  base.suggestions = {
+    skips: suggestions.skips && typeof suggestions.skips === "object" ? suggestions.skips : {},
   };
   return base;
 }
@@ -1421,6 +1532,414 @@ function saveAdminData(data) {
   adminDataCache.value = normalized;
   adminDataCache.loadedAt = Date.now();
   return normalized;
+}
+
+function extractPurstreamSearchRows(payload) {
+  const merged = [];
+  const append = (list) => {
+    if (Array.isArray(list)) {
+      list.forEach((row) => {
+        if (row) merged.push(row);
+      });
+    }
+  };
+
+  append(payload?.data?.items?.items);
+  append(payload?.data?.items?.movies?.items);
+  append(payload?.data?.items?.series?.items);
+  append(payload?.data?.items?.tv?.items);
+  append(payload?.data?.movies?.items);
+  append(payload?.data?.results);
+
+  const blocks = payload?.data?.items?.blocks || payload?.data?.blocks;
+  if (blocks && typeof blocks === "object") {
+    Object.values(blocks).forEach((entry) => {
+      append(entry?.items);
+      append(entry);
+    });
+  }
+
+  if (merged.length === 0 && Array.isArray(payload?.data?.items)) {
+    append(payload.data.items);
+  }
+
+  const dedupe = new Map();
+  merged.forEach((entry) => {
+    const id = toInt(entry?.id, 0, 0, 999999999);
+    if (id <= 0) {
+      return;
+    }
+    if (!dedupe.has(id)) {
+      dedupe.set(id, entry);
+    }
+  });
+  return Array.from(dedupe.values());
+}
+
+function normalizePurstreamSearchRow(row) {
+  const id = toInt(row?.id, 0, 0, 999999999);
+  if (id <= 0) {
+    return null;
+  }
+  const title =
+    String(row?.title || row?.name || row?.original_title || row?.original_name || "").trim();
+  if (!title) {
+    return null;
+  }
+  const typeRaw = String(row?.type || row?.media_type || row?.mediaType || "").toLowerCase();
+  const type = typeRaw === "tv" || typeRaw === "series" || typeRaw === "serie" ? "tv" : "movie";
+  const year = toInt(
+    parseYearFromText(row?.release_date || row?.first_air_date || row?.year || ""),
+    0,
+    0,
+    2099
+  );
+  return { id, title, type, year };
+}
+
+async function fetchPurstreamSearchRows(query) {
+  const safeQuery = String(query || "").trim();
+  if (!safeQuery) {
+    return [];
+  }
+  const key = normalizeTitleKey(safeQuery);
+  const now = Date.now();
+  const cached = purstreamSearchCache.get(key);
+  if (cached && Number(cached.expiresAt || 0) > now) {
+    return cached.rows || [];
+  }
+  const target = `${PURSTREAM_API_BASE}/search-bar/search/${encodeURIComponent(safeQuery)}`;
+  const response = await fetchRemote(target, {
+    Referer: `${PURSTREAM_WEB_BASE}/`,
+    Origin: PURSTREAM_WEB_BASE,
+    "Accept-Language": DEFAULT_ACCEPT_LANGUAGE,
+  });
+  const payload = response.status >= 200 && response.status < 300 ? parseJsonSafe(response.body) : null;
+  const items = payload ? extractPurstreamSearchRows(payload).map(normalizePurstreamSearchRow).filter(Boolean) : [];
+  purstreamSearchCache.set(key, {
+    expiresAt: now + PURSTREAM_SEARCH_CACHE_MS,
+    rows: items,
+  });
+  if (purstreamSearchCache.size > 240) {
+    const entries = Array.from(purstreamSearchCache.entries()).sort(
+      (left, right) => Number(left?.[1]?.expiresAt || 0) - Number(right?.[1]?.expiresAt || 0)
+    );
+    entries.slice(0, purstreamSearchCache.size - 200).forEach(([cacheKey]) => purstreamSearchCache.delete(cacheKey));
+  }
+  return items;
+}
+
+async function isTitleOnPurstream(title, type, year = 0) {
+  const safeTitle = String(title || "").trim();
+  if (!safeTitle) {
+    return false;
+  }
+  const safeType = String(type || "").toLowerCase() === "tv" ? "tv" : "movie";
+  const safeYear = toInt(year, 0, 0, 2099);
+  const titleKey = normalizeTitleKey(safeTitle);
+  if (!titleKey) {
+    return false;
+  }
+  const rows = await fetchPurstreamSearchRows(safeTitle);
+  return rows.some((row) => {
+    if (!row) {
+      return false;
+    }
+    if (row.type !== safeType) {
+      return false;
+    }
+    const rowKey = normalizeTitleKey(row.title || "");
+    if (!rowKey || rowKey !== titleKey) {
+      return false;
+    }
+    if (!safeYear) {
+      return true;
+    }
+    const rowYear = toInt(row.year, 0, 0, 2099);
+    if (!rowYear) {
+      return true;
+    }
+    return Math.abs(rowYear - safeYear) <= 1;
+  });
+}
+
+function isCustomAlreadyAdded(adminData, candidate) {
+  if (!adminData || !candidate) {
+    return false;
+  }
+  const custom = Array.isArray(adminData.custom) ? adminData.custom : [];
+  const provider = String(candidate.provider || "").toLowerCase();
+  if (provider === "nakios" && candidate.tmdbId) {
+    return custom.some((entry) => Number(entry?.external_tmdb_id || 0) === Number(candidate.tmdbId || 0));
+  }
+  if (provider === "filmer2" && candidate.url) {
+    return custom.some((entry) => String(entry?.external_detail_url || "") === String(candidate.url || ""));
+  }
+  if (provider === "anime" && candidate.catalogUrl) {
+    return custom.some((entry) => String(entry?.external_detail_url || "") === String(candidate.catalogUrl || ""));
+  }
+  const titleKey = normalizeTitleKey(candidate.title || "");
+  if (!titleKey) {
+    return false;
+  }
+  return custom.some((entry) => normalizeTitleKey(entry?.title || "") === titleKey);
+}
+
+function buildNakiosImportUrlFromCandidate(candidate) {
+  const tmdbId = toInt(candidate?.tmdbId, 0, 0, 999999999);
+  if (!tmdbId) {
+    return "";
+  }
+  const type = String(candidate?.type || "").toLowerCase() === "tv" ? "series" : "movie";
+  return `https://nakios.site/${type}/${tmdbId}`;
+}
+
+async function enrichNakiosSuggestion(candidate) {
+  const tmdbId = toInt(candidate?.tmdbId, 0, 0, 999999999);
+  if (!tmdbId) {
+    return candidate;
+  }
+  const mediaType = String(candidate?.type || "").toLowerCase() === "tv" ? "series" : "movies";
+  const target = `${NAKIOS_API_BASE}/api/${mediaType}/${tmdbId}`;
+  const response = await fetchRemote(target, NAKIOS_FETCH_HEADERS);
+  if (response.status < 200 || response.status >= 300) {
+    return candidate;
+  }
+  const detail = parseJsonSafe(response.body);
+  if (!detail) {
+    return candidate;
+  }
+  const overview = String(detail?.overview || "").trim();
+  const poster = toNakiosTmdbPosterUrl(detail?.poster_path || "") || candidate.poster || "";
+  const backdrop = toNakiosTmdbBackdropUrl(detail?.backdrop_path || "", detail?.poster_path || "");
+  const year = toInt(
+    parseYearFromText(detail?.release_date || detail?.first_air_date || ""),
+    candidate.year || 0,
+    0,
+    2099
+  );
+  return {
+    ...candidate,
+    title: String(detail?.title || detail?.name || candidate.title || "").trim() || candidate.title,
+    overview: overview || candidate.overview || "",
+    poster,
+    backdrop: backdrop || candidate.backdrop || poster,
+    year: year || candidate.year || 0,
+  };
+}
+
+async function enrichFilmer2Suggestion(candidate) {
+  const url = String(candidate?.url || "").trim();
+  if (!url) {
+    return candidate;
+  }
+  const detail = await fetchFilmer2Detail(url);
+  if (!detail) {
+    return candidate;
+  }
+  return {
+    ...candidate,
+    title: String(detail?.title || candidate.title || "").trim() || candidate.title,
+    overview: String(detail?.description || "").trim() || candidate.overview || "",
+    poster: String(detail?.poster || candidate.poster || "").trim() || candidate.poster || "",
+    backdrop: String(detail?.backdrop || candidate.backdrop || "").trim() || candidate.backdrop || "",
+    year: toInt(detail?.year, candidate.year || 0, 0, 2099) || candidate.year || 0,
+  };
+}
+
+async function enrichAnimeSuggestion(candidate) {
+  const catalogUrl = sanitizeAnimeSamaCatalogUrl(candidate?.catalogUrl || "");
+  if (!catalogUrl) {
+    return candidate;
+  }
+  const response = await fetchRemoteText(catalogUrl, "text/html");
+  if (response.status < 200 || response.status >= 300) {
+    return { ...candidate, catalogUrl };
+  }
+  const html = response.body || "";
+  const title =
+    extractMetaContent(html, "og:title") ||
+    extractTagText(html, "h1") ||
+    candidate.title ||
+    "";
+  const poster =
+    extractMetaContent(html, "og:image") ||
+    extractMetaContent(html, "twitter:image") ||
+    candidate.poster ||
+    "";
+  const overview =
+    extractMetaContent(html, "og:description") ||
+    extractMetaContent(html, "description") ||
+    candidate.overview ||
+    "";
+  return {
+    ...candidate,
+    title: String(title || "").replace(/\s*\|\s*anime-sama.*$/i, "").trim() || candidate.title,
+    overview: String(overview || "").trim() || candidate.overview || "",
+    poster: String(poster || "").trim() || candidate.poster || "",
+    catalogUrl,
+  };
+}
+
+function shuffleArray(values) {
+  const rows = Array.isArray(values) ? values.slice() : [];
+  for (let index = rows.length - 1; index > 0; index -= 1) {
+    const pick = Math.floor(Math.random() * (index + 1));
+    [rows[index], rows[pick]] = [rows[pick], rows[index]];
+  }
+  return rows;
+}
+
+async function buildAdminSuggestions(type = "movie", limit = 3) {
+  const safeType = String(type || "movie").toLowerCase() === "anime" ? "anime" : String(type || "movie").toLowerCase();
+  const safeLimit = Math.max(1, Math.min(8, Number(limit || 3)));
+  const adminData = loadAdminData(true);
+  pruneSuggestionSkips(adminData);
+  const suggestions = [];
+  const candidates = [];
+
+  if (safeType === "anime") {
+    try {
+      const html = await fetchAnimePlanningPage();
+      const planning = parseAnimePlanning(html, new Date().getFullYear());
+      const entries = Array.isArray(planning?.items) ? planning.items : [];
+      entries.forEach((entry) => {
+        const catalogUrl = sanitizeAnimeSamaCatalogUrl(entry?.url || "");
+        if (!catalogUrl) {
+          return;
+        }
+        candidates.push({
+          provider: "anime",
+          type: "tv",
+          title: entry?.title || "",
+          year: 0,
+          poster: entry?.poster || "",
+          overview: "",
+          catalogUrl,
+          importUrl: catalogUrl,
+          score: 50,
+          availability: "available",
+        });
+      });
+    } catch {
+      // ignore
+    }
+  } else {
+    const desiredType = safeType === "tv" ? "tv" : "movie";
+    try {
+      const nakiosRows = await loadNakiosCatalogEntries();
+      nakiosRows.forEach((row) => {
+        if (!row || String(row.type || "").toLowerCase() !== desiredType) {
+          return;
+        }
+        const tmdbId = toInt(row?.external_tmdb_id, 0, 0, 999999999);
+        candidates.push({
+          provider: "nakios",
+          type: desiredType,
+          title: row?.title || "",
+          year: toInt(row?.external_year, 0, 0, 2099),
+          poster: row?.large_poster_path || row?.small_poster_path || "",
+          backdrop: row?.wallpaper_poster_path || "",
+          tmdbId,
+          importUrl: tmdbId ? `https://nakios.site/${desiredType === "tv" ? "series" : "movie"}/${tmdbId}` : "",
+          availability: row?.availability_status || row?.external_status || "",
+          score: Number(row?.supplemental_rank || 0),
+        });
+      });
+    } catch {
+      // ignore
+    }
+
+    try {
+      const filmer2Rows = await loadFilmer2CatalogEntries();
+      filmer2Rows.forEach((row) => {
+        const rowType = String(row?.type || row?.mediaType || "").toLowerCase() === "tv" ? "tv" : "movie";
+        if (rowType !== desiredType) {
+          return;
+        }
+        const url = String(row?.external_detail_url || row?.detailUrl || "").trim();
+        if (!url) {
+          return;
+        }
+        candidates.push({
+          provider: "filmer2",
+          type: rowType,
+          title: row?.title || "",
+          year: toInt(row?.external_year || row?.year, 0, 0, 2099),
+          poster: row?.large_poster_path || row?.small_poster_path || "",
+          backdrop: row?.wallpaper_poster_path || "",
+          url,
+          importUrl: url,
+          availability: row?.availability_status || row?.external_status || "",
+          score: Number(row?.supplemental_rank || 0),
+        });
+      });
+    } catch {
+      // ignore
+    }
+  }
+
+  const ordered = shuffleArray(
+    candidates
+      .sort((left, right) => Number(right?.score || 0) - Number(left?.score || 0))
+      .slice(0, 260)
+  );
+
+  for (const candidate of ordered) {
+    if (suggestions.length >= safeLimit) {
+      break;
+    }
+    const key = buildSuggestionKey(candidate);
+    if (!key) {
+      continue;
+    }
+    if (isSuggestionSkipped(adminData, key)) {
+      continue;
+    }
+    if (isCustomAlreadyAdded(adminData, candidate)) {
+      continue;
+    }
+    if (candidate.title && (await isTitleOnPurstream(candidate.title, candidate.type, candidate.year))) {
+      continue;
+    }
+
+    let enriched = candidate;
+    if (candidate.provider === "nakios") {
+      enriched = await enrichNakiosSuggestion(candidate);
+      enriched.importUrl = enriched.importUrl || buildNakiosImportUrlFromCandidate(enriched);
+    } else if (candidate.provider === "filmer2") {
+      enriched = await enrichFilmer2Suggestion(candidate);
+    } else if (candidate.provider === "anime") {
+      enriched = await enrichAnimeSuggestion(candidate);
+    }
+
+    suggestions.push({
+      key,
+      title: enriched.title || candidate.title || "Sans titre",
+      type: String(enriched.type || candidate.type || "movie").toLowerCase(),
+      year: toInt(enriched.year, 0, 0, 2099),
+      poster: enriched.poster || candidate.poster || "",
+      overview: enriched.overview || "",
+      availability: normalizeNakiosAvailabilityStatus(enriched.availability || candidate.availability || "") || "",
+      importUrl: enriched.importUrl || candidate.importUrl || "",
+      provider: enriched.provider || candidate.provider || "external",
+      tags: [],
+    });
+  }
+
+  suggestions.forEach((item) => {
+    const tags = [];
+    tags.push(item.type === "tv" ? "Serie" : item.type === "anime" ? "Anime" : "Film");
+    if (item.year) tags.push(String(item.year));
+    if (item.availability === "pending") tags.push("En attente");
+    item.tags = tags;
+  });
+
+  if (adminData?.suggestions?.skips) {
+    saveAdminData(adminData);
+  }
+
+  return suggestions;
 }
 
 function normalizeBackupUrl(value) {
@@ -7648,7 +8167,7 @@ function parseAnimeCardsFromBlock(block, dayName, dateLabel, fallbackYear, limit
       type,
       language,
       poster: src,
-      url: "",
+      url: absoluteUrl,
     });
   }
 
@@ -10320,30 +10839,10 @@ function parseAdminImportUrl(input) {
   return null;
 }
 
-async function handleAdminImport(req, res, requestUrl) {
-  if (requestUrl.pathname !== "/api/admin/import") {
-    return false;
-  }
-  if (req.method !== "POST") {
-    sendJson(res, 405, { error: "Method Not Allowed" });
-    return true;
-  }
-  if (!isAdminAuthenticated(req)) {
-    sendJson(res, 401, { error: "Unauthorized" });
-    return true;
-  }
-  let body = null;
-  try {
-    body = await readJsonBody(req, 8192);
-  } catch {
-    sendJson(res, 400, { error: "Invalid JSON" });
-    return true;
-  }
-  const url = String(body?.url || "").trim();
+async function importAdminEntryByUrl(url) {
   const parsed = parseAdminImportUrl(url);
   if (!parsed) {
-    sendJson(res, 400, { error: "Unsupported URL" });
-    return true;
+    return null;
   }
   let entry = null;
   if (parsed.provider === "nakios") {
@@ -10371,15 +10870,18 @@ async function handleAdminImport(req, res, requestUrl) {
   } else if (parsed.provider === "youtube") {
     entry = await buildAdminCustomEntryFromYoutubePlaylist(parsed.playlistId);
   }
-  if (!entry) {
-    sendJson(res, 404, { error: "Import failed" });
-    return true;
+  return entry;
+}
+
+function upsertAdminCustomEntry(data, entry) {
+  if (!data || !entry) {
+    return null;
   }
-  const data = loadAdminData(true);
   const custom = Array.isArray(data.custom) ? data.custom.slice() : [];
-  const existingIndex = custom.findIndex(
-    (row) => String(row?.external_key || "") === String(entry.external_key || "")
-  );
+  const externalKey = String(entry?.external_key || "").trim();
+  const existingIndex = externalKey
+    ? custom.findIndex((row) => String(row?.external_key || "") === externalKey)
+    : -1;
   if (existingIndex >= 0) {
     custom[existingIndex] = entry;
   } else {
@@ -10387,7 +10889,37 @@ async function handleAdminImport(req, res, requestUrl) {
   }
   data.custom = custom;
   saveAdminData(data);
-  sendJson(res, 200, { ok: true, data: entry });
+  return entry;
+}
+
+async function handleAdminImport(req, res, requestUrl) {
+  if (requestUrl.pathname !== "/api/admin/import") {
+    return false;
+  }
+  if (req.method !== "POST") {
+    sendJson(res, 405, { error: "Method Not Allowed" });
+    return true;
+  }
+  if (!isAdminAuthenticated(req)) {
+    sendJson(res, 401, { error: "Unauthorized" });
+    return true;
+  }
+  let body = null;
+  try {
+    body = await readJsonBody(req, 8192);
+  } catch {
+    sendJson(res, 400, { error: "Invalid JSON" });
+    return true;
+  }
+  const url = String(body?.url || "").trim();
+  const entry = await importAdminEntryByUrl(url);
+  if (!entry) {
+    sendJson(res, 404, { error: "Import failed" });
+    return true;
+  }
+  const data = loadAdminData(true);
+  const saved = upsertAdminCustomEntry(data, entry);
+  sendJson(res, 200, { ok: true, data: saved });
   return true;
 }
 
@@ -10461,6 +10993,96 @@ async function handleAdminSearch(req, res, requestUrl) {
     external: nakiosPayload || null,
     supplemental: filmer2Results,
   });
+  return true;
+}
+
+async function handleAdminSuggestions(req, res, requestUrl) {
+  if (requestUrl.pathname !== "/api/admin/suggestions") {
+    return false;
+  }
+  if (req.method !== "GET") {
+    sendJson(res, 405, { error: "Method Not Allowed" });
+    return true;
+  }
+  if (!isAdminAuthenticated(req)) {
+    sendJson(res, 401, { error: "Unauthorized" });
+    return true;
+  }
+  const type = String(requestUrl.searchParams.get("type") || "movie").trim().toLowerCase();
+  const limit = toInt(requestUrl.searchParams.get("limit"), 3, 1, 8);
+  const suggestions = await buildAdminSuggestions(type, limit);
+  sendJson(res, 200, { ok: true, data: suggestions });
+  return true;
+}
+
+async function handleAdminSuggestionSkip(req, res, requestUrl) {
+  if (requestUrl.pathname !== "/api/admin/suggestions/skip") {
+    return false;
+  }
+  if (req.method !== "POST") {
+    sendJson(res, 405, { error: "Method Not Allowed" });
+    return true;
+  }
+  if (!isAdminAuthenticated(req)) {
+    sendJson(res, 401, { error: "Unauthorized" });
+    return true;
+  }
+  let body = null;
+  try {
+    body = await readJsonBody(req, 4096);
+  } catch {
+    sendJson(res, 400, { error: "Invalid JSON" });
+    return true;
+  }
+  const key = String(body?.key || "").trim();
+  if (!key) {
+    sendJson(res, 400, { error: "Missing key" });
+    return true;
+  }
+  const data = loadAdminData(true);
+  markSuggestionSkipped(data, key, "manual");
+  pruneSuggestionSkips(data);
+  saveAdminData(data);
+  sendJson(res, 200, { ok: true });
+  return true;
+}
+
+async function handleAdminSuggestionAccept(req, res, requestUrl) {
+  if (requestUrl.pathname !== "/api/admin/suggestions/accept") {
+    return false;
+  }
+  if (req.method !== "POST") {
+    sendJson(res, 405, { error: "Method Not Allowed" });
+    return true;
+  }
+  if (!isAdminAuthenticated(req)) {
+    sendJson(res, 401, { error: "Unauthorized" });
+    return true;
+  }
+  let body = null;
+  try {
+    body = await readJsonBody(req, 8192);
+  } catch {
+    sendJson(res, 400, { error: "Invalid JSON" });
+    return true;
+  }
+  const key = String(body?.key || "").trim();
+  const url = String(body?.url || body?.importUrl || "").trim();
+  if (!url) {
+    sendJson(res, 400, { error: "Missing URL" });
+    return true;
+  }
+  const entry = await importAdminEntryByUrl(url);
+  if (!entry) {
+    sendJson(res, 404, { error: "Import failed" });
+    return true;
+  }
+  const data = loadAdminData(true);
+  if (key) {
+    clearSuggestionSkip(data, key);
+  }
+  const saved = upsertAdminCustomEntry(data, entry);
+  sendJson(res, 200, { ok: true, data: saved });
   return true;
 }
 
@@ -12278,6 +12900,24 @@ const server = http.createServer((req, res) => {
     })
     .then((handledAdminSearch) => {
       if (handledAdminSearch) {
+        return true;
+      }
+      return handleAdminSuggestions(req, res, requestUrl);
+    })
+    .then((handledAdminSuggestions) => {
+      if (handledAdminSuggestions) {
+        return true;
+      }
+      return handleAdminSuggestionSkip(req, res, requestUrl);
+    })
+    .then((handledAdminSuggestSkip) => {
+      if (handledAdminSuggestSkip) {
+        return true;
+      }
+      return handleAdminSuggestionAccept(req, res, requestUrl);
+    })
+    .then((handledAdminSuggestAccept) => {
+      if (handledAdminSuggestAccept) {
         return true;
       }
       return handleFilmer2Search(req, res, requestUrl);
