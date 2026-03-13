@@ -595,3 +595,8 @@ Last update: 2026-03-11
 - Added YouTube playlist support for admin imports.
 - Zenix seasons/source endpoints now serve YouTube playlist episodes for external TV entries.
 - Playlist episodes map to S1 and return a YouTube embed source.
+
+## c228 follow-up (2026-03-13)
+- Card preview now accepts HLS sources (desktop only, hls.js when needed).
+- Quality badge defaults to Full HD/4K via global rule if no playback success exists.
+- Cache-bust updated to `20260313-c228`.

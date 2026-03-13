@@ -148,6 +148,9 @@ const PREVIEW_ENABLED = true;
 const PREVIEW_HOVER_DELAY_MS = 220;
 const PREVIEW_DURATION_MS = 10000;
 const PREVIEW_COOLDOWN_MS = 22000;
+const PREVIEW_ALLOW_HLS = true;
+const QUALITY_BADGE_DEFAULT = "Full HD";
+const QUALITY_BADGE_4K_RECENT_YEARS = 2;
 const SKIP_INTRO_SECONDS = 85;
 const SKIP_RECAP_SECONDS = 45;
 const INTEREST_QUERY_MAX = 40;
@@ -7697,7 +7700,26 @@ function pickPreviewSource(payload) {
     return format === "mp4" || format === "webm";
   });
   if (direct.length === 0) {
-    return null;
+    if (!PREVIEW_ALLOW_HLS) {
+      return null;
+    }
+    const hlsSources = sources.filter((entry) => {
+      const format = String(entry?.format || "").toLowerCase();
+      const url = String(entry?.url || entry?.stream_url || "").toLowerCase();
+      return format === "hls" || url.includes(".m3u8");
+    });
+    if (hlsSources.length === 0) {
+      return null;
+    }
+    const sortedHls = sortSourcesByScore(hlsSources);
+    const selectedHls = sortedHls[0] || null;
+    if (!selectedHls) {
+      return null;
+    }
+    return {
+      url: String(selectedHls.url || "").trim(),
+      format: "hls",
+    };
   }
   const sorted = sortSourcesByScore(direct);
   const selected = sorted[0] || null;
@@ -7714,6 +7736,13 @@ function stopCardPreview() {
   const active = state.previewActive;
   if (active.timeoutId) {
     clearTimeout(active.timeoutId);
+  }
+  if (active.hls && typeof active.hls.destroy === "function") {
+    try {
+      active.hls.destroy();
+    } catch {
+      // ignore
+    }
   }
   if (active.video) {
     try {
@@ -7759,7 +7788,56 @@ function startCardPreview(card, item, thumb) {
   video.preload = "metadata";
   video.autoplay = true;
   video.loop = false;
-  video.src = preview.url;
+  const previewUrl = String(preview.url || "").trim();
+  const isHlsPreview =
+    PREVIEW_ALLOW_HLS &&
+    (/m3u8/i.test(previewUrl) || String(preview.format || "").toLowerCase() === "hls");
+  let hlsInstance = null;
+  let usesNativeHls = false;
+  if (isHlsPreview) {
+    const absolute = toAbsoluteUrl(previewUrl);
+    const proxied = toHlsProxyUrl(absolute) || absolute;
+    usesNativeHls = shouldUseNativeHls(video);
+    if (usesNativeHls) {
+      video.src = proxied;
+    } else {
+      loadHlsLibrary()
+        .then((Hls) => {
+          if (!Hls || !Hls.isSupported()) {
+            throw new Error("HLS unsupported");
+          }
+          hlsInstance = new Hls({
+            enableWorker: true,
+            lowLatencyMode: false,
+            backBufferLength: 12,
+            maxBufferLength: 8,
+            maxMaxBufferLength: 16,
+          });
+          if (!state.previewActive || state.previewActive.id !== id) {
+            hlsInstance.destroy();
+            return;
+          }
+          state.previewActive.hls = hlsInstance;
+          hlsInstance.attachMedia(video);
+          hlsInstance.on(Hls.Events.MEDIA_ATTACHED, () => {
+            hlsInstance.loadSource(proxied);
+          });
+          hlsInstance.on(Hls.Events.MANIFEST_PARSED, () => {
+            video.play().catch(() => {
+              // ignore
+            });
+          });
+          hlsInstance.on(Hls.Events.ERROR, () => {
+            stopCardPreview();
+          });
+        })
+        .catch(() => {
+          stopCardPreview();
+        });
+    }
+  } else {
+    video.src = previewUrl;
+  }
 
   thumb.appendChild(video);
   thumb.classList.add("is-previewing");
@@ -7769,10 +7847,12 @@ function startCardPreview(card, item, thumb) {
     state.previewCooldownAt.set(id, Date.now() + PREVIEW_COOLDOWN_MS);
   }, PREVIEW_DURATION_MS);
 
-  state.previewActive = { id, video, thumb, timeoutId };
-  video.play().catch(() => {
-    stopCardPreview();
-  });
+  state.previewActive = { id, video, thumb, timeoutId, hls: hlsInstance };
+  if (!isHlsPreview || usesNativeHls) {
+    video.play().catch(() => {
+      stopCardPreview();
+    });
+  }
 }
 
 function attachCardPreviewHandlers(card, item, thumb) {
@@ -7903,7 +7983,7 @@ function renderTopDaily() {
     const runtime = item.runtime ? toHumanRuntime(item.runtime) : item.type === "tv" ? "Episodes" : "Film";
     const year = getYear(item.releaseDate) || "-";
     const languageLabel = resolveDetailLanguageLabel(details, item.id);
-    const qualityBadge = getItemQualityBadge(item.id);
+    const qualityBadge = getItemQualityBadge(item);
     const isPendingUpload = isPendingUploadItem(item);
     const isComingSoonRelease = !isPendingUpload && isComingSoon(item);
     const isNewRelease = !isPendingUpload && isRecentlyReleased(item, NEW_RELEASE_DAYS);
@@ -8549,7 +8629,7 @@ function buildMediaCard(item, resume = false, progressEntry = null, position = 0
   const year = getYear(item.releaseDate) || "-";
   const runtime = item.runtime ? toHumanRuntime(item.runtime) : item.type === "tv" ? "Episodes" : "Film";
   const typeLabel = getItemTypeLabel(item);
-  const qualityBadge = getItemQualityBadge(item.id);
+  const qualityBadge = getItemQualityBadge(item);
   const languageLabel = resolveDetailLanguageLabel(details, item.id);
   const favorite = isFavorite(item.id);
   const progress = progressEntry || state.progress[item.id] || null;
@@ -12945,15 +13025,30 @@ function getQualityBadgeFromSource(source) {
   return "HD";
 }
 
-function getItemQualityBadge(itemId) {
-  const key = Number(itemId || 0);
+function getGlobalQualityBadge(item) {
+  if (!item || typeof item !== "object") {
+    return QUALITY_BADGE_DEFAULT;
+  }
+  const year = getItemReleaseYear(item) || getCatalogReleaseYear(item);
+  if (year > 0) {
+    const currentYear = new Date().getFullYear();
+    if (year >= currentYear - QUALITY_BADGE_4K_RECENT_YEARS) {
+      return "4K";
+    }
+  }
+  return QUALITY_BADGE_DEFAULT;
+}
+
+function getItemQualityBadge(itemOrId) {
+  const item = itemOrId && typeof itemOrId === "object" ? itemOrId : null;
+  const key = Number(item?.id || itemOrId || 0);
   if (key > 0 && state.itemQualityMap instanceof Map) {
     const value = String(state.itemQualityMap.get(key) || "").trim();
     if (value) {
       return value;
     }
   }
-  return "HD";
+  return getGlobalQualityBadge(item);
 }
 
 function rememberSourceSuccess(source, itemId = 0) {

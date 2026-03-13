@@ -923,3 +923,8 @@ LATEST YOUTUBE PLAYLIST SUPPORT (2026-03-13, c227)
 - Admin import now accepts YouTube playlist URLs.
 - Zenix seasons + sources now resolve YouTube playlist entries for TV items.
 - Playlist episodes map to S1E1.. and return a YouTube embed source.
+
+LATEST PREVIEW + QUALITY RULE (2026-03-13, c228)
+- Card preview now supports HLS sources (desktop only).
+- Quality badges default to Full HD/4K via global rule when no playback success is cached.
+- Cache-bust bumped to `20260313-c228`.
