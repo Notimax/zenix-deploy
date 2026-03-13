@@ -849,3 +849,8 @@ LATEST STARTUP FAILSAFE (2026-03-13, c212)
 - Added an inline unlock timer to force-hide the splash and remove `startup-lock`
   if JS fails to complete the intro (prevents infinite animation lock).
 - Cache-bust bumped to `20260313-c212`.
+
+LATEST JS ENCODING FIX (2026-03-13, c213)
+- `zenix.js` converted to UTF-8 (was UTF-16), fixing "Invalid or unexpected token"
+  errors that blocked all JS execution (nav, covers, popups, announcements).
+- Cache-bust bumped to `20260313-c213`.
