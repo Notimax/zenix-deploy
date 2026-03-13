@@ -973,3 +973,8 @@ LATEST BACKUP POPUP LINK LAYOUT + ZENIX.LOL ADMIN NO-REFRESH (2026-03-14, c235)
 - Backup popup link layout improved (no overlap with text, better wrapping).
 - zenix.lol admin forms now never reload the page (submit blocked + button clicks + Enter handled).
 - Cache-bust bumped to `20260313-c235`.
+
+LATEST BACKUP POPUP LINK CENTER + ZENIX.LOL ADMIN FALLBACK (2026-03-14, c236)
+- Backup popup URL is now centered and displayed as a standalone block.
+- zenix.lol admin adds an inline fallback handler so login/update works even if admin.js cache fails.
+- Cache-bust bumped to `20260314-c236`.

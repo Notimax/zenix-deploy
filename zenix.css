@@ -6448,7 +6448,8 @@ body.discord-locked .back-to-top {
   border: 1px solid rgba(56, 189, 248, 0.25);
   background: rgba(15, 23, 42, 0.8);
   font-weight: 600;
-  display: inline-block;
+  display: block;
+  text-align: center;
   max-width: 100%;
   line-height: 1.35;
   word-break: break-word;
