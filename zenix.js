@@ -522,6 +522,10 @@ const refs = {
   navToggles: Array.from(document.querySelectorAll("[data-nav-toggle]")),
   navSubItems: Array.from(document.querySelectorAll(".nav-subitem[data-view]")),
   navSubmenuBackdrop: document.getElementById("navSubmenuBackdrop"),
+  navSubmenuSheet: document.getElementById("navSubmenuSheet"),
+  navSubmenuList: document.getElementById("navSubmenuList"),
+  navSubmenuTitle: document.getElementById("navSubmenuTitle"),
+  navSubmenuCloseBtn: document.getElementById("navSubmenuCloseBtn"),
   topbar: document.querySelector(".topbar"),
   mobileTabs: Array.from(document.querySelectorAll(".mobile-tab[data-mobile-view]")),
   quickLinks: Array.from(document.querySelectorAll(".quick-link[data-view-jump]")),
@@ -846,6 +850,9 @@ function closeNavGroups(except = null) {
     if (refs.navSubmenuBackdrop) {
       refs.navSubmenuBackdrop.hidden = true;
     }
+    if (refs.navSubmenuSheet) {
+      refs.navSubmenuSheet.hidden = true;
+    }
   }
 }
 
@@ -872,6 +879,40 @@ function openNavGroup(group) {
     const top = Math.max(56, Math.round(rect.bottom + 8));
     document.body.style.setProperty("--nav-submenu-top", `${top}px`);
   }
+  if (isCompactViewport()) {
+    openMobileNavSubmenu(group);
+  }
+}
+
+function openMobileNavSubmenu(group) {
+  if (!refs.navSubmenuSheet || !refs.navSubmenuList) {
+    return;
+  }
+  const items = Array.from(group.querySelectorAll(".nav-subitem[data-view]"));
+  if (items.length === 0) {
+    refs.navSubmenuSheet.hidden = true;
+    return;
+  }
+  refs.navSubmenuList.innerHTML = "";
+  const title = group.querySelector("[data-nav-toggle]")?.textContent || "Menu";
+  if (refs.navSubmenuTitle) {
+    refs.navSubmenuTitle.textContent = String(title || "").trim() || "Menu";
+  }
+  const fragment = document.createDocumentFragment();
+  items.forEach((item) => {
+    const view = String(item.dataset.view || "").trim();
+    if (!view) {
+      return;
+    }
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "nav-submenu-sheet-item";
+    button.dataset.view = view;
+    button.textContent = item.textContent || view;
+    fragment.appendChild(button);
+  });
+  refs.navSubmenuList.appendChild(fragment);
+  refs.navSubmenuSheet.hidden = false;
 }
 
 function toggleNavGroup(group) {
@@ -1606,6 +1647,24 @@ function bindEvents() {
   if (refs.navSubmenuBackdrop) {
     bindFastPress(refs.navSubmenuBackdrop, () => {
       closeNavGroups();
+    });
+  }
+
+  if (refs.navSubmenuCloseBtn) {
+    bindFastPress(refs.navSubmenuCloseBtn, () => {
+      closeNavGroups();
+    });
+  }
+
+  if (refs.navSubmenuList) {
+    refs.navSubmenuList.addEventListener("click", (event) => {
+      const target = event.target instanceof HTMLElement ? event.target.closest(".nav-submenu-sheet-item[data-view]") : null;
+      if (!(target instanceof HTMLElement)) {
+        return;
+      }
+      const view = String(target.dataset.view || "all");
+      closeNavGroups();
+      handleViewSelection(view);
     });
   }
 

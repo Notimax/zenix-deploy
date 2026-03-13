@@ -882,3 +882,8 @@ LATEST MOBILE SUBMENU SHEET (2026-03-13, c219)
 - Added a dedicated mobile backdrop and fixed-position submenu sheet for nav dropdowns.
 - Dropdowns now open reliably on iPhone with proper overlay and tap-to-close.
 - Cache-bust bumped to `20260313-c219`.
+
+LATEST MOBILE SUBMENU FIX (2026-03-13, c220)
+- Nav dropdowns now render inside a dedicated mobile sheet with list items.
+- Default navbar submenu is hidden on mobile to avoid empty blur state.
+- Cache-bust bumped to `20260313-c220`.

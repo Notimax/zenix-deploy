@@ -554,3 +554,8 @@ Last update: 2026-03-11
 - Added mobile nav submenu backdrop + fixed-position sheet for dropdowns.
 - Dropdowns now open reliably on iPhone with tap-to-close backdrop.
 - Cache-bust updated to `20260313-c219`.
+
+## c220 follow-up (2026-03-13)
+- Mobile nav dropdowns now use a dedicated sheet with explicit list items.
+- Default nav submenu is hidden on mobile to avoid blank overlay.
+- Cache-bust updated to `20260313-c220`.
