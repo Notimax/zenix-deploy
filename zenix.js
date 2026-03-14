@@ -153,6 +153,9 @@ const MOBILE_VIDEO_READY_TIMEOUT_MS = 7000;
 const MOBILE_EMBED_READY_TIMEOUT_MS = 6000;
 const EMBED_STALL_SWITCH_MS = 7000;
 const MOBILE_EMBED_STALL_SWITCH_MS = 6200;
+const MOBILE_AUTO_SWITCH_COOLDOWN_MS = 12000;
+const MOBILE_STABLE_PLAYBACK_MIN_SEC = 4.5;
+const MOBILE_STABLE_PLAYBACK_GRACE_MS = 2300;
 const PREVIEW_ENABLED = true;
 const PREVIEW_HOVER_DELAY_MS = 220;
 const PREVIEW_DURATION_MS = 10000;
@@ -412,6 +415,8 @@ const state = {
   manualSourceLock: false,
   manualSourceLockedIndex: -1,
   awaitingUserPlayUntil: 0,
+  lastAutoSwitchAt: 0,
+  lastAutoSwitchReason: "",
   lastSyncAt: null,
   refreshFeedTimer: null,
   refreshTopTimer: null,
@@ -12861,6 +12866,8 @@ function startPlaybackGuard() {
     if (switchingSource) {
       return;
     }
+    const autoSwitchCooldownActive =
+      mobileGuard && Date.now() - Number(state.lastAutoSwitchAt || 0) < MOBILE_AUTO_SWITCH_COOLDOWN_MS;
     const hasNextCandidate = state.sourceIndex + 1 < state.sourcePool.length;
     const loadingTooLong =
       state.sourceLoading &&
@@ -12868,7 +12875,7 @@ function startPlaybackGuard() {
       Date.now() - state.sourceLoadingSince > fallbackStallMs &&
       hasNextCandidate;
     if (state.sourceLoading || state.sourceIndex < 0 || isManualSourceLockActive()) {
-      if (loadingTooLong) {
+      if (loadingTooLong && !autoSwitchCooldownActive) {
         switchingSource = true;
         setPlayerStatus("Lecture bloquee, bascule automatique...", true);
         trySwitchToNextSource()
@@ -12941,6 +12948,17 @@ function startPlaybackGuard() {
       lastAdvanceAt = Date.now();
     }
     const stalledForMs = Date.now() - lastAdvanceAt;
+    const recentlyAdvanced = Date.now() - lastAdvanceAt < (mobileGuard ? MOBILE_STABLE_PLAYBACK_GRACE_MS : 3200);
+    const stablePlayback =
+      mobileGuard &&
+      !video.paused &&
+      errorCode <= 0 &&
+      currentTime > MOBILE_STABLE_PLAYBACK_MIN_SEC &&
+      recentlyAdvanced &&
+      readyState >= 2;
+    if (stablePlayback) {
+      return;
+    }
     const canAutoRecoverWhileAwaiting =
       awaitingUser &&
       stalledForMs > statusRecoveryMs + (mobileGuard ? 800 : 1200) &&
@@ -12998,6 +13016,18 @@ function startPlaybackGuard() {
       fallbackStatusSince > 0 &&
       Date.now() - fallbackStatusSince > fallbackStallMs &&
       currentTime < 0.25;
+    const severeAutoSwitch =
+      errorCode > 0 ||
+      blockedAtStart ||
+      noSourceAtStart ||
+      stalledDuringPlayback ||
+      startupStallWithAlternative ||
+      startupLoadingStallWithAlternative ||
+      statusDrivenRecovery ||
+      prolongedFallbackStall;
+    if (autoSwitchCooldownActive && !severeAutoSwitch) {
+      return;
+    }
     if (
       errorCode <= 0 &&
       !blockedAtStart &&
@@ -13063,6 +13093,14 @@ function schedulePlaybackHealthMonitor(token, step = 0) {
     const networkState = Number(video.networkState || 0);
     const awaitingUser = isAwaitingUserPlay();
     const statusText = String(refs.playerStatus?.textContent || "").toLowerCase();
+    const autoSwitchCooldownActive =
+      mobileGuard && Date.now() - Number(state.lastAutoSwitchAt || 0) < MOBILE_AUTO_SWITCH_COOLDOWN_MS;
+    const stablePlayback =
+      mobileGuard && !video.paused && errorCode <= 0 && currentTime > MOBILE_STABLE_PLAYBACK_MIN_SEC && readyState >= 2;
+    if (stablePlayback && !awaitingUser) {
+      clearPlaybackHealthMonitor();
+      return;
+    }
     const canAutoRecoverWhileAwaiting =
       awaitingUser &&
       step >= 2 &&
@@ -13083,9 +13121,11 @@ function schedulePlaybackHealthMonitor(token, step = 0) {
       readyState <= 1 &&
       /connexion source|chargement du flux|chargement de la source|fallback ios actif/.test(statusText);
     if (errorCode > 0 || blockedAtStart || noSourceAtStart || startupLoadingStall) {
-      trySwitchToNextSource().catch(() => {
-        setPlayerStatus("Erreur video detectee. Choisis une autre source.", true);
-      });
+      if (!autoSwitchCooldownActive || errorCode > 0) {
+        trySwitchToNextSource().catch(() => {
+          setPlayerStatus("Erreur video detectee. Choisis une autre source.", true);
+        });
+      }
       return;
     }
     if (step < 6) {
@@ -13195,6 +13235,8 @@ async function trySwitchToNextSource() {
     return;
   }
 
+  state.lastAutoSwitchAt = Date.now();
+  state.lastAutoSwitchReason = "auto";
   const currentSource = state.sourcePool[state.sourceIndex] || null;
   const avoidPremiumAuto = !currentSource?.premiumHint;
   const allowPremiumAutoFallback = AUTO_PREMIUM_FALLBACK;

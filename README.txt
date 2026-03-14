@@ -1091,6 +1091,12 @@ LATEST STRICT EXTERNAL MATCH (2026-03-14, c265)
 - Prevents external titles (e.g. Scream 7) from mapping to a wrong internal match.
 - Cache-bust bumped to `20260314-c265`.
 
+LATEST MOBILE AUTOSWITCH STABILITY (2026-03-15, c266)
+- Added a mobile auto-switch cooldown to prevent rapid source hopping on phone.
+- Auto-switch now suppresses itself once playback is stable on mobile (time advancing + ready state OK).
+- Health monitor stops early on stable mobile playback to avoid redundant switches.
+- Cache-bust bumped to `20260315-c266`.
+
 IOS13 ZENIX READER BRUTE (LIVE, 2026-03-14)
 - Script: `__tmp_ios13_zenix_5s_battery.js` (5s per title, WebKit iPhone 13).
 - Selection:
