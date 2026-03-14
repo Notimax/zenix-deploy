@@ -1097,6 +1097,11 @@ LATEST MOBILE AUTOSWITCH STABILITY (2026-03-15, c266)
 - Health monitor stops early on stable mobile playback to avoid redundant switches.
 - Cache-bust bumped to `20260315-c266`.
 
+LATEST EXTERNAL TMDB URL FIX (2026-03-15, c267)
+- External entries now extract TMDB id from `external_detail_url` when missing.
+- Prevents external titles (e.g. Scream 7) from resolving to wrong internal films.
+- Cache-bust bumped to `20260315-c267`.
+
 IOS13 ZENIX READER BRUTE (LIVE, 2026-03-14)
 - Script: `__tmp_ios13_zenix_5s_battery.js` (5s per title, WebKit iPhone 13).
 - Selection:

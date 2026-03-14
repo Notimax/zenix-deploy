@@ -6719,6 +6719,22 @@ function isLikelyAnimeCatalogRow(raw) {
   return false;
 }
 
+function extractExternalTmdbIdFromUrl(value) {
+  const url = String(value || "").trim();
+  if (!url) {
+    return 0;
+  }
+  const pathMatch = url.match(/\/(movie|movies|film|serie|series|tv)\/(?<id>\d+)/i);
+  if (pathMatch?.groups?.id) {
+    return Number(pathMatch.groups.id) || 0;
+  }
+  const queryMatch = url.match(/[?&](?:tmdb|tmdbId|id)=(?<id>\d+)/i);
+  if (queryMatch?.groups?.id) {
+    return Number(queryMatch.groups.id) || 0;
+  }
+  return 0;
+}
+
 function normalizeCatalogItem(raw) {
   if (!raw || typeof raw !== "object") {
     return null;
@@ -6761,6 +6777,15 @@ function normalizeCatalogItem(raw) {
   const externalEpisode = Math.max(0, Number(raw?.external_episode ?? raw?.externalEpisode ?? 0));
   const externalYearRaw = Number(raw?.external_year ?? raw?.externalYear ?? 0);
   const externalTmdbIdRaw = Number(raw?.external_tmdb_id ?? raw?.externalTmdbId ?? 0);
+  const externalDetailUrl = String(
+    raw?.external_detail_url ??
+      raw?.externalDetailUrl ??
+      raw?.detailUrl ??
+      raw?.pageUrl ??
+      raw?.source_url ??
+      raw?.sourceUrl ??
+      ""
+  ).trim();
   const availabilityStatusRaw =
     raw?.availability_status ??
     raw?.availabilityStatus ??
@@ -6773,7 +6798,13 @@ function normalizeCatalogItem(raw) {
   const resolvedAvailabilityStatus = availabilityStatus || (pendingUploadFlag ? "pending" : "");
   const fallbackYear = Number.parseInt(getYear(releaseDate || ""), 10);
   const externalYear = Number.isFinite(externalYearRaw) && externalYearRaw > 0 ? externalYearRaw : fallbackYear > 0 ? fallbackYear : 0;
-  const externalTmdbId = Number.isFinite(externalTmdbIdRaw) && externalTmdbIdRaw > 0 ? externalTmdbIdRaw : 0;
+  let externalTmdbId = Number.isFinite(externalTmdbIdRaw) && externalTmdbIdRaw > 0 ? externalTmdbIdRaw : 0;
+  if (externalTmdbId <= 0 && externalDetailUrl) {
+    const extracted = extractExternalTmdbIdFromUrl(externalDetailUrl);
+    if (extracted > 0) {
+      externalTmdbId = extracted;
+    }
+  }
   return {
     id,
     type,
@@ -6794,7 +6825,7 @@ function normalizeCatalogItem(raw) {
     isExternal: Boolean(externalProvider),
     externalProvider,
     externalKey: String(raw?.external_key || raw?.externalKey || "").trim(),
-    externalDetailUrl: String(raw?.external_detail_url || raw?.externalDetailUrl || "").trim(),
+    externalDetailUrl,
     externalLanguage: normalizeLanguageLabel(raw?.external_language || raw?.externalLanguage || ""),
     externalTmdbId,
     externalYear,
