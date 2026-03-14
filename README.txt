@@ -1001,3 +1001,8 @@ LATEST MOBILE POPUP TAP SHIELD (2026-03-14, c241)
 - Closing Discord/Backup/Adblock popups now arms the ghost-tap guard on mobile.
 - Prevents tap-through opening cards behind the popup.
 - Cache-bust bumped to `20260314-c241`.
+
+LATEST BADGES + REPAIR MESSAGE (2026-03-14, c242)
+- Added new card badges: Favori + Vu.
+- Repair now reports actual new sources added (no fake count).
+- Cache-bust bumped to `20260314-c242`.

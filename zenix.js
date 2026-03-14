@@ -8935,7 +8935,6 @@ function buildMediaCard(item, resume = false, progressEntry = null, position = 0
   const isPendingUpload = isPendingUploadItem(item);
   const isComingSoonRelease = !isPendingUpload && isComingSoon(item);
   const isNewRelease = !isPendingUpload && isRecentlyReleased(item, NEW_RELEASE_DAYS);
-  const hasResume = Number(progress?.time || 0) > 45;
   const ribbonLabel = isPendingUpload ? "En attente" : isComingSoonRelease ? "Bientot dispo" : isNewRelease ? "Nouveau" : "";
   const ribbonClass = isPendingUpload
     ? "media-thumb-ribbon media-thumb-ribbon-waiting"
@@ -8948,6 +8947,10 @@ function buildMediaCard(item, resume = false, progressEntry = null, position = 0
     ? (Number(progress.time || 0) / Number(progress.duration || 1)) * 100
     : 0;
   const ratio = Math.max(0, Math.min(100, Math.round(ratioRaw)));
+  const hasWatched = progress && Number(progress.duration || 0) > 0
+    ? Number(progress.time || 0) / Number(progress.duration || 1) >= 0.92
+    : false;
+  const hasResume = Number(progress?.time || 0) > 45 && !hasWatched;
   const removeContinueButton = resume
     ? `<button type="button" class="continue-remove-btn" data-card-remove-progress="${item.id}" aria-label="Retirer ${escapeHtml(item.title)} de Continuer">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18.3 5.71 12 12l6.3 6.29-1.41 1.41L10.59 13.4 4.29 19.7 2.88 18.29 9.17 12 2.88 5.71 4.29 4.29l6.3 6.3 6.29-6.3z"></path></svg>
@@ -8990,6 +8993,8 @@ function buildMediaCard(item, resume = false, progressEntry = null, position = 0
         ${!isPendingUpload && isComingSoonRelease ? '<span class="meta-pill meta-pill-soon">Bientot dispo</span>' : ""}
         ${!isPendingUpload && !isComingSoonRelease && isNewRelease ? '<span class="meta-pill meta-pill-new">Nouveau</span>' : ""}
         ${hasResume ? '<span class="meta-pill meta-pill-resume">Reprise</span>' : ""}
+        ${hasWatched ? '<span class="meta-pill meta-pill-watched">Vu</span>' : ""}
+        ${favorite ? '<span class="meta-pill meta-pill-favorite">Favori</span>' : ""}
         <span class="meta-dot" aria-hidden="true"></span>
         <span>${escapeHtml(runtime)}</span>
         <span class="meta-dot" aria-hidden="true"></span>
@@ -11661,9 +11666,23 @@ async function runPlayerRepair() {
     refs.playerRepairBtn.classList.remove("is-loading");
     return;
   }
+  const normalizedSources = normalizeRepairSourceList(sources);
+  const existingSources = Array.isArray(state.allEpisodeSources) ? state.allEpisodeSources : [];
+  const existingKeys = new Set(existingSources.map((entry) => getSourceDedupKey(entry)).filter(Boolean));
+  const addedSources = normalizedSources.filter((entry) => {
+    const key = getSourceDedupKey(entry);
+    if (!key) {
+      return true;
+    }
+    if (existingKeys.has(key)) {
+      return false;
+    }
+    existingKeys.add(key);
+    return true;
+  });
 
-  await storeRepairSources(key, sources);
-  const merged = mergeSourceLists(sources, state.allEpisodeSources || []);
+  await storeRepairSources(key, normalizedSources);
+  const merged = mergeSourceLists(normalizedSources, existingSources);
   state.allEpisodeSources = merged;
   if (item.type === "tv") {
     const currentLang = String(refs.playerLanguageSelect?.value || state.nowPlaying?.language || "");
@@ -11680,7 +11699,9 @@ async function runPlayerRepair() {
   renderPlayerSourceOptions();
   scheduleHlsLanguageProbe(state.allEpisodeSources);
   if (refs.playerRepairStatus) {
-    refs.playerRepairStatus.textContent = `Reparation terminee: ${sources.length} source(s) ajoutee(s).`;
+    refs.playerRepairStatus.textContent = addedSources.length > 0
+      ? `Reparation terminee: ${addedSources.length} source(s) ajoutee(s).`
+      : "Aucune nouvelle source. Lecteurs existants conserves.";
   }
   refs.playerRepairBtn.disabled = false;
   refs.playerRepairBtn.classList.remove("is-loading");

@@ -672,3 +672,8 @@ Last update: 2026-03-11
 - Mobile popups now arm the ghost-tap shield on close (Discord/Backup/Adblock).
 - Prevents tap-through opening content behind popups on phone.
 - Cache-bust updated to `20260314-c241`.
+
+## c242 follow-up (2026-03-14)
+- Added new card badges: Favori + Vu.
+- Repair now reports actual new sources added (no fake count).
+- Cache-bust updated to `20260314-c242`.
