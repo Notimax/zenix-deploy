@@ -1075,6 +1075,11 @@ LATEST PERSISTENCE + MATCH FIXES (2026-03-14, c262)
 - Purstream base updated to `purstream.cc`.
 - Cache-bust bumped to `20260314-c262`.
 
+LATEST BOOT RELOAD REMOVED (2026-03-14, c263)
+- Removed the hard reload fallback in `index.html` to avoid visible refresh loops.
+- Boot retry now only injects `zenix.js` once if the first load fails.
+- Cache-bust bumped to `20260314-c263`.
+
 IOS13 ZENIX READER BRUTE (LIVE, 2026-03-14)
 - Script: `__tmp_ios13_zenix_5s_battery.js` (5s per title, WebKit iPhone 13).
 - Selection:
