@@ -1058,6 +1058,11 @@ LATEST MOBILE ZENIX SORT (2026-03-14, c259)
 - Ensures iPhone tries proxy-backed sources first to avoid hotlink 403s.
 - Cache-bust bumped to `20260314-c259`.
 
+LATEST VFQ LABEL NORMALIZATION (2026-03-14, c260)
+- Language parser now treats `VFQ` / `TRUEFRENCH` as `VF`.
+- Prevents VFQ sources from being ranked below MULTI on mobile.
+- Cache-bust bumped to `20260314-c260`.
+
 IOS13 ZENIX READER BRUTE (LIVE, 2026-03-14)
 - Script: `__tmp_ios13_zenix_5s_battery.js` (5s per title, WebKit iPhone 13).
 - Selection:

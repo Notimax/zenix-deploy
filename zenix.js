@@ -7702,7 +7702,15 @@ function normalizeLanguageLabel(value) {
   if (!raw) {
     return "";
   }
-  if (raw === "1" || raw === "VF" || raw === "FR" || raw.includes("FRENCH")) {
+  if (
+    raw === "1" ||
+    raw === "VF" ||
+    raw === "VFQ" ||
+    raw === "FR" ||
+    raw.includes("VFQ") ||
+    raw.includes("TRUEFRENCH") ||
+    raw.includes("FRENCH")
+  ) {
     return "VF";
   }
   if (raw === "2" || raw.includes("VOST") || raw.includes("SUB")) {
