@@ -3610,6 +3610,8 @@ function setDiscordGateVisible(visible) {
   document.body.classList.toggle("discord-locked", nextVisible);
   if (nextVisible) {
     markDiscordPromptSession();
+  } else if (isLikelyMobileDevice()) {
+    activatePostCloseTapGuard(900);
   }
 }
 
@@ -3692,6 +3694,8 @@ function setBackupGateVisible(visible) {
   document.body.classList.toggle("backup-locked", nextVisible);
   if (nextVisible) {
     markBackupPromptSeen();
+  } else if (isLikelyMobileDevice()) {
+    activatePostCloseTapGuard(900);
   }
 }
 
@@ -3928,6 +3932,8 @@ function setAdblockGateVisible(visible) {
   document.body.classList.toggle("adblock-locked", nextVisible);
   if (nextVisible) {
     setDiscordGateVisible(false);
+  } else if (isLikelyMobileDevice()) {
+    activatePostCloseTapGuard(900);
   }
 }
 

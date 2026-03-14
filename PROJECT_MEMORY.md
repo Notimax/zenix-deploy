@@ -667,3 +667,8 @@ Last update: 2026-03-11
 - Added a boot guard to re-inject zenix.js once if init does not complete after load.
 - init now records `__zenixBooted` / `__zenixBootError` for recovery and debugging.
 - Cache-bust updated to `20260314-c240`.
+
+## c241 follow-up (2026-03-14)
+- Mobile popups now arm the ghost-tap shield on close (Discord/Backup/Adblock).
+- Prevents tap-through opening content behind popups on phone.
+- Cache-bust updated to `20260314-c241`.

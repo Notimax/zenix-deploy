@@ -996,3 +996,8 @@ LATEST BOOT FAILSAFE (2026-03-14, c240)
 - Added a boot guard: if JS doesn't finish init, re-inject zenix.js once after load.
 - init now sets a boot flag and logs init failures to console.
 - Cache-bust bumped to `20260314-c240`.
+
+LATEST MOBILE POPUP TAP SHIELD (2026-03-14, c241)
+- Closing Discord/Backup/Adblock popups now arms the ghost-tap guard on mobile.
+- Prevents tap-through opening cards behind the popup.
+- Cache-bust bumped to `20260314-c241`.
