@@ -1,4 +1,4 @@
-﻿const { webkit, devices } = require('playwright');
+const { webkit, devices } = require('playwright');
 
 const BASE_URL = (process.env.ZENIX_BASE_URL || 'https://zenix.best/').replace(/\/+$/, '');
 const WATCH_MS = Number(process.env.ZENIX_WATCH_MS || 5000);
@@ -7,9 +7,11 @@ const MOVIE_TARGET = Number(process.env.ZENIX_MOVIE_TARGET || 10);
 const SERIES_TARGET = Number(process.env.ZENIX_SERIES_TARGET || 10);
 const ANIME_TARGET = Number(process.env.ZENIX_ANIME_TARGET || 6);
 const CATALOG_PAGES_MAX = Number(process.env.ZENIX_CATALOG_PAGES || 8);
+const OPEN_TIMEOUT_MS = Number(process.env.ZENIX_OPEN_TIMEOUT_MS || 15000);
 const FORCE_ID = Number(process.env.ZENIX_FORCE_ID || 0);
 const FORCE_TYPE = String(process.env.ZENIX_FORCE_TYPE || 'movie').toLowerCase();
 const FORCE_TITLE = String(process.env.ZENIX_FORCE_TITLE || '').trim();
+const SKIP_GATE = String(process.env.ZENIX_SKIP_GATE || '') === '1';
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
 
@@ -266,20 +268,25 @@ async function openAndPlay(page, entry) {
     const id = Number(payload?.id || 0);
     const season = Number(payload?.season || 1);
     const episode = Number(payload?.episode || 1);
+    const timeoutMs = Number(payload?.timeoutMs || 12000);
     if (id <= 0 || typeof window.openPlayer !== 'function') {
       return 'openPlayer-missing';
     }
     try {
-      if (String(payload?.type || '') === 'tv') {
-        await window.openPlayer(id, { season, episode, syncRoute: false });
-      } else {
-        await window.openPlayer(id, { syncRoute: false });
-      }
-      return true;
+      const openPromise = (async () => {
+        if (String(payload?.type || '') === 'tv') {
+          await window.openPlayer(id, { season, episode, syncRoute: false });
+        } else {
+          await window.openPlayer(id, { syncRoute: false });
+        }
+        return true;
+      })();
+      const timeoutPromise = new Promise((resolve) => setTimeout(() => resolve('openPlayer-timeout'), timeoutMs));
+      return await Promise.race([openPromise, timeoutPromise]);
     } catch {
       return 'openPlayer-error';
     }
-  }, entry);
+  }, { ...entry, timeoutMs: OPEN_TIMEOUT_MS });
 
   if (opened !== true) {
     throw new Error(`openPlayer failed (${opened || 'unknown'}) for ${entry.title}`);
@@ -382,7 +389,7 @@ async function runOne(page, entry) {
 }
 
 async function runSuite() {
-  const gateToken = await issueGateToken();
+  const gateToken = SKIP_GATE ? '' : await issueGateToken();
   const selection = FORCE_ID
     ? {
         movies: FORCE_TYPE === 'movie' ? [{ id: FORCE_ID, title: FORCE_TITLE || `ID ${FORCE_ID}`, type: 'movie' }] : [],
@@ -406,26 +413,30 @@ async function runSuite() {
   });
 
   const cookieDomain = new URL(BASE_URL).hostname;
-  await context.addCookies([
-    {
-      name: 'zenix_gate',
-      value: gateToken,
-      domain: cookieDomain,
-      path: '/',
-      httpOnly: true,
-      secure: true,
-      sameSite: 'Lax',
-    },
-  ]);
+  if (gateToken) {
+    await context.addCookies([
+      {
+        name: 'zenix_gate',
+        value: gateToken,
+        domain: cookieDomain,
+        path: '/',
+        httpOnly: true,
+        secure: true,
+        sameSite: 'Lax',
+      },
+    ]);
+  }
 
   const page = await context.newPage();
-  await page.addInitScript((token) => {
-    try {
-      localStorage.setItem('zenix-gate-token-v1', token);
-    } catch {
-      // ignore
-    }
-  }, gateToken);
+  if (gateToken) {
+    await page.addInitScript((token) => {
+      try {
+        localStorage.setItem('zenix-gate-token-v1', token);
+      } catch {
+        // ignore
+      }
+    }, gateToken);
+  }
 
   await preparePage(page);
 
@@ -531,3 +542,4 @@ runSuite()
     process.stderr.write(String(error?.stack || error?.message || error));
     process.exit(1);
   });
+

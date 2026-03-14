@@ -2456,69 +2456,75 @@ function bindEvents() {
     }
   });
 
-  refs.playerSeasonSelect.addEventListener("change", () => {
-    if (!state.nowPlaying || state.nowPlaying.type !== "tv") {
-      return;
-    }
-    const mediaId = Number(state.nowPlaying.id || 0);
-    const season = Number(refs.playerSeasonSelect.value || "1");
-    const seasons = state.seasonsCache.get(mediaId) || [];
-    const episodes = getEpisodesForSeason(seasons, season);
-    const episode = getFirstPlayableEpisode(episodes);
-    populateEpisodeSelect(refs.playerEpisodeSelect, episodes, episode);
-    const language = String(refs.playerLanguageSelect?.value || "").trim();
-    updatePlayerNextEpisodeButton();
-    verifySoonEpisodesForSeason(mediaId, season, episodes)
-      .then((changed) => {
-        if (!changed || Number(state.nowPlaying?.id || 0) !== mediaId) {
-          return;
-        }
-        if (Number(refs.playerSeasonSelect.value || "0") !== season) {
-          return;
-        }
-        const currentEpisode = Number(refs.playerEpisodeSelect.value || episode);
-        populateEpisodeSelect(refs.playerEpisodeSelect, episodes, currentEpisode);
-        updatePlayerNextEpisodeButton();
-      })
-      .catch(() => {
-        // no-op
+  if (refs.playerSeasonSelect) {
+    refs.playerSeasonSelect.addEventListener("change", () => {
+      if (!state.nowPlaying || state.nowPlaying.type !== "tv") {
+        return;
+      }
+      const mediaId = Number(state.nowPlaying.id || 0);
+      const season = Number(refs.playerSeasonSelect?.value || "1");
+      const seasons = state.seasonsCache.get(mediaId) || [];
+      const episodes = getEpisodesForSeason(seasons, season);
+      const episode = getFirstPlayableEpisode(episodes);
+      populateEpisodeSelect(refs.playerEpisodeSelect, episodes, episode);
+      const language = String(refs.playerLanguageSelect?.value || "").trim();
+      updatePlayerNextEpisodeButton();
+      verifySoonEpisodesForSeason(mediaId, season, episodes)
+        .then((changed) => {
+          if (!changed || Number(state.nowPlaying?.id || 0) !== mediaId) {
+            return;
+          }
+          if (Number(refs.playerSeasonSelect?.value || "0") !== season) {
+            return;
+          }
+          const currentEpisode = Number(refs.playerEpisodeSelect?.value || episode);
+          populateEpisodeSelect(refs.playerEpisodeSelect, episodes, currentEpisode);
+          updatePlayerNextEpisodeButton();
+        })
+        .catch(() => {
+          // no-op
+        });
+      switchPlayerEpisode(season, episode, { language }).catch(() => {
+        showMessage("Impossible de charger cet episode.", true);
       });
-    switchPlayerEpisode(season, episode, { language }).catch(() => {
-      showMessage("Impossible de charger cet episode.", true);
     });
-  });
+  }
 
-  refs.playerEpisodeSelect.addEventListener("change", () => {
-    if (!state.nowPlaying || state.nowPlaying.type !== "tv") {
-      return;
-    }
-    const season = Number(refs.playerSeasonSelect.value || "1");
-    const episode = Number(refs.playerEpisodeSelect.value || "1");
-    const language = String(refs.playerLanguageSelect?.value || "").trim();
-    switchPlayerEpisode(season, episode, { language }).catch(() => {
-      showMessage("Impossible de charger cet episode.", true);
+  if (refs.playerEpisodeSelect) {
+    refs.playerEpisodeSelect.addEventListener("change", () => {
+      if (!state.nowPlaying || state.nowPlaying.type !== "tv") {
+        return;
+      }
+      const season = Number(refs.playerSeasonSelect?.value || "1");
+      const episode = Number(refs.playerEpisodeSelect?.value || "1");
+      const language = String(refs.playerLanguageSelect?.value || "").trim();
+      switchPlayerEpisode(season, episode, { language }).catch(() => {
+        showMessage("Impossible de charger cet episode.", true);
+      });
+      updatePlayerNextEpisodeButton();
     });
-    updatePlayerNextEpisodeButton();
-  });
+  }
 
-  refs.playerLanguageSelect?.addEventListener("change", () => {
-    if (!state.nowPlaying || state.nowPlaying.type !== "tv") {
-      return;
-    }
-    const season = Number(refs.playerSeasonSelect.value || "1");
-    const episode = Number(refs.playerEpisodeSelect.value || "1");
-    const language = String(refs.playerLanguageSelect.value || "").trim();
-    if (language) {
-      state.selectedLanguageByMedia.set(state.nowPlaying.id, language);
-    } else {
-      state.selectedLanguageByMedia.delete(state.nowPlaying.id);
-    }
-    saveLanguagePrefsMap(state.selectedLanguageByMedia);
-    switchPlayerEpisode(season, episode, { language }).catch(() => {
-      showMessage("Impossible de charger cet episode.", true);
+  if (refs.playerLanguageSelect) {
+    refs.playerLanguageSelect.addEventListener("change", () => {
+      if (!state.nowPlaying || state.nowPlaying.type !== "tv") {
+        return;
+      }
+      const season = Number(refs.playerSeasonSelect?.value || "1");
+      const episode = Number(refs.playerEpisodeSelect?.value || "1");
+      const language = String(refs.playerLanguageSelect?.value || "").trim();
+      if (language) {
+        state.selectedLanguageByMedia.set(state.nowPlaying.id, language);
+      } else {
+        state.selectedLanguageByMedia.delete(state.nowPlaying.id);
+      }
+      saveLanguagePrefsMap(state.selectedLanguageByMedia);
+      switchPlayerEpisode(season, episode, { language }).catch(() => {
+        showMessage("Impossible de charger cet episode.", true);
+      });
+      updatePlayerNextEpisodeButton();
     });
-    updatePlayerNextEpisodeButton();
-  });
+  }
 
   if (refs.playerNextEpisodeBtn) {
     bindFastPress(refs.playerNextEpisodeBtn, () => {
