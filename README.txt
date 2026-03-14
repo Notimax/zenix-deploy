@@ -1023,3 +1023,7 @@ LATEST ADMIN DUPLICATE ENTRIES (2026-03-14, c245)
 - Admin imports now mark entries as force-duplicate, so they appear even if a title already exists.
 - Catalog merge skips semantic dedupe for these forced entries.
 - Cache-bust bumped to `20260314-c245`.
+
+LATEST ADMIN BADGE (2026-03-14, c246)
+- Admin-forced duplicates now show an "Admin" badge on cards.
+- Cache-bust bumped to `20260314-c246`.

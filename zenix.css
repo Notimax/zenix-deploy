@@ -2257,6 +2257,12 @@ body.in-app-browser .catalog-grid {
   color: #ffd7d7;
 }
 
+.meta-pill-admin {
+  border-color: rgba(56, 189, 248, 0.6);
+  background: rgba(56, 189, 248, 0.18);
+  color: #d8f2ff;
+}
+
 .meta-pill-watched {
   border-color: rgba(74, 222, 128, 0.56);
   background: rgba(34, 197, 94, 0.18);

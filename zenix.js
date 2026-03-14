@@ -8945,6 +8945,7 @@ function buildMediaCard(item, resume = false, progressEntry = null, position = 0
   const favorite = isFavorite(item.id);
   const progress = progressEntry || state.progress[item.id] || null;
   const isPendingUpload = isPendingUploadItem(item);
+  const isAdminForced = Boolean(item.forceDuplicate);
   const isComingSoonRelease = !isPendingUpload && isComingSoon(item);
   const isNewRelease = !isPendingUpload && isRecentlyReleased(item, NEW_RELEASE_DAYS);
   const ribbonLabel = isPendingUpload ? "En attente" : isComingSoonRelease ? "Bientot dispo" : isNewRelease ? "Nouveau" : "";
@@ -9005,6 +9006,7 @@ function buildMediaCard(item, resume = false, progressEntry = null, position = 0
         ${!isPendingUpload && isComingSoonRelease ? '<span class="meta-pill meta-pill-soon">Bientot dispo</span>' : ""}
         ${!isPendingUpload && !isComingSoonRelease && isNewRelease ? '<span class="meta-pill meta-pill-new">Nouveau</span>' : ""}
         ${hasResume ? '<span class="meta-pill meta-pill-resume">Reprise</span>' : ""}
+        ${isAdminForced ? '<span class="meta-pill meta-pill-admin">Admin</span>' : ""}
         ${hasWatched ? '<span class="meta-pill meta-pill-watched">Vu</span>' : ""}
         ${favorite ? '<span class="meta-pill meta-pill-favorite">Favori</span>' : ""}
         <span class="meta-dot" aria-hidden="true"></span>
