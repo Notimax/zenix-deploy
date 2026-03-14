@@ -12511,6 +12511,12 @@ function preferAnimeSamaSources(item, sources) {
 function sortSourcesByScore(sources) {
   const rows = Array.isArray(sources) ? sources.slice() : [];
   rows.sort((left, right) => {
+    if (isLikelyMobileDevice()) {
+      const zenixDelta = Number(Boolean(right?.isZenix)) - Number(Boolean(left?.isZenix));
+      if (zenixDelta !== 0) {
+        return zenixDelta;
+      }
+    }
     const premiumDelta = Number(Boolean(left?.premiumHint)) - Number(Boolean(right?.premiumHint));
     if (premiumDelta !== 0) {
       return premiumDelta;

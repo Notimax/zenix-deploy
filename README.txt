@@ -1053,6 +1053,11 @@ LATEST MOBILE ZENIX BOOST (2026-03-14, c258)
 - Helps iPhone pick the proxy path faster on titles like La Femme de menage.
 - Cache-bust bumped to `20260314-c258`.
 
+LATEST MOBILE ZENIX SORT (2026-03-14, c259)
+- On mobile, Zenix relay sources are sorted to the top of the pool before premium scoring.
+- Ensures iPhone tries proxy-backed sources first to avoid hotlink 403s.
+- Cache-bust bumped to `20260314-c259`.
+
 IOS13 ZENIX READER BRUTE (LIVE, 2026-03-14)
 - Script: `__tmp_ios13_zenix_5s_battery.js` (5s per title, WebKit iPhone 13).
 - Selection:
