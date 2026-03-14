@@ -15609,6 +15609,9 @@ function updatePlayerStepperFromStatus(message, isError = false) {
 
 function setPlayerStatus(message, isError = false) {
   const safeMessage = String(message || "");
+  if (!refs.playerStatus) {
+    return;
+  }
   refs.playerStatus.textContent = safeMessage;
   refs.playerStatus.classList.toggle("error", Boolean(isError));
   setPlayerLoading(shouldShowPlayerLoadingFromStatus(safeMessage, isError), safeMessage);
