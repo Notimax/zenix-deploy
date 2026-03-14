@@ -1027,3 +1027,22 @@ LATEST ADMIN DUPLICATE ENTRIES (2026-03-14, c245)
 LATEST ADMIN BADGE (2026-03-14, c246)
 - Admin-forced duplicates now show an "Admin" badge on cards.
 - Cache-bust bumped to `20260314-c246`.
+
+LATEST BOOT RETRY GUARD (2026-03-14, c249)
+- Boot retry now triggers only if the initial `zenix.js` failed to load (prevents duplicate script execution).
+- Added `zenixCoreScript` load/error flags to avoid double-eval errors.
+- Cache-bust bumped to `20260314-c249`.
+
+LATEST ZENIX AUTOSWITCH LOCK (2026-03-14, c250)
+- Manual source lock no longer blocks auto-switch when the selected source is Zenix.
+- Auto-rescue + fallback can engage even after a user clicks the Zenix chip.
+- Cache-bust bumped to `20260314-c250`.
+
+IOS13 ZENIX READER BRUTE (LIVE, 2026-03-14)
+- Script: `__tmp_ios13_zenix_5s_battery.js` (5s per title, WebKit iPhone 13).
+- Selection:
+  - Movies: Zootopie 2, F1® Le Film
+  - Series: Stranger Things, Mercredi
+  - Anime: One Piece
+- Result: 5/5 passed (Zenix reader active, playback/iframe stable for 5s).
+- Note: `La Femme de ménage` was attempted but openPlayer failed in the harness; requires a targeted rerun.

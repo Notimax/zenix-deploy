@@ -7,6 +7,9 @@ const MOVIE_TARGET = Number(process.env.ZENIX_MOVIE_TARGET || 10);
 const SERIES_TARGET = Number(process.env.ZENIX_SERIES_TARGET || 10);
 const ANIME_TARGET = Number(process.env.ZENIX_ANIME_TARGET || 6);
 const CATALOG_PAGES_MAX = Number(process.env.ZENIX_CATALOG_PAGES || 8);
+const FORCE_ID = Number(process.env.ZENIX_FORCE_ID || 0);
+const FORCE_TYPE = String(process.env.ZENIX_FORCE_TYPE || 'movie').toLowerCase();
+const FORCE_TITLE = String(process.env.ZENIX_FORCE_TITLE || '').trim();
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
 
@@ -264,7 +267,7 @@ async function openAndPlay(page, entry) {
     const season = Number(payload?.season || 1);
     const episode = Number(payload?.episode || 1);
     if (id <= 0 || typeof window.openPlayer !== 'function') {
-      return false;
+      return 'openPlayer-missing';
     }
     try {
       if (String(payload?.type || '') === 'tv') {
@@ -274,12 +277,12 @@ async function openAndPlay(page, entry) {
       }
       return true;
     } catch {
-      return false;
+      return 'openPlayer-error';
     }
   }, entry);
 
-  if (!opened) {
-    throw new Error(`openPlayer failed for ${entry.title}`);
+  if (opened !== true) {
+    throw new Error(`openPlayer failed (${opened || 'unknown'}) for ${entry.title}`);
   }
 
   await page.waitForTimeout(1600);
@@ -321,7 +324,23 @@ async function runOne(page, entry) {
   page.on('response', onResponse);
 
   try {
-    out.zenixSelect = await openAndPlay(page, entry);
+    let opened = false;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        out.zenixSelect = await openAndPlay(page, entry);
+        opened = true;
+        break;
+      } catch (error) {
+        if (attempt >= 1) {
+          throw error;
+        }
+        process.stderr.write(`[WARN] openPlayer retry for ${entry.title}\\n`);
+        await preparePage(page);
+      }
+    }
+    if (!opened) {
+      throw new Error(`openPlayer failed for ${entry.title}`);
+    }
     const start = Date.now();
     while (Date.now() - start < WATCH_MS) {
       const sample = await page.evaluate(() => {
@@ -364,7 +383,19 @@ async function runOne(page, entry) {
 
 async function runSuite() {
   const gateToken = await issueGateToken();
-  const selection = await gatherCandidates(gateToken);
+  const selection = FORCE_ID
+    ? {
+        movies: FORCE_TYPE === 'movie' ? [{ id: FORCE_ID, title: FORCE_TITLE || `ID ${FORCE_ID}`, type: 'movie' }] : [],
+        series:
+          FORCE_TYPE === 'tv'
+            ? [{ id: FORCE_ID, title: FORCE_TITLE || `ID ${FORCE_ID}`, type: 'tv', season: 1, episode: 1 }]
+            : [],
+        anime:
+          FORCE_TYPE === 'anime'
+            ? [{ id: FORCE_ID, title: FORCE_TITLE || `ID ${FORCE_ID}`, type: 'tv', season: 1, episode: 1, isAnime: true }]
+            : [],
+      }
+    : await gatherCandidates(gateToken);
 
   const browser = await webkit.launch({ headless: true });
   const context = await browser.newContext({

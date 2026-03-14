@@ -698,3 +698,21 @@ Last update: 2026-03-11
 ## c246 follow-up (2026-03-14)
 - Admin-forced entries display an "Admin" badge on cards.
 - Cache-bust updated to `20260314-c246`.
+
+## c249 follow-up (2026-03-14)
+- Boot retry now runs only if the initial `zenix.js` failed to load (prevents duplicate eval errors).
+- Added `zenixCoreScript` load/error flags to guard against double-injection.
+- Cache-bust updated to `20260314-c249`.
+
+## c250 follow-up (2026-03-14)
+- Manual source lock no longer blocks auto-switch when the selected source is Zenix.
+- Auto-rescue + fallback can engage even after a user clicks the Zenix source chip.
+- Cache-bust updated to `20260314-c250`.
+
+## iPhone 13 Zenix reader probe (live, 2026-03-14)
+- 5s WebKit playback battery on live:
+  - Movies: Zootopie 2, F1® Le Film
+  - Series: Stranger Things, Mercredi
+  - Anime: One Piece
+- Result: 5/5 passed with Zenix reader active.
+- Note: `La Femme de ménage` openPlayer failed in the harness; needs a dedicated rerun.
