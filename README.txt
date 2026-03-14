@@ -1102,6 +1102,11 @@ LATEST EXTERNAL TMDB URL FIX (2026-03-15, c267)
 - Prevents external titles (e.g. Scream 7) from resolving to wrong internal films.
 - Cache-bust bumped to `20260315-c267`.
 
+LATEST EXTERNAL MATCH HARDENING (2026-03-15, c268)
+- Catalog semantic dedupe now prefers TMDB id when available (stops title-only merges).
+- External items without TMDB id will no longer swap to internal candidates for playback.
+- Cache-bust bumped to `20260315-c268`.
+
 IOS13 ZENIX READER BRUTE (LIVE, 2026-03-14)
 - Script: `__tmp_ios13_zenix_5s_battery.js` (5s per title, WebKit iPhone 13).
 - Selection:

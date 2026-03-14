@@ -6450,6 +6450,12 @@ function getCatalogSemanticKey(item) {
     return "";
   }
   const mediaType = item.type === "tv" ? "tv" : "movie";
+  const tmdbId = Number(
+    item?.tmdbId || item?.tmdb_id || item?.externalTmdbId || item?.external_tmdb_id || 0
+  );
+  if (Number.isFinite(tmdbId) && tmdbId > 0) {
+    return `tmdb:${tmdbId}::${mediaType}`;
+  }
   const releaseYear = Number.parseInt(getYear(item.releaseDate || ""), 10);
   const externalYear = Number(item.externalYear || 0);
   const year = externalYear > 0 ? externalYear : Number.isFinite(releaseYear) ? releaseYear : 0;
@@ -11136,6 +11142,13 @@ async function hasPlayablePurstreamSources(item, season = 1, episode = 1) {
 
 async function resolvePlayableProviderItem(item, season = 1, episode = 1) {
   if (!item || !item.isExternal) {
+    return item;
+  }
+  const externalTmdbId = Number(
+    item?.tmdbId || item?.tmdb_id || item?.externalTmdbId || item?.external_tmdb_id || 0
+  );
+  if (!Number.isFinite(externalTmdbId) || externalTmdbId <= 0) {
+    // If we don't have a trusted external TMDB id, never swap to an internal item.
     return item;
   }
   let internalCandidate = findInternalProviderCandidate(item);
