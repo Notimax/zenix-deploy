@@ -18,6 +18,15 @@ const NAKIOS_API_BASE = "https://api.nakios.site";
 const NAKIOS_API_HOST = "api.nakios.site";
 const FILMER2_BASE = "https://filmer2.com";
 const FILMER2_HOST = "filmer2.com";
+const MOVIX_BASE_URL = String(process.env.MOVIX_BASE_URL || "https://movix.blog")
+  .trim()
+  .replace(/\/+$/, "");
+const MOVIX_API_BASE = String(process.env.MOVIX_API_BASE || "https://api.movix.blog")
+  .trim()
+  .replace(/\/+$/, "");
+const MOVIX_ACCESS_KEY = String(process.env.MOVIX_ACCESS_KEY || "").trim();
+const MOVIX_HOSTS = new Set(["movix.blog", "movix.club", "movix.website"]);
+const MOVIX_BASE62_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const DEFAULT_BROWSER_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 const DEFAULT_ACCEPT_LANGUAGE = "fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7";
@@ -45,6 +54,11 @@ const NAKIOS_FETCH_HEADERS = {
 const FILMER2_FETCH_HEADERS = {
   Referer: `${FILMER2_BASE}/`,
   Origin: FILMER2_BASE,
+  "Accept-Language": DEFAULT_ACCEPT_LANGUAGE,
+};
+const MOVIX_FETCH_HEADERS = {
+  ...(MOVIX_BASE_URL ? { Referer: `${MOVIX_BASE_URL}/`, Origin: MOVIX_BASE_URL } : {}),
+  ...(MOVIX_ACCESS_KEY ? { "x-access-key": MOVIX_ACCESS_KEY } : {}),
   "Accept-Language": DEFAULT_ACCEPT_LANGUAGE,
 };
 const NAKIOS_CATALOG_FEEDS = [
@@ -3049,6 +3063,172 @@ function normalizeTitleKey(value) {
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
+}
+
+function isMovixHost(host) {
+  const safe = String(host || "").toLowerCase();
+  if (!safe) {
+    return false;
+  }
+  for (const base of MOVIX_HOSTS) {
+    if (safe === base || safe.endsWith(`.${base}`)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function decodeMovixBase62ToBytes(input) {
+  const raw = String(input || "").trim();
+  if (!raw) {
+    return null;
+  }
+  let value = 0n;
+  for (const char of raw) {
+    const index = MOVIX_BASE62_ALPHABET.indexOf(char);
+    if (index < 0) {
+      return null;
+    }
+    value = value * 62n + BigInt(index);
+  }
+  if (value === 0n) {
+    return Buffer.from([]);
+  }
+  const bytes = [];
+  while (value > 0n) {
+    bytes.unshift(Number(value & 255n));
+    value >>= 8n;
+  }
+  return Buffer.from(bytes);
+}
+
+function decodeMovixId(raw) {
+  const safe = String(raw || "").trim();
+  if (!safe) {
+    return "";
+  }
+  if (/^\d+$/.test(safe)) {
+    return safe;
+  }
+  if (safe.includes("=")) {
+    const base = safe.slice(0, -7);
+    if (!base) {
+      return "";
+    }
+    try {
+      const decoded = Buffer.from(base, "base64").toString("utf8");
+      return /^\d+$/.test(decoded) ? decoded : "";
+    } catch {
+      return "";
+    }
+  }
+  const startIndex = Math.max(1, safe.length - 30);
+  for (let i = startIndex; i >= 1; i -= 1) {
+    const prefix = safe.slice(0, i);
+    const bytes = decodeMovixBase62ToBytes(prefix);
+    if (!bytes || bytes.length === 0) {
+      continue;
+    }
+    const decoded = bytes.toString("utf8");
+    if (/^\d+$/.test(decoded)) {
+      return decoded;
+    }
+  }
+  return "";
+}
+
+function parseMovixExternalKey(value) {
+  const raw = String(value || "").trim();
+  if (!raw.startsWith("movix:")) {
+    return null;
+  }
+  const parts = raw.split(":").filter(Boolean);
+  if (parts.length < 3) {
+    return null;
+  }
+  const mediaType = parts[1] === "tv" ? "tv" : parts[1] === "movie" ? "movie" : "";
+  const tmdbId = toInt(parts[2], 0, 0, 999999999);
+  if (!mediaType || tmdbId <= 0) {
+    return null;
+  }
+  return { mediaType, tmdbId };
+}
+
+function parseMovixUrl(input) {
+  const raw = String(input || "").trim();
+  if (!raw) {
+    return null;
+  }
+  let parsed = null;
+  try {
+    parsed = new URL(raw, MOVIX_BASE_URL || "https://movix.blog");
+  } catch {
+    return null;
+  }
+  if (!isMovixHost(parsed.hostname)) {
+    return null;
+  }
+  const segments = String(parsed.pathname || "")
+    .split("/")
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+  if (segments.length === 0) {
+    return null;
+  }
+  let mediaType = "";
+  let idToken = "";
+  let season = 1;
+  let episode = 1;
+  let isAnime = false;
+
+  if (segments[0] === "watch") {
+    const kind = segments[1] || "";
+    if (kind === "movie" || kind === "film") {
+      mediaType = "movie";
+      idToken = segments[2] || "";
+    } else if (kind === "tv" || kind === "series" || kind === "serie") {
+      mediaType = "tv";
+      idToken = segments[2] || "";
+    } else if (kind === "anime") {
+      mediaType = "tv";
+      isAnime = true;
+      idToken = segments[2] || "";
+    } else if (segments[1]) {
+      idToken = segments[1];
+    }
+    const seasonIndex = segments.findIndex((segment) => segment === "s" || segment === "season");
+    if (seasonIndex >= 0 && segments[seasonIndex + 1]) {
+      season = toInt(segments[seasonIndex + 1], 1, 1, 500);
+    }
+    const episodeIndex = segments.findIndex((segment) => segment === "e" || segment === "episode");
+    if (episodeIndex >= 0 && segments[episodeIndex + 1]) {
+      episode = toInt(segments[episodeIndex + 1], 1, 1, 50000);
+    }
+  } else if (segments[0] === "movie" || segments[0] === "film") {
+    mediaType = "movie";
+    idToken = segments[1] || "";
+  } else if (segments[0] === "tv" || segments[0] === "series" || segments[0] === "serie") {
+    mediaType = "tv";
+    idToken = segments[1] || "";
+  }
+
+  if (!mediaType || !idToken) {
+    return null;
+  }
+  const decoded = decodeMovixId(idToken);
+  const tmdbId = toInt(decoded || idToken, 0, 0, 999999999);
+  if (tmdbId <= 0) {
+    return null;
+  }
+  return {
+    provider: "movix",
+    mediaType,
+    tmdbId,
+    season,
+    episode,
+    isAnime,
+    detailUrl: parsed.href,
+  };
 }
 
 function normalizePidoovLanguage(value) {
@@ -7617,6 +7797,62 @@ function buildAdminCustomEntryFromFilmer2(detail, mediaType) {
   });
 }
 
+async function buildAdminCustomEntryFromMovix(parsed) {
+  if (!parsed || typeof parsed !== "object") {
+    return null;
+  }
+  const normalizedType = String(parsed.mediaType || "").toLowerCase() === "tv" ? "tv" : "movie";
+  const tmdbId = toInt(parsed.tmdbId, 0, 0, 999999999);
+  const movixKey = `movix:${normalizedType}:${tmdbId || normalizeTitleKey(parsed.title || "")}`;
+  let entry = null;
+
+  if (tmdbId > 0) {
+    const target =
+      normalizedType === "tv"
+        ? `${NAKIOS_API_BASE}/api/series/${tmdbId}`
+        : `${NAKIOS_API_BASE}/api/movies/${tmdbId}`;
+    const response = await fetchRemote(target, NAKIOS_FETCH_HEADERS);
+    if (response.status >= 200 && response.status < 300) {
+      const detail = parseJsonSafe(response.body);
+      entry = buildAdminCustomEntryFromNakios(detail, normalizedType);
+    }
+  }
+
+  if (!entry) {
+    const fallbackTitle = tmdbId > 0 ? `Movix ${tmdbId}` : "Movix";
+    entry = normalizeAdminCustomEntry({
+      type: normalizedType,
+      title: fallbackTitle,
+      year: 0,
+      overview: "",
+      external_key: movixKey,
+      external_tmdb_id: tmdbId,
+      external_detail_url: parsed.detailUrl || "",
+      providerLabel: ZENIX_BRAND_LABEL,
+      language: "VF",
+      lang: "VF",
+      availability_status: "available",
+      external_status: "available",
+    });
+  }
+
+  if (!entry) {
+    return null;
+  }
+
+  entry.external_key = movixKey;
+  if (tmdbId > 0) {
+    entry.external_tmdb_id = tmdbId;
+  }
+  if (parsed.detailUrl) {
+    entry.external_detail_url = parsed.detailUrl;
+  }
+  if (parsed.isAnime) {
+    entry.isAnime = true;
+  }
+  return entry;
+}
+
 function extractYoutubePlaylistIdFromKey(externalKey) {
   const raw = String(externalKey || "").trim();
   if (!raw) {
@@ -7659,6 +7895,58 @@ async function buildAdminCustomEntryFromYoutubePlaylist(playlistId) {
     availability_status: "available",
     external_status: "available",
   });
+}
+
+function resolveMovixAdminEntry(options = {}) {
+  const title = String(options.title || "").trim();
+  const mediaType = String(options.mediaType || "").toLowerCase() === "tv" ? "tv" : "movie";
+  const externalKeyParam = String(options.externalKey || "").trim();
+  const tmdbId = toInt(options.tmdbId, 0, 0, 999999999);
+  const adminData = loadAdminData();
+  const custom = Array.isArray(adminData?.custom) ? adminData.custom : [];
+  let entry = null;
+
+  if (externalKeyParam) {
+    const parsed = parseMovixExternalKey(externalKeyParam);
+    if (parsed) {
+      entry =
+        custom.find((row) => String(row?.external_key || row?.externalKey || "") === externalKeyParam) || null;
+    }
+  }
+  if (!entry && tmdbId > 0) {
+    entry =
+      custom.find((row) => {
+        const parsed = parseMovixExternalKey(row?.external_key || row?.externalKey || "");
+        return parsed && parsed.tmdbId === tmdbId;
+      }) || null;
+  }
+  if (!entry && title) {
+    const key = normalizeTitleKey(title);
+    if (key) {
+      entry =
+        custom.find((row) => {
+          const parsed = parseMovixExternalKey(row?.external_key || row?.externalKey || "");
+          return parsed && normalizeTitleKey(row?.title || "") === key;
+        }) || null;
+    }
+  }
+
+  if (!entry) {
+    return null;
+  }
+  const resolved = applyAdminOverride(entry, adminData);
+  if (!resolved) {
+    return null;
+  }
+  const entryType = String(resolved?.type || "").toLowerCase() === "tv" ? "tv" : "movie";
+  if (mediaType && mediaType !== entryType) {
+    return null;
+  }
+  const parsed = parseMovixExternalKey(resolved?.external_key || "");
+  if (!parsed) {
+    return null;
+  }
+  return resolved;
 }
 
 function resolveYoutubeAdminEntry(options = {}) {
@@ -7824,6 +8112,107 @@ async function resolveNakiosSourcesByTmdbId(mediaType, tmdbId, season = 1, episo
     });
   });
   return out;
+}
+
+function extractMovixLinksFromPayload(payload, mediaType) {
+  if (!payload || typeof payload !== "object") {
+    return [];
+  }
+  const data = payload.data;
+  if (mediaType === "tv") {
+    if (Array.isArray(data) && data.length > 0 && Array.isArray(data[0]?.links)) {
+      return data[0].links;
+    }
+    if (Array.isArray(data?.links)) {
+      return data.links;
+    }
+  }
+  if (Array.isArray(data?.links)) {
+    return data.links;
+  }
+  if (Array.isArray(data) && data.length > 0 && Array.isArray(data[0]?.links)) {
+    return data[0].links;
+  }
+  return [];
+}
+
+function normalizeMovixLinks(links) {
+  const rows = Array.isArray(links) ? links : [];
+  const out = [];
+  const dedupe = new Set();
+  rows.forEach((entry, index) => {
+    let url = "";
+    let label = "";
+    let language = "";
+    let isVip = false;
+    let formatHint = "";
+    if (typeof entry === "string") {
+      url = entry;
+    } else if (entry && typeof entry === "object") {
+      url = entry.url || entry.decoded_url || entry.link || entry.src || "";
+      label = entry.label || entry.quality || "";
+      language = entry.language || entry.lang || "";
+      isVip = Boolean(entry.isVip || entry.vip);
+      formatHint = entry.format || entry.type || "";
+    }
+    const parsed = parseSafeRemoteUrl(url);
+    if (!parsed) {
+      return;
+    }
+    const streamUrl = parsed.href;
+    if (!streamUrl || dedupe.has(streamUrl)) {
+      return;
+    }
+    dedupe.add(streamUrl);
+    const normalizedLanguage = normalizePidoovLanguage(language || label) || "VF";
+    const quality = sanitizeToken(String(label || "HD"), 24) || "HD";
+    const format = inferOwnedSourceFormat(streamUrl, formatHint || "");
+    const sourceName = isVip ? `${ZENIX_BRAND_LABEL} Premium` : ZENIX_BRAND_LABEL;
+    const basePriority =
+      normalizedLanguage === "VF"
+        ? 370
+        : normalizedLanguage === "MULTI"
+          ? 350
+          : normalizedLanguage === "VOSTFR"
+            ? 340
+            : 320;
+    out.push({
+      stream_url: streamUrl,
+      source_name: sourceName,
+      quality,
+      language: normalizedLanguage,
+      format,
+      priority: basePriority - Math.min(30, index * 4),
+    });
+  });
+  return out;
+}
+
+async function resolveMovixSourcesByTmdbId(mediaType, tmdbId, season = 1, episode = 1) {
+  if (!MOVIX_API_BASE) {
+    return [];
+  }
+  const safeTmdbId = toInt(tmdbId, 0, 0, 999999999);
+  if (safeTmdbId <= 0) {
+    return [];
+  }
+  const normalizedType = String(mediaType || "").toLowerCase() === "tv" ? "tv" : "movie";
+  const safeSeason = toInt(season, 1, 1, 500);
+  const safeEpisode = toInt(episode, 1, 1, 50000);
+  const target =
+    normalizedType === "tv"
+      ? `${MOVIX_API_BASE}/api/links/tv/${safeTmdbId}?season=${safeSeason}&episode=${safeEpisode}`
+      : `${MOVIX_API_BASE}/api/links/movie/${safeTmdbId}`;
+  const response = await fetchRemote(target, MOVIX_FETCH_HEADERS);
+  if (response.status < 200 || response.status >= 300) {
+    return [];
+  }
+  const payload = parseJsonSafe(response.body);
+  const links = extractMovixLinksFromPayload(payload, normalizedType);
+  if (!Array.isArray(links) || links.length === 0) {
+    return [];
+  }
+  return normalizeMovixLinks(links);
 }
 
 async function fetchNakiosSeasonsByTmdbId(tmdbId) {
@@ -10832,6 +11221,10 @@ function parseAdminImportUrl(input) {
     const mediaType = match[1].toLowerCase() === "tv" ? "tv" : "movie";
     return { provider: "filmer2", mediaType, detailUrl: parsed.href };
   }
+  const movixParsed = parseMovixUrl(parsed.href);
+  if (movixParsed) {
+    return movixParsed;
+  }
   if (/youtube\.com|youtu\.be/i.test(host)) {
     const playlistId = parseYoutubePlaylistId(parsed.href);
     if (!playlistId) {
@@ -10870,6 +11263,8 @@ async function importAdminEntryByUrl(url) {
     if (detail) {
       entry = buildAdminCustomEntryFromFilmer2(detail, parsed.mediaType);
     }
+  } else if (parsed.provider === "movix") {
+    entry = await buildAdminCustomEntryFromMovix(parsed);
   } else if (parsed.provider === "youtube") {
     entry = await buildAdminCustomEntryFromYoutubePlaylist(parsed.playlistId);
   }
@@ -12223,6 +12618,16 @@ async function handleZenixSource(req, res, requestUrl) {
     return true;
   }
 
+  let movixEntry = resolveMovixAdminEntry({
+    title,
+    mediaType,
+    externalKey: externalKeyParam,
+    tmdbId,
+  });
+  if (movixEntry && tmdbId <= 0) {
+    tmdbId = toInt(movixEntry?.external_tmdb_id || movixEntry?.externalTmdbId, 0, 0, 999999999);
+  }
+
   if (tmdbId <= 0) {
     if (title.length < 2) {
       sendJson(res, 200, {
@@ -12254,6 +12659,13 @@ async function handleZenixSource(req, res, requestUrl) {
     }
   }
 
+  if (!movixEntry && tmdbId > 0) {
+    movixEntry = resolveMovixAdminEntry({
+      mediaType,
+      tmdbId,
+    });
+  }
+
   let sources = [];
   if (tmdbId > 0) {
     try {
@@ -12263,7 +12675,7 @@ async function handleZenixSource(req, res, requestUrl) {
     }
   }
 
-  if (sources.length === 0 && title.length >= 2) {
+  if (!movixEntry && sources.length === 0 && title.length >= 2) {
     if (year > 0) {
       try {
         const altTmdbId = await resolveNakiosTmdbIdBySearch(cleanedTitle || title, mediaType, 0);
@@ -12308,6 +12720,33 @@ async function handleZenixSource(req, res, requestUrl) {
           .filter(Boolean)
       : [];
     sources = filmerSources;
+  }
+
+  if (movixEntry && tmdbId > 0) {
+    let movixSources = [];
+    try {
+      movixSources = await resolveMovixSourcesByTmdbId(mediaType, tmdbId, season, episode);
+    } catch {
+      movixSources = [];
+    }
+    if (movixSources.length > 0) {
+      const combined = [];
+      const dedupe = new Set();
+      const pushUnique = (entry) => {
+        if (!entry) {
+          return;
+        }
+        const key = String(entry?.stream_url || entry?.url || "").trim();
+        if (!key || dedupe.has(key)) {
+          return;
+        }
+        dedupe.add(key);
+        combined.push(entry);
+      };
+      movixSources.forEach(pushUnique);
+      sources.forEach(pushUnique);
+      sources = combined;
+    }
   }
 
   sendJson(res, 200, {

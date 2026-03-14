@@ -1014,3 +1014,7 @@ LATEST SW CLEANUP FAILSAFE (2026-03-14, c243)
 LATEST BOOT HARD RELOAD (2026-03-14, c244)
 - If boot still fails after retry, page reloads once per session to clear stale state.
 - Cache-bust bumped to `20260314-c244`.
+
+LATEST MOVIX IMPORT (2026-03-14)
+- Admin import now accepts Movix URLs and resolves sources via MOVIX_API_BASE.
+- Requires MOVIX_BASE_URL + MOVIX_API_BASE in /etc/zenix.env (optional MOVIX_ACCESS_KEY).

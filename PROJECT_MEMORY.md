@@ -685,3 +685,7 @@ Last update: 2026-03-11
 ## c244 follow-up (2026-03-14)
 - Added a one-time hard reload if boot still fails after retry.
 - Cache-bust updated to `20260314-c244`.
+
+## Movix import (2026-03-14)
+- Admin import supports Movix URLs (movie/series/anime watch links).
+- Backend resolves sources via MOVIX_API_BASE and optional MOVIX_ACCESS_KEY.
