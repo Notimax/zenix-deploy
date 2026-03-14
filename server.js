@@ -1206,6 +1206,23 @@ function parseRepairKey(input) {
   if (!raw) {
     return null;
   }
+  const legacyMatch = raw.match(/^(movie|tv):(\d+)(?::s(\d+)e(\d+))?$/i);
+  if (legacyMatch) {
+    const type = String(legacyMatch[1] || "").toLowerCase();
+    const id = toInt(legacyMatch[2], 0, 0, 999999999);
+    if (!id) {
+      return null;
+    }
+    const season = toInt(legacyMatch[3], 1, 1, 500);
+    const episode = toInt(legacyMatch[4], 1, 1, 50000);
+    return {
+      id,
+      type,
+      season,
+      episode,
+      key: buildRepairKey(id, type, season, episode),
+    };
+  }
   const parts = raw.split(":");
   if (parts.length < 4) {
     return null;
