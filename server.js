@@ -2172,8 +2172,16 @@ function mergeAdminCustomEntries(entries, adminData) {
     if (!entry || typeof entry !== "object") {
       return;
     }
+    const isForced = Boolean(entry.force_duplicate ?? entry.forceDuplicate ?? entry.allow_duplicate ?? entry.allowDuplicate);
     const key = buildSupplementalSemanticKey(entry) || String(entry.id || "");
-    if (!key || seen.has(key)) {
+    if (!key) {
+      return;
+    }
+    if (isForced) {
+      merged.push(entry);
+      return;
+    }
+    if (seen.has(key)) {
       return;
     }
     seen.add(key);
@@ -7653,6 +7661,7 @@ function normalizeAdminCustomEntry(entry) {
   if (!title) {
     return null;
   }
+  const forceDuplicate = Boolean(entry.force_duplicate ?? entry.forceDuplicate ?? entry.allow_duplicate ?? entry.allowDuplicate);
   const type = String(entry.type || "").toLowerCase() === "tv" ? "tv" : "movie";
   const titleKey = normalizeTitleKey(entry.titleKey || title);
   const year = toInt(entry.year, 0, 0, 2099);
@@ -7692,6 +7701,7 @@ function normalizeAdminCustomEntry(entry) {
     supplemental_rank: Number(entry.supplemental_rank || 0),
     supplemental_date: String(entry.supplemental_date || entry.release_date || "").trim(),
     providerLabel: String(entry.providerLabel || "Zenix").trim(),
+    force_duplicate: forceDuplicate,
   };
   if (!normalized.supplemental_rank) {
     normalized.supplemental_rank = scoreSupplementalCandidate(normalized);
@@ -11267,6 +11277,9 @@ async function importAdminEntryByUrl(url) {
     entry = await buildAdminCustomEntryFromMovix(parsed);
   } else if (parsed.provider === "youtube") {
     entry = await buildAdminCustomEntryFromYoutubePlaylist(parsed.playlistId);
+  }
+  if (entry) {
+    entry.force_duplicate = true;
   }
   return entry;
 }

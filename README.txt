@@ -1018,3 +1018,8 @@ LATEST BOOT HARD RELOAD (2026-03-14, c244)
 LATEST MOVIX IMPORT (2026-03-14)
 - Admin import now accepts Movix URLs and resolves sources via MOVIX_API_BASE.
 - Requires MOVIX_BASE_URL + MOVIX_API_BASE in /etc/zenix.env (optional MOVIX_ACCESS_KEY).
+
+LATEST ADMIN DUPLICATE ENTRIES (2026-03-14, c245)
+- Admin imports now mark entries as force-duplicate, so they appear even if a title already exists.
+- Catalog merge skips semantic dedupe for these forced entries.
+- Cache-bust bumped to `20260314-c245`.

@@ -689,3 +689,8 @@ Last update: 2026-03-11
 ## Movix import (2026-03-14)
 - Admin import supports Movix URLs (movie/series/anime watch links).
 - Backend resolves sources via MOVIX_API_BASE and optional MOVIX_ACCESS_KEY.
+
+## c245 follow-up (2026-03-14)
+- Admin imports are marked as force-duplicate, so they remain visible even if a title already exists in the main catalog.
+- Client catalog merge now skips semantic dedupe for forced entries.
+- Cache-bust updated to `20260314-c245`.

@@ -6325,6 +6325,11 @@ function upsertCatalogItems(items, { prepend }) {
     if (!item) {
       continue;
     }
+    if (item.forceDuplicate) {
+      incoming.push(item);
+      map.set(item.id, item);
+      continue;
+    }
 
     if (map.has(item.id)) {
       map.set(item.id, { ...map.get(item.id), ...item });
@@ -6663,6 +6668,12 @@ function normalizeCatalogItem(raw) {
   }
 
   const title = String(raw?.title || "Sans titre");
+  const forceDuplicate = Boolean(
+    raw?.force_duplicate ??
+    raw?.forceDuplicate ??
+    raw?.allow_duplicate ??
+    raw?.allowDuplicate
+  );
   const languageHint = normalizeLanguageLabel(raw?.lang || raw?.language || raw?.langue || "");
   const releaseDate = raw?.release_date || raw?.releaseDate || null;
   const categories = Array.isArray(raw?.categories)
@@ -6702,6 +6713,7 @@ function normalizeCatalogItem(raw) {
     id,
     type,
     title,
+    forceDuplicate,
     titleLower: title.toLowerCase(),
     titleKey: normalizeTitleKey(title),
     poster: normalizeImageUrl(raw?.large_poster_path || raw?.small_poster_path || ""),
