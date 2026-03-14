@@ -991,3 +991,8 @@ LATEST DESKTOP BOOKMARK FLOW (2026-03-14, c238)
 LATEST DESKTOP BOOKMARK OPEN FIX (2026-03-14, c239)
 - Backup popup now tries anchor-click open for zenix.lol and reports popup-block status.
 - Cache-bust bumped to `20260314-c239`.
+
+LATEST BOOT FAILSAFE (2026-03-14, c240)
+- Added a boot guard: if JS doesn't finish init, re-inject zenix.js once after load.
+- init now sets a boot flag and logs init failures to console.
+- Cache-bust bumped to `20260314-c240`.

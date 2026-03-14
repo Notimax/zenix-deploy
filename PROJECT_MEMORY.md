@@ -662,3 +662,8 @@ Last update: 2026-03-11
 ## c239 follow-up (2026-03-14)
 - Backup popup now attempts anchor-click open for zenix.lol and reports popup-block status.
 - Cache-bust updated to `20260314-c239`.
+
+## c240 follow-up (2026-03-14)
+- Added a boot guard to re-inject zenix.js once if init does not complete after load.
+- init now records `__zenixBooted` / `__zenixBootError` for recovery and debugging.
+- Cache-bust updated to `20260314-c240`.

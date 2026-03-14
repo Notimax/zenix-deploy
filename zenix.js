@@ -1,5 +1,9 @@
 ﻿const API_BASE = "/api";
 const STORAGE_KEY = "zenix-progress-v4";
+if (typeof window !== "undefined") {
+  window.__zenixBooted = false;
+  window.__zenixBootError = false;
+}
 const FAVORITES_KEY = "zenix-favorites-v1";
 const FAVORITES_BACKUP_KEY = "zenix-favorites-backup-v1";
 const RATINGS_KEY = "zenix-ratings-v1";
@@ -1394,7 +1398,16 @@ async function completeStartupSplash(startedAt = 0, options = {}) {
   forceHideStartupSplash();
 }
 
-init();
+init().catch((error) => {
+  try {
+    console.error("Zenix init failed", error);
+  } catch {
+    // ignore
+  }
+  if (typeof window !== "undefined") {
+    window.__zenixBootError = true;
+  }
+});
 
 async function init() {
   const splashStartedAt = startStartupSplash();
@@ -1527,6 +1540,9 @@ async function init() {
   maybeShowDiscordGate({ delayMs: 420 });
   scheduleBackupAfterDiscord(BACKUP_PROMPT_DELAY_MS);
   initFloatingNotificationGuard();
+  if (typeof window !== "undefined") {
+    window.__zenixBooted = true;
+  }
 }
 
 function bindFastPress(target, callback, options = {}) {

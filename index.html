@@ -111,7 +111,26 @@
         });
       })();
     </script>
-    <script defer src="/zenix.js?v=20260314-c239"></script>
+    <script defer src="/zenix.js?v=20260314-c240"></script>
+    <script>
+      (function () {
+        if (window.__zenixBootRetryArmed) {
+          return;
+        }
+        window.__zenixBootRetryArmed = true;
+        window.addEventListener("load", function () {
+          setTimeout(function () {
+            if (window.__zenixBooted) {
+              return;
+            }
+            var script = document.createElement("script");
+            script.defer = true;
+            script.src = "/zenix.js?v=20260314-c240&retry=" + Date.now();
+            document.head.appendChild(script);
+          }, 4200);
+        });
+      })();
+    </script>
 </head>
 <body>
   <div class="startup-splash" id="startupSplash" aria-hidden="true" hidden>
