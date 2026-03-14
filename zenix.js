@@ -10912,7 +10912,7 @@ function areProviderTitlesCompatible(leftTitle, rightTitle) {
   return shared >= threshold;
 }
 
-function areTmdbIdsCompatible(leftItem, rightItem) {
+function areTmdbIdsCompatible(leftItem, rightItem, options = {}) {
   const leftId = Number(
     leftItem?.tmdbId ||
       leftItem?.external_tmdb_id ||
@@ -10928,6 +10928,15 @@ function areTmdbIdsCompatible(leftItem, rightItem) {
       0
   );
   if (leftId > 0 && rightId > 0 && leftId !== rightId) {
+    return false;
+  }
+  const strictExternal = options.strictExternal === true;
+  const leftExternal = Boolean(leftItem?.isExternal);
+  const rightExternal = Boolean(rightItem?.isExternal);
+  if (strictExternal && leftExternal && leftId > 0 && rightId <= 0) {
+    return false;
+  }
+  if (strictExternal && rightExternal && rightId > 0 && leftId <= 0) {
     return false;
   }
   return true;
@@ -10958,7 +10967,7 @@ function findInternalProviderCandidate(item, options = {}) {
     if ((candidate.type === "tv" ? "tv" : "movie") !== mediaType) {
       continue;
     }
-    if (!areTmdbIdsCompatible(item, candidate)) {
+    if (!areTmdbIdsCompatible(item, candidate, { strictExternal: true })) {
       continue;
     }
     const candidateTitle = String(candidate.title || candidate.titleKey || "").trim();
@@ -11022,7 +11031,7 @@ async function findInternalProviderCandidateFromSearch(item, options = {}) {
     if ((candidate.type === "tv" ? "tv" : "movie") !== mediaType) {
       continue;
     }
-    if (!areTmdbIdsCompatible(item, candidate)) {
+    if (!areTmdbIdsCompatible(item, candidate, { strictExternal: true })) {
       continue;
     }
     const candidateTitle = String(candidate.title || candidate.titleKey || "").trim();

@@ -1086,6 +1086,11 @@ LATEST SOURCE + REPAIR EXPANSION (2026-03-14, c264)
 - Provider matching now checks TMDB ids when present to avoid wrong-title mapping (e.g. Scream 7).
 - Cache-bust bumped to `20260314-c264`.
 
+LATEST STRICT EXTERNAL MATCH (2026-03-14, c265)
+- External items now require matching TMDB ids when an internal candidate has none.
+- Prevents external titles (e.g. Scream 7) from mapping to a wrong internal match.
+- Cache-bust bumped to `20260314-c265`.
+
 IOS13 ZENIX READER BRUTE (LIVE, 2026-03-14)
 - Script: `__tmp_ios13_zenix_5s_battery.js` (5s per title, WebKit iPhone 13).
 - Selection:
