@@ -7939,6 +7939,25 @@ function resolveMovixAdminEntry(options = {}) {
           return parsed && normalizeTitleKey(row?.title || "") === key;
         }) || null;
     }
+    if (!entry && key && key.length >= 4) {
+      entry =
+        custom.find((row) => {
+          const parsed = parseMovixExternalKey(row?.external_key || row?.externalKey || "");
+          if (!parsed) {
+            return false;
+          }
+          const rowKey = normalizeTitleKey(row?.title || "");
+          if (!rowKey) {
+            return false;
+          }
+          const shorter = key.length <= rowKey.length ? key : rowKey;
+          const longer = key.length <= rowKey.length ? rowKey : key;
+          if (shorter.length < 4) {
+            return false;
+          }
+          return longer.includes(shorter);
+        }) || null;
+    }
   }
 
   if (!entry) {
@@ -12590,6 +12609,10 @@ async function handleZenixSource(req, res, requestUrl) {
   const externalKeyParam = String(requestUrl.searchParams.get("externalKey") || "").trim();
   const mediaId = toInt(requestUrl.searchParams.get("mediaId"), 0, 0, 999999999);
   let tmdbId = toInt(requestUrl.searchParams.get("tmdbId"), 0, 0, 999999999);
+  const movixKeyParsed = parseMovixExternalKey(externalKeyParam);
+  if (movixKeyParsed && movixKeyParsed.mediaType === mediaType && tmdbId <= 0) {
+    tmdbId = movixKeyParsed.tmdbId;
+  }
 
   const youtubeEntry = resolveYoutubeAdminEntry({
     title,

@@ -12051,6 +12051,7 @@ async function appendNakiosSources(item, season, episode, sources) {
   }
 
   const title = String(item?.title || "").trim();
+  const externalKey = String(item?.externalKey || item?.external_key || "").trim();
   if (title.length < 2) {
     return base;
   }
@@ -12065,6 +12066,9 @@ async function appendNakiosSources(item, season, episode, sources) {
     season: String(safeSeason),
     episode: String(safeEpisode),
   });
+  if (externalKey) {
+    params.set("externalKey", externalKey);
+  }
   const tmdbId = await resolveNakiosTmdbId(item);
   if (tmdbId > 0) {
     params.set("tmdbId", String(tmdbId));
@@ -12168,6 +12172,7 @@ async function appendFilmer2Sources(item, season, episode, sources) {
     return base;
   }
   const title = String(item?.title || "").trim();
+  const externalKey = String(item?.externalKey || item?.external_key || "").trim();
   if (!title) {
     return base;
   }
@@ -12179,6 +12184,13 @@ async function appendFilmer2Sources(item, season, episode, sources) {
     season: String(Math.max(1, Number(season || 1))),
     episode: String(Math.max(1, Number(episode || 1))),
   });
+  if (externalKey) {
+    params.set("externalKey", externalKey);
+  }
+  const tmdbId = await resolveNakiosTmdbId(item);
+  if (tmdbId > 0) {
+    params.set("tmdbId", String(tmdbId));
+  }
   if (year > 0) {
     params.set("year", String(year));
   }
@@ -12285,12 +12297,20 @@ async function fetchFilmer2SourcesForItem(item, season = 1, episode = 1) {
   }
   const mediaType = baseItem?.type === "tv" ? "tv" : "movie";
   const year = getItemReleaseYear(baseItem) || getCatalogReleaseYear(baseItem);
+  const externalKey = String(baseItem?.externalKey || baseItem?.external_key || "").trim();
   const params = new URLSearchParams({
     title,
     type: mediaType,
     season: String(Math.max(1, Number(season || 1))),
     episode: String(Math.max(1, Number(episode || 1))),
   });
+  if (externalKey) {
+    params.set("externalKey", externalKey);
+  }
+  const tmdbId = await resolveNakiosTmdbId(baseItem);
+  if (tmdbId > 0) {
+    params.set("tmdbId", String(tmdbId));
+  }
   if (year > 0) {
     params.set("year", String(year));
   }
