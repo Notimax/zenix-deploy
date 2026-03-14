@@ -1010,3 +1010,7 @@ LATEST BADGES + REPAIR MESSAGE (2026-03-14, c242)
 LATEST SW CLEANUP FAILSAFE (2026-03-14, c243)
 - Inline service-worker + cache cleanup added before JS boot (prevents stale blank UI).
 - Cache-bust bumped to `20260314-c243`.
+
+LATEST BOOT HARD RELOAD (2026-03-14, c244)
+- If boot still fails after retry, page reloads once per session to clear stale state.
+- Cache-bust bumped to `20260314-c244`.

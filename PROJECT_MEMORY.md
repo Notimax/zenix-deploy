@@ -681,3 +681,7 @@ Last update: 2026-03-11
 ## c243 follow-up (2026-03-14)
 - Added inline SW/cache cleanup before JS boot to avoid stale blank UI.
 - Cache-bust updated to `20260314-c243`.
+
+## c244 follow-up (2026-03-14)
+- Added a one-time hard reload if boot still fails after retry.
+- Cache-bust updated to `20260314-c244`.

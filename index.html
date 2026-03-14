@@ -142,7 +142,7 @@
         }
       })();
     </script>
-    <script defer src="/zenix.js?v=20260314-c243"></script>
+    <script defer src="/zenix.js?v=20260314-c244"></script>
     <script>
       (function () {
         if (window.__zenixBootRetryArmed) {
@@ -156,9 +156,24 @@
             }
             var script = document.createElement("script");
             script.defer = true;
-            script.src = "/zenix.js?v=20260314-c243&retry=" + Date.now();
+            script.src = "/zenix.js?v=20260314-c244&retry=" + Date.now();
             document.head.appendChild(script);
           }, 4200);
+          setTimeout(function () {
+            if (window.__zenixBooted) {
+              return;
+            }
+            try {
+              var key = "zenix-hard-reload-v1";
+              if (sessionStorage.getItem(key)) {
+                return;
+              }
+              sessionStorage.setItem(key, "1");
+            } catch (e) {
+              // ignore
+            }
+            location.reload();
+          }, 8200);
         });
       })();
     </script>
