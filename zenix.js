@@ -11224,9 +11224,10 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
       if (refreshedOwnedMovieSources.length === 0) {
         warmNakiosSources = await nakiosPromise.then((sources) => (Array.isArray(sources) ? sources : [])).catch(() => []);
       } else {
+        const warmNakiosWaitMs = isLikelyMobileDevice() ? 5200 : 2200;
         warmNakiosSources = await Promise.race([
           nakiosPromise.then((sources) => (Array.isArray(sources) ? sources : [])).catch(() => []),
-          wait(2200).then(() => []),
+          wait(warmNakiosWaitMs).then(() => []),
         ]);
       }
       const refreshedNakiosMovieSources =
@@ -11299,9 +11300,10 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
     if (ownedMovieSources.length === 0) {
       warmNakiosSources = await nakiosPromise.then((sources) => (Array.isArray(sources) ? sources : [])).catch(() => []);
     } else {
+      const warmNakiosWaitMs = isLikelyMobileDevice() ? 5200 : 2200;
       warmNakiosSources = await Promise.race([
         nakiosPromise.then((sources) => (Array.isArray(sources) ? sources : [])).catch(() => []),
-        wait(2200).then(() => []),
+        wait(warmNakiosWaitMs).then(() => []),
       ]);
     }
     const nakiosMovieSources =
@@ -11465,9 +11467,10 @@ async function loadEpisodeStream(
     let warmNakiosSources = Array.isArray(preloadedNakiosSources) ? preloadedNakiosSources : [];
     if (!selectedItem?.isAnime) {
       if (warmNakiosSources.length === 0 && nakiosWarmPromise && typeof nakiosWarmPromise.then === "function") {
+        const warmNakiosWaitMs = isLikelyMobileDevice() ? 5200 : 2200;
         warmNakiosSources = await Promise.race([
           nakiosWarmPromise.then((sources) => (Array.isArray(sources) ? sources : [])).catch(() => []),
-          wait(2200).then(() => []),
+          wait(warmNakiosWaitMs).then(() => []),
         ]);
       }
       if (
@@ -11693,9 +11696,10 @@ async function collectRepairSourcesForItem(item, season = 1, episode = 1) {
   let warmNakiosSources = Array.isArray(resolved?.preloadedNakios) ? resolved.preloadedNakios : [];
   if (!selectedItem?.isAnime) {
     if (warmNakiosSources.length === 0 && resolved?.nakiosPromise) {
+      const warmNakiosWaitMs = isLikelyMobileDevice() ? 5200 : 2200;
       warmNakiosSources = await Promise.race([
         resolved.nakiosPromise.then((sources) => (Array.isArray(sources) ? sources : [])).catch(() => []),
-        wait(2200).then(() => []),
+        wait(warmNakiosWaitMs).then(() => []),
       ]);
     }
     if (warmNakiosSources.length === 0 && ownedMerged.length === 0 && resolved?.nakiosPromise) {
