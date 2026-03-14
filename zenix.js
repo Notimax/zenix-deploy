@@ -10311,14 +10311,26 @@ function filterMovieSourcesForFrench(sources) {
     ["VOSTFR", 2],
     ["VO", 4],
   ]);
-  const formatOrder = new Map([
-    ["hls", 0],
-    ["mp4", 1],
-    ["webm", 2],
-    ["dash", 3],
-    ["embed", 6],
-    ["unknown", 7],
-  ]);
+  const preferMp4 = isLikelyMobileDevice();
+  const formatOrder = new Map(
+    preferMp4
+      ? [
+          ["mp4", 0],
+          ["hls", 1],
+          ["webm", 2],
+          ["dash", 3],
+          ["embed", 6],
+          ["unknown", 7],
+        ]
+      : [
+          ["hls", 0],
+          ["mp4", 1],
+          ["webm", 2],
+          ["dash", 3],
+          ["embed", 6],
+          ["unknown", 7],
+        ]
+  );
   ranked.sort((left, right) => {
     const leftLang = Number(languageOrder.get(left.language) ?? 3);
     const rightLang = Number(languageOrder.get(right.language) ?? 3);
