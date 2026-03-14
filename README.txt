@@ -1038,6 +1038,11 @@ LATEST ZENIX AUTOSWITCH LOCK (2026-03-14, c250)
 - Auto-rescue + fallback can engage even after a user clicks the Zenix chip.
 - Cache-bust bumped to `20260314-c250`.
 
+LATEST MOBILE NAKIOS WARMUP (2026-03-14, c256)
+- Mobile now waits longer for Nakios sources during warmup (5.2s vs 2.2s).
+- Applied to movie refresh + episode warmup to reduce missing Nakios sources on iPhone.
+- Cache-bust bumped to `20260314-c256`.
+
 IOS13 ZENIX READER BRUTE (LIVE, 2026-03-14)
 - Script: `__tmp_ios13_zenix_5s_battery.js` (5s per title, WebKit iPhone 13).
 - Selection:
