@@ -1080,6 +1080,12 @@ LATEST BOOT RELOAD REMOVED (2026-03-14, c263)
 - Boot retry now only injects `zenix.js` once if the first load fails.
 - Cache-bust bumped to `20260314-c263`.
 
+LATEST SOURCE + REPAIR EXPANSION (2026-03-14, c264)
+- Movie source filter now keeps all languages (VF/MULTI/VOSTFR/VO) and embeds; no more source trimming.
+- Repair now retries playback immediately after updating the source pool.
+- Provider matching now checks TMDB ids when present to avoid wrong-title mapping (e.g. Scream 7).
+- Cache-bust bumped to `20260314-c264`.
+
 IOS13 ZENIX READER BRUTE (LIVE, 2026-03-14)
 - Script: `__tmp_ios13_zenix_5s_battery.js` (5s per title, WebKit iPhone 13).
 - Selection:

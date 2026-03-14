@@ -10307,19 +10307,12 @@ function filterMovieSourcesForFrench(sources) {
     index,
     language: String(entry?.language || "").trim().toUpperCase(),
   }));
-  const hasFrenchFriendly = indexed.some(
-    (entry) => entry.language === "VF" || entry.language === "VOSTFR" || entry.language === "MULTI"
-  );
-  if (!hasFrenchFriendly) {
-    return rows;
-  }
-  const withoutVo = indexed.filter((entry) => entry.language !== "VO");
-  const ranked = (withoutVo.length > 0 ? withoutVo : indexed).slice();
+  const ranked = indexed.slice();
   const languageOrder = new Map([
     ["VF", 0],
     ["MULTI", 1],
     ["VOSTFR", 2],
-    ["VO", 4],
+    ["VO", 3],
   ]);
   const preferMp4 = isLikelyMobileDevice();
   const formatOrder = new Map(
@@ -10342,6 +10335,12 @@ function filterMovieSourcesForFrench(sources) {
         ]
   );
   ranked.sort((left, right) => {
+    if (isLikelyMobileDevice()) {
+      const zenixDelta = Number(Boolean(right.entry?.isZenix)) - Number(Boolean(left.entry?.isZenix));
+      if (zenixDelta !== 0) {
+        return zenixDelta;
+      }
+    }
     const leftLang = Number(languageOrder.get(left.language) ?? 3);
     const rightLang = Number(languageOrder.get(right.language) ?? 3);
     if (leftLang !== rightLang) {
@@ -10357,20 +10356,16 @@ function filterMovieSourcesForFrench(sources) {
     if (leftPremium !== rightPremium) {
       return leftPremium - rightPremium;
     }
+    const scoreDelta = Number(right.entry?.score || 0) - Number(left.entry?.score || 0);
+    if (scoreDelta !== 0) {
+      return scoreDelta;
+    }
     return left.index - right.index;
   });
 
-  const directFormats = new Set(["hls", "mp4", "webm", "dash"]);
-  const hasDirectCandidate = ranked.some((row) =>
-    directFormats.has(String(row?.entry?.format || "").trim().toLowerCase())
-  );
   const dedupe = new Set();
   const ordered = [];
   for (const row of ranked) {
-    const format = String(row?.entry?.format || "").trim().toLowerCase();
-    if (hasDirectCandidate && !directFormats.has(format)) {
-      continue;
-    }
     const key = String(row.entry?.url || "").trim();
     if (!key || dedupe.has(key)) {
       continue;
@@ -10917,6 +10912,27 @@ function areProviderTitlesCompatible(leftTitle, rightTitle) {
   return shared >= threshold;
 }
 
+function areTmdbIdsCompatible(leftItem, rightItem) {
+  const leftId = Number(
+    leftItem?.tmdbId ||
+      leftItem?.external_tmdb_id ||
+      leftItem?.externalTmdbId ||
+      leftItem?.tmdb_id ||
+      0
+  );
+  const rightId = Number(
+    rightItem?.tmdbId ||
+      rightItem?.external_tmdb_id ||
+      rightItem?.externalTmdbId ||
+      rightItem?.tmdb_id ||
+      0
+  );
+  if (leftId > 0 && rightId > 0 && leftId !== rightId) {
+    return false;
+  }
+  return true;
+}
+
 function findInternalProviderCandidate(item, options = {}) {
   if (!item) {
     return null;
@@ -10940,6 +10956,9 @@ function findInternalProviderCandidate(item, options = {}) {
       continue;
     }
     if ((candidate.type === "tv" ? "tv" : "movie") !== mediaType) {
+      continue;
+    }
+    if (!areTmdbIdsCompatible(item, candidate)) {
       continue;
     }
     const candidateTitle = String(candidate.title || candidate.titleKey || "").trim();
@@ -11001,6 +11020,9 @@ async function findInternalProviderCandidateFromSearch(item, options = {}) {
       continue;
     }
     if ((candidate.type === "tv" ? "tv" : "movie") !== mediaType) {
+      continue;
+    }
+    if (!areTmdbIdsCompatible(item, candidate)) {
       continue;
     }
     const candidateTitle = String(candidate.title || candidate.titleKey || "").trim();
@@ -11842,6 +11864,20 @@ async function runPlayerRepair() {
   }
   refs.playerRepairBtn.disabled = false;
   refs.playerRepairBtn.classList.remove("is-loading");
+
+  if (!refs.playerOverlay.hidden && state.sourcePool.length > 0) {
+    const resumeTime = Number(refs.playerVideo?.currentTime || 0);
+    const token = ++state.playToken;
+    try {
+      await playFromSourcePoolWithRescue(resumeTime, token, {
+        startIndex: 0,
+        strictIndex: false,
+        skipPremiumFallback: false,
+      });
+    } catch {
+      // keep current state if retry fails
+    }
+  }
 }
 
 async function switchPlayerEpisode(season, episode, options = {}) {
