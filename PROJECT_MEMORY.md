@@ -658,3 +658,7 @@ Last update: 2026-03-11
 ## c238 follow-up (2026-03-14)
 - Desktop backup popup now opens zenix.lol and tells the user to bookmark that tab (Ctrl/Cmd+D).
 - Cache-bust updated to `20260314-c238`.
+
+## c239 follow-up (2026-03-14)
+- Backup popup now attempts anchor-click open for zenix.lol and reports popup-block status.
+- Cache-bust updated to `20260314-c239`.

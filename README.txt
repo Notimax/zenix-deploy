@@ -987,3 +987,7 @@ LATEST IOS SHARE + ONLINE COUNT BOOST (2026-03-14, c237)
 LATEST DESKTOP BOOKMARK FLOW (2026-03-14, c238)
 - Backup popup desktop button now opens zenix.lol and instructs to bookmark that tab.
 - Cache-bust bumped to `20260314-c238`.
+
+LATEST DESKTOP BOOKMARK OPEN FIX (2026-03-14, c239)
+- Backup popup now tries anchor-click open for zenix.lol and reports popup-block status.
+- Cache-bust bumped to `20260314-c239`.

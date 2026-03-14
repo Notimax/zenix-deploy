@@ -3776,12 +3776,20 @@ function initBackupGate() {
         }
       }
       if (!shared && !isMobile) {
-        openBackupPortal();
+        const opened = openBackupPortal({ reason: "bookmark" });
         try {
           await copyText(url);
-          setBackupGateStatus("Onglet zenix.lol ouvert. Utilise Ctrl+D / Cmd+D dans cet onglet.");
+          setBackupGateStatus(
+            opened
+              ? "Onglet zenix.lol ouvert. Utilise Ctrl+D / Cmd+D dans cet onglet."
+              : "Popup bloque. Clique le lien zenix.lol puis Ctrl+D / Cmd+D."
+          );
         } catch {
-          setBackupGateStatus("Onglet zenix.lol ouvert. Utilise Ctrl+D / Cmd+D dans cet onglet.");
+          setBackupGateStatus(
+            opened
+              ? "Onglet zenix.lol ouvert. Utilise Ctrl+D / Cmd+D dans cet onglet."
+              : "Popup bloque. Clique le lien zenix.lol puis Ctrl+D / Cmd+D."
+          );
         }
         return;
       }
@@ -4163,12 +4171,31 @@ function getBackupBookmarkHint() {
   return "Sur PC: Ctrl+D / Cmd+D pour ajouter aux favoris.";
 }
 
-function openBackupPortal() {
+function openBackupPortal(options = {}) {
+  const target = options?.sameTab ? "_self" : "_blank";
+  const url = BACKUP_PORTAL_URL;
+  let opened = false;
   try {
-    window.open(BACKUP_PORTAL_URL, "_blank", "noopener,noreferrer");
+    if (refs.backupGateUrl && refs.backupGateUrl.tagName === "A") {
+      const anchor = refs.backupGateUrl;
+      anchor.rel = "noopener noreferrer";
+      anchor.target = target;
+      anchor.href = url;
+      anchor.click();
+      opened = true;
+    }
   } catch {
     // ignore
   }
+  if (!opened) {
+    try {
+      const win = window.open(url, target, "noopener,noreferrer");
+      opened = Boolean(win);
+    } catch {
+      // ignore
+    }
+  }
+  return opened;
 }
 
 function shouldBoostCoverLoading() {
