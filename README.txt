@@ -1043,6 +1043,11 @@ LATEST MOBILE NAKIOS WARMUP (2026-03-14, c256)
 - Applied to movie refresh + episode warmup to reduce missing Nakios sources on iPhone.
 - Cache-bust bumped to `20260314-c256`.
 
+LATEST MOBILE HLS PROXY PRIORITY (2026-03-14, c257)
+- On iPhone, Zenix sources and known hotlink-sensitive hosts now prefer proxy-first HLS.
+- Reduces direct 403 stalls on hosts like `xalaflix/fastflux` by trying the relay before direct.
+- Cache-bust bumped to `20260314-c257`.
+
 IOS13 ZENIX READER BRUTE (LIVE, 2026-03-14)
 - Script: `__tmp_ios13_zenix_5s_battery.js` (5s per title, WebKit iPhone 13).
 - Selection:

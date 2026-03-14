@@ -14807,7 +14807,26 @@ function shouldPreferProxyFirstForHls(video, source) {
     return false;
   }
   if (isLikelyMobileDevice()) {
-    // On iPhone/iPad, prefer direct HLS first to reduce random proxy 502 failures.
+    const absolute = toAbsoluteUrl(source?.url || "");
+    const target = extractProxyTargetUrl(absolute) || absolute;
+    if (source?.isZenix) {
+      return true;
+    }
+    try {
+      const targetHost = String(new URL(target).hostname || "")
+        .trim()
+        .toLowerCase()
+        .replace(/^www\./, "");
+      if (!targetHost) {
+        return false;
+      }
+      if (/xalaflix|fastflux|fsvid|fsvideo|fembed|dood|uqload|uptostream|vidoza|netu|sibnet/.test(targetHost)) {
+        return true;
+      }
+    } catch {
+      return false;
+    }
+    // Default: prefer direct HLS first on iPhone/iPad.
     return false;
   }
   const absolute = toAbsoluteUrl(source?.url || "");
