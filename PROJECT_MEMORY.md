@@ -654,3 +654,7 @@ Last update: 2026-03-11
 - iPhone backup popup now triggers the share sheet on first tap (uses click handler on iOS).
 - Online count base boosted to +50.
 - Cache-bust updated to `20260314-c237`.
+
+## c238 follow-up (2026-03-14)
+- Desktop backup popup now opens zenix.lol and tells the user to bookmark that tab (Ctrl/Cmd+D).
+- Cache-bust updated to `20260314-c238`.

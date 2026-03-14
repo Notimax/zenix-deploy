@@ -3760,6 +3760,7 @@ function initBackupGate() {
       const url = BACKUP_PORTAL_URL;
       let hinted = false;
       let shared = false;
+      const isMobile = isLikelyMobileDevice();
       const wantsShare = isLikelyMobileDevice() && typeof navigator.share === "function";
       if (wantsShare) {
         try {
@@ -3773,6 +3774,16 @@ function initBackupGate() {
         } catch {
           // ignore share failures
         }
+      }
+      if (!shared && !isMobile) {
+        openBackupPortal();
+        try {
+          await copyText(url);
+          setBackupGateStatus("Onglet zenix.lol ouvert. Utilise Ctrl+D / Cmd+D dans cet onglet.");
+        } catch {
+          setBackupGateStatus("Onglet zenix.lol ouvert. Utilise Ctrl+D / Cmd+D dans cet onglet.");
+        }
+        return;
       }
       if (!shared) {
         try {

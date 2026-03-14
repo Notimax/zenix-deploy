@@ -983,3 +983,7 @@ LATEST IOS SHARE + ONLINE COUNT BOOST (2026-03-14, c237)
 - iPhone backup popup now triggers the share sheet on first tap (uses click handler on iOS).
 - Online count base boosted from +40 to +50.
 - Cache-bust bumped to `20260314-c237`.
+
+LATEST DESKTOP BOOKMARK FLOW (2026-03-14, c238)
+- Backup popup desktop button now opens zenix.lol and instructs to bookmark that tab.
+- Cache-bust bumped to `20260314-c238`.
