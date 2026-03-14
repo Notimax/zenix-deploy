@@ -1399,6 +1399,54 @@ async function completeStartupSplash(startedAt = 0, options = {}) {
   forceHideStartupSplash();
 }
 
+function scheduleUiRecovery(reason = "post-boot") {
+  if (typeof window === "undefined") {
+    return;
+  }
+  if (window.__zenixUiRecoveryScheduled) {
+    return;
+  }
+  window.__zenixUiRecoveryScheduled = true;
+
+  const runCheck = async () => {
+    const cards = document.querySelectorAll(".media-card[data-card-id]").length;
+    const hasNav = Array.isArray(refs.navPills) && refs.navPills.length > 0;
+    if (cards >= 6 && hasNav) {
+      return;
+    }
+    if (document.body.classList.contains("startup-lock")) {
+      document.body.classList.remove("startup-lock");
+      const splash = document.getElementById("startupSplash");
+      if (splash && !splash.hidden) {
+        splash.hidden = true;
+        splash.classList.remove("is-leaving", "is-ending", "is-replaying");
+      }
+    }
+    if (!state.loadingCatalog) {
+      await refreshGateToken({ force: true }).catch(() => {});
+      await loadInitialCatalog().catch(() => {});
+      if (state.catalog.length === 0) {
+        state.catalog = FALLBACK_ITEMS.slice();
+        state.page = 1;
+        state.hasMore = false;
+      }
+      renderAll();
+    }
+    if (state.discordPromptReady) {
+      maybeShowDiscordGate({ delayMs: 200 });
+      scheduleBackupAfterDiscord(BACKUP_PROMPT_DELAY_MS);
+    }
+    const refreshedCards = document.querySelectorAll(".media-card[data-card-id]").length;
+    if (refreshedCards < 4 && !window.__zenixUiRecoveryReloaded) {
+      window.__zenixUiRecoveryReloaded = true;
+      location.reload();
+    }
+  };
+
+  setTimeout(runCheck, 5200);
+  setTimeout(runCheck, 11000);
+}
+
 init().catch((error) => {
   try {
     console.error("Zenix init failed", error);
@@ -1408,6 +1456,7 @@ init().catch((error) => {
   if (typeof window !== "undefined") {
     window.__zenixBootError = true;
   }
+  scheduleUiRecovery("boot-error");
 });
 
 async function init() {
@@ -1544,6 +1593,7 @@ async function init() {
   if (typeof window !== "undefined") {
     window.__zenixBooted = true;
   }
+  scheduleUiRecovery("post-boot");
 }
 
 function bindFastPress(target, callback, options = {}) {
