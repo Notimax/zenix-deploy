@@ -677,3 +677,7 @@ Last update: 2026-03-11
 - Added new card badges: Favori + Vu.
 - Repair now reports actual new sources added (no fake count).
 - Cache-bust updated to `20260314-c242`.
+
+## c243 follow-up (2026-03-14)
+- Added inline SW/cache cleanup before JS boot to avoid stale blank UI.
+- Cache-bust updated to `20260314-c243`.

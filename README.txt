@@ -1006,3 +1006,7 @@ LATEST BADGES + REPAIR MESSAGE (2026-03-14, c242)
 - Added new card badges: Favori + Vu.
 - Repair now reports actual new sources added (no fake count).
 - Cache-bust bumped to `20260314-c242`.
+
+LATEST SW CLEANUP FAILSAFE (2026-03-14, c243)
+- Inline service-worker + cache cleanup added before JS boot (prevents stale blank UI).
+- Cache-bust bumped to `20260314-c243`.
