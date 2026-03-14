@@ -1438,9 +1438,11 @@ function scheduleUiRecovery(reason = "post-boot") {
       scheduleBackupAfterDiscord(BACKUP_PROMPT_DELAY_MS);
     }
     const refreshedCards = document.querySelectorAll(".media-card[data-card-id]").length;
-    if (refreshedCards < 4 && !window.__zenixUiRecoveryReloaded) {
-      window.__zenixUiRecoveryReloaded = true;
-      location.reload();
+    if (refreshedCards < 4 && !window.__zenixUiRecoveryNotified) {
+      window.__zenixUiRecoveryNotified = true;
+      if (refs.syncInfo) {
+        refs.syncInfo.textContent = "Synchronisation en cours... merci de patienter.";
+      }
     }
   };
 
@@ -10839,6 +10841,41 @@ function areProviderTitlesCompatible(leftTitle, rightTitle) {
   const rightKey = normalizeTitleKey(rightTitle || "");
   if (!leftKey || !rightKey) {
     return false;
+  }
+  const extractNumbers = (value) => {
+    const raw = String(value || "");
+    const digits = raw.match(/\d+/g) || [];
+    const romanMap = new Map([
+      ["i", 1],
+      ["ii", 2],
+      ["iii", 3],
+      ["iv", 4],
+      ["v", 5],
+      ["vi", 6],
+      ["vii", 7],
+      ["viii", 8],
+      ["ix", 9],
+      ["x", 10],
+    ]);
+    const roman = raw
+      .toLowerCase()
+      .split(/\s+/)
+      .map((token) => token.replace(/[^ivx]/gi, ""))
+      .filter((token) => romanMap.has(token))
+      .map((token) => romanMap.get(token));
+    return digits.map((n) => Number(n)).concat(roman);
+  };
+  const leftNums = extractNumbers(leftTitle);
+  const rightNums = extractNumbers(rightTitle);
+  if (leftNums.length > 0 || rightNums.length > 0) {
+    if (leftNums.length === 0 || rightNums.length === 0) {
+      return false;
+    }
+    const leftKeyNums = leftNums.join(",");
+    const rightKeyNums = rightNums.join(",");
+    if (leftKeyNums !== rightKeyNums) {
+      return false;
+    }
   }
   if (leftKey === rightKey) {
     return true;

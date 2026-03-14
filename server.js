@@ -9,9 +9,9 @@ const PORT = Number(process.env.PORT || 4173);
 const CANONICAL_HOST = normalizeHostName(process.env.CANONICAL_HOST || "");
 const CANONICAL_SCHEME =
   String(process.env.CANONICAL_SCHEME || "https").trim().toLowerCase() === "http" ? "http" : "https";
-const REMOTE_API_BASE = "https://api.purstream.co/api/v1";
-const PURSTREAM_API_BASE = "https://api.purstream.co/api/v1";
-const PURSTREAM_WEB_BASE = "https://purstream.co";
+const REMOTE_API_BASE = "https://api.purstream.cc/api/v1";
+const PURSTREAM_API_BASE = "https://api.purstream.cc/api/v1";
+const PURSTREAM_WEB_BASE = "https://purstream.cc";
 const NAKIOS_BASE = "https://nakios.site";
 const NAKIOS_HOST = "nakios.site";
 const NAKIOS_API_BASE = "https://api.nakios.site";
@@ -253,9 +253,18 @@ const ADMIN_SESSION_TTL_MS = Math.max(
   15 * 60 * 1000,
   Number(process.env.ZENIX_ADMIN_SESSION_TTL_MS || 12 * 60 * 60 * 1000)
 );
-const ADMIN_DATA_FILE = path.resolve(process.env.ZENIX_ADMIN_DATA_FILE || path.join(ROOT, "admin-data.json"));
+const DEFAULT_DATA_DIR =
+  String(process.env.ZENIX_DATA_DIR || "").trim() ||
+  (process.platform === "win32" ? path.join(ROOT, ".data") : "/var/lib/zenix");
+const DATA_DIR = path.resolve(DEFAULT_DATA_DIR);
+try {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+} catch {
+  // ignore mkdir failures
+}
+const ADMIN_DATA_FILE = path.resolve(process.env.ZENIX_ADMIN_DATA_FILE || path.join(DATA_DIR, "admin-data.json"));
 const BACKUP_CONFIG_FILE = path.resolve(
-  process.env.ZENIX_BACKUP_CONFIG_FILE || path.join(ROOT, "backup-config.json")
+  process.env.ZENIX_BACKUP_CONFIG_FILE || path.join(DATA_DIR, "backup-config.json")
 );
 const ADMIN_LOGIN_WINDOW_MS = Math.max(60 * 1000, Number(process.env.ZENIX_ADMIN_LOGIN_WINDOW_MS || 5 * 60 * 1000));
 const ADMIN_LOGIN_MAX_ATTEMPTS = Math.max(
