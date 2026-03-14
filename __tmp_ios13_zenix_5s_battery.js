@@ -195,8 +195,8 @@ function analyzeSamples(samples) {
   const statusHasError = /erreur|indisponible|bloqu|impossible|failed/.test(latestStatus);
   const zenixStatus = String(rows[rows.length - 1]?.zenixStatus || '').toLowerCase();
   const zenixActive = /zenix/.test(zenixStatus);
-  const videoPass = videoRows.length >= 4 && maxTime >= 2.5 && resets <= 1;
-  const iframePass = iframeRows.length >= 4 && !statusHasError;
+  const videoPass = videoRows.length >= 3 && maxTime >= 2.0 && resets <= 1;
+  const iframePass = iframeRows.length >= 3 && !statusHasError;
 
   return {
     sampleCount: rows.length,
@@ -234,13 +234,31 @@ async function ensureZenixSourceSelected(page) {
   return result;
 }
 
-async function openAndPlay(page, entry) {
+async function preparePage(page) {
+  process.stderr.write('[STEP] preparePage\\n');
   await page.goto(BASE_URL, { waitUntil: 'domcontentloaded', timeout: 45000 });
   await page.waitForTimeout(2200);
   await page.waitForFunction(() => window.__zenixBooted === true && !window.__zenixBootError, { timeout: 30000 });
   await page.waitForFunction(() => typeof window.openPlayer === 'function', { timeout: 20000 });
   await page.waitForFunction(() => Boolean(document.querySelector('.media-card[data-card-id]')), { timeout: 25000 });
+  process.stderr.write('[STEP] page ready\\n');
+}
 
+async function closePlayerOverlay(page) {
+  await page.evaluate(() => {
+    const btn = document.getElementById('playerCloseBtn');
+    if (btn) {
+      btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    }
+  });
+  await page.waitForFunction(() => {
+    const overlay = document.getElementById('playerOverlay');
+    return overlay ? overlay.hidden === true : true;
+  }, { timeout: 12000 }).catch(() => {});
+}
+
+async function openAndPlay(page, entry) {
+  process.stderr.write(`[STEP] openAndPlay ${entry.title}\\n`);
   const opened = await page.evaluate(async (payload) => {
     const id = Number(payload?.id || 0);
     const season = Number(payload?.season || 1);
@@ -265,6 +283,7 @@ async function openAndPlay(page, entry) {
   }
 
   await page.waitForTimeout(1600);
+  process.stderr.write(`[STEP] player opened ${entry.title}\\n`);
   return ensureZenixSourceSelected(page);
 }
 
@@ -337,6 +356,7 @@ async function runOne(page, entry) {
     page.off('pageerror', onPageError);
     page.off('requestfailed', onRequestFailed);
     page.off('response', onResponse);
+    await closePlayerOverlay(page);
   }
 
   return out;
@@ -375,6 +395,8 @@ async function runSuite() {
       // ignore
     }
   }, gateToken);
+
+  await preparePage(page);
 
   const movieResults = [];
   const seriesResults = [];

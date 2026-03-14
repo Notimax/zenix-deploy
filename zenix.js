@@ -2579,10 +2579,10 @@ function bindEvents() {
       nearStart &&
       !refs.playerOverlay.hidden &&
       !state.sourceLoading &&
-      !state.manualSourceLock
+      !isManualSourceLockActive()
     ) {
       window.setTimeout(() => {
-        if (refs.playerOverlay.hidden || state.sourceLoading || state.manualSourceLock) {
+        if (refs.playerOverlay.hidden || state.sourceLoading || isManualSourceLockActive()) {
           return;
         }
         const stillErrorCode = Number(refs.playerVideo?.error?.code || 0);
@@ -12649,6 +12649,17 @@ function clearPlaybackGuard() {
   }
 }
 
+function isManualSourceLockActive() {
+  if (!state.manualSourceLock) {
+    return false;
+  }
+  const current = state.sourcePool[state.sourceIndex] || null;
+  if (isZenixSource(current)) {
+    return false;
+  }
+  return true;
+}
+
 function startPlaybackGuard() {
   clearPlaybackGuard();
   const mobileGuard = isLikelyMobileDevice();
@@ -12677,7 +12688,7 @@ function startPlaybackGuard() {
     if (switchingSource) {
       return;
     }
-    if (state.sourceLoading || state.sourceIndex < 0 || state.manualSourceLock) {
+    if (state.sourceLoading || state.sourceIndex < 0 || isManualSourceLockActive()) {
       return;
     }
     const activePlayToken = Number(state.playToken || 0);
@@ -12986,7 +12997,7 @@ function getFallbackSourceIndex(startIndex, excludeKeys = null) {
 }
 
 async function trySwitchToNextSource() {
-  if (state.manualSourceLock) {
+  if (isManualSourceLockActive()) {
     setPlayerStatus("Source selectionnee indisponible. Choisis une autre source.", true);
     return;
   }
@@ -13139,7 +13150,7 @@ async function playFromSourcePoolWithRescue(resumeTime, token, options = {}) {
     });
     return;
   } catch (firstError) {
-    if (strictIndex || !allowPremiumRescue || !initialSkipPremiumFallback || state.manualSourceLock) {
+    if (strictIndex || !allowPremiumRescue || !initialSkipPremiumFallback || isManualSourceLockActive()) {
       throw firstError;
     }
     const hasPremium = state.sourcePool.some((entry) => Boolean(entry?.premiumHint));
@@ -13867,8 +13878,10 @@ async function switchPlayerSource(index) {
   if (safeIndex === state.sourceIndex) {
     return;
   }
-  state.manualSourceLock = true;
-  state.manualSourceLockedIndex = safeIndex;
+  const nextSource = state.sourcePool[safeIndex] || null;
+  const shouldLock = !isZenixSource(nextSource);
+  state.manualSourceLock = shouldLock;
+  state.manualSourceLockedIndex = shouldLock ? safeIndex : -1;
   const token = ++state.playToken;
   const resumeTime = Number(refs.playerVideo.currentTime || 0);
   try {
@@ -15149,7 +15162,7 @@ async function startTsSegmentFallbackPlayback(video, streamUrl, token) {
 
     const activeSourceIndex = Number(state.sourceIndex);
     const hasAlternativeSource =
-      !state.manualSourceLock &&
+      !isManualSourceLockActive() &&
       Number.isInteger(activeSourceIndex) &&
       activeSourceIndex >= 0 &&
       getFallbackSourceIndex(activeSourceIndex) >= 0;
