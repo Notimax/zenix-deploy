@@ -10397,11 +10397,19 @@ async function fetchHlsUpstreamWithFallback(target, range, signal, method = "GET
     Accept: "*/*",
     "User-Agent": HLS_PROXY_USER_AGENT,
   };
+  const targetHost = String(target?.hostname || "").toLowerCase();
+  const nakiosHeaders = targetHost.endsWith("nakios.site")
+    ? {
+        Referer: "https://nakios.site/",
+        Origin: "https://nakios.site",
+      }
+    : null;
   const headerVariants = [
     {
       Referer: `${target.origin}/`,
       Origin: target.origin,
     },
+    ...(nakiosHeaders ? [nakiosHeaders] : []),
     {
       Referer: `${PURSTREAM_WEB_BASE}/`,
       Origin: PURSTREAM_WEB_BASE,
