@@ -11239,7 +11239,9 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
         ]);
       }
       const refreshedNakiosMovieSources =
-        Array.isArray(warmNakiosSources) && warmNakiosSources.length > 0 ? warmNakiosSources : refreshedOwnedMovieSources;
+        Array.isArray(warmNakiosSources) && warmNakiosSources.length > 0
+          ? mergeSourceLists(refreshedOwnedMovieSources, warmNakiosSources)
+          : refreshedOwnedMovieSources;
       state.sourcePool = filterMovieSourcesForFrench(refreshedNakiosMovieSources);
       state.sourcePool = await appendRepairSources(selectedItem, 1, 1, state.sourcePool);
       nakiosPromise
@@ -11315,7 +11317,9 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
       ]);
     }
     const nakiosMovieSources =
-      Array.isArray(warmNakiosSources) && warmNakiosSources.length > 0 ? warmNakiosSources : ownedMovieSources;
+      Array.isArray(warmNakiosSources) && warmNakiosSources.length > 0
+        ? mergeSourceLists(ownedMovieSources, warmNakiosSources)
+        : ownedMovieSources;
     state.sourcePool = filterMovieSourcesForFrench(nakiosMovieSources);
     state.sourcePool = await appendRepairSources(selectedItem, 1, 1, state.sourcePool);
     nakiosPromise

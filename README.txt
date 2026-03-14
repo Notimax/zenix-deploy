@@ -1063,6 +1063,11 @@ LATEST VFQ LABEL NORMALIZATION (2026-03-14, c260)
 - Prevents VFQ sources from being ranked below MULTI on mobile.
 - Cache-bust bumped to `20260314-c260`.
 
+LATEST MOVIE SOURCE MERGE (2026-03-14, c261)
+- Movie playback now merges Nakios sources with internal/Zenix sources instead of replacing them.
+- Keeps the Zenix relay from direct internal sources even when Nakios sources are present.
+- Cache-bust bumped to `20260314-c261`.
+
 IOS13 ZENIX READER BRUTE (LIVE, 2026-03-14)
 - Script: `__tmp_ios13_zenix_5s_battery.js` (5s per title, WebKit iPhone 13).
 - Selection:
