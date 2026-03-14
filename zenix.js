@@ -685,6 +685,7 @@ const refs = {
   playerSourceSelect: document.getElementById("playerSourceSelect"),
   playerSourceChips: document.getElementById("playerSourceChips"),
   playerSourceApplyBtn: document.getElementById("playerSourceApplyBtn"),
+  playerZenixStatus: document.getElementById("playerZenixStatus"),
   playerRepairBtn: document.getElementById("playerRepairBtn"),
   playerRepairStatus: document.getElementById("playerRepairStatus"),
   playerStepper: document.getElementById("playerStepper"),
@@ -11785,40 +11786,56 @@ function appendAutoZenixRelaySources(sources) {
     return base;
   }
 
-  const seen = new Set(base.map((entry) => getSourceDedupKey(entry)).filter(Boolean));
-  const relayRows = [];
-
-  for (const source of base) {
-    if (!source || source.premiumHint) {
-      continue;
-    }
-    const relayUrl = toZenixRelayUrl(source);
-    const relayKey = canonicalizeSourceUrl(relayUrl);
-    if (!relayUrl || !relayKey || seen.has(relayKey)) {
-      continue;
-    }
-
-    const relayEntry = normalizeSourceEntry(
-      {
-        stream_url: relayUrl,
-        format: source.format || "",
-        quality: source.quality || "Zenix",
-        language: source.language || "",
-        source_name: "Zenix Source",
-      },
-      relayRows.length
-    );
-    if (!relayEntry) {
-      continue;
-    }
-    seen.add(relayKey);
-    relayRows.push(relayEntry);
-  }
-
-  if (relayRows.length === 0) {
+  const alreadyZenix = base.some((entry) => entry && entry.isZenix);
+  if (alreadyZenix) {
     return base;
   }
-  return relayRows.concat(base);
+
+  const pickCandidate = () => {
+    const direct = base.filter((entry) => entry && !entry.premiumHint && !isEmbedSource(entry));
+    if (direct.length > 0) {
+      return direct[0];
+    }
+    const nonEmbed = base.filter((entry) => entry && !isEmbedSource(entry));
+    if (nonEmbed.length > 0) {
+      return nonEmbed[0];
+    }
+    return base.find((entry) => entry) || null;
+  };
+
+  const candidate = pickCandidate();
+  if (!candidate) {
+    return base;
+  }
+
+  const isEmbedCandidate = isEmbedSource(candidate);
+  const relayUrl = isEmbedCandidate
+    ? String(candidate?.url || "").trim()
+    : toZenixRelayUrl(candidate);
+  const relayKey = canonicalizeSourceUrl(relayUrl);
+  if (!relayUrl || !relayKey) {
+    return base;
+  }
+
+  const relayEntry = normalizeSourceEntry(
+    {
+      stream_url: relayUrl,
+      format: candidate.format || "",
+      quality: candidate.quality || "HD",
+      language: candidate.language || "",
+      source_name: "Zenix",
+      isZenix: true,
+    },
+    0
+  );
+
+  if (!relayEntry) {
+    return base;
+  }
+  relayEntry.isZenix = true;
+  relayEntry.zenixMode = isEmbedCandidate ? "embed" : "direct";
+
+  return [relayEntry, ...base];
 }
 
 function getOwnedSourceMediaType(item) {
@@ -13205,6 +13222,12 @@ function normalizeSourceEntry(entry, index) {
     quality,
   });
   const origin = String(entry?.origin || entry?.provider || entry?.source || "").trim();
+  const isZenix = Boolean(
+    entry?.isZenix ||
+      entry?.zenix ||
+      /zenix/i.test(String(entry?.source_name || "")) ||
+      /\/api\/hls-proxy\?url=/i.test(url)
+  );
 
   return {
     url,
@@ -13215,6 +13238,7 @@ function normalizeSourceEntry(entry, index) {
     score,
     premiumHint,
     origin,
+    isZenix,
   };
 }
 
@@ -13549,6 +13573,9 @@ function getSourceDisplayQuality(source) {
 
 function formatSourceLabel(source, index, total) {
   const chunks = [`Source ${index + 1}/${total}`];
+  if (source?.isZenix) {
+    chunks.push("Zenix");
+  }
   const qualityLabel = getSourceDisplayQuality(source);
   const languageLabel = getSourceDisplayLanguage(source);
   if (qualityLabel && qualityLabel !== "Auto") {
@@ -13564,6 +13591,37 @@ function formatSourceLabel(source, index, total) {
     chunks.push("Premium");
   }
   return chunks.join(" - ");
+}
+
+function isZenixSource(source) {
+  return Boolean(source?.isZenix);
+}
+
+function updateZenixStatus() {
+  if (!refs.playerZenixStatus) {
+    return;
+  }
+  if (!Array.isArray(state.sourcePool) || state.sourcePool.length === 0) {
+    refs.playerZenixStatus.textContent = "";
+    refs.playerZenixStatus.classList.remove("is-ok", "is-warn");
+    return;
+  }
+  const hasZenix = state.sourcePool.some((entry) => isZenixSource(entry));
+  if (hasZenix) {
+    const zenixEntry = state.sourcePool.find((entry) => isZenixSource(entry));
+    const mode = String(zenixEntry?.zenixMode || "").toLowerCase();
+    if (mode === "embed") {
+      refs.playerZenixStatus.textContent = "Lecteur Zenix actif (mode externe).";
+    } else {
+      refs.playerZenixStatus.textContent = "Lecteur Zenix actif (compatible).";
+    }
+    refs.playerZenixStatus.classList.add("is-ok");
+    refs.playerZenixStatus.classList.remove("is-warn");
+    return;
+  }
+  refs.playerZenixStatus.textContent = "Lecteur Zenix non compatible pour ce titre.";
+  refs.playerZenixStatus.classList.add("is-warn");
+  refs.playerZenixStatus.classList.remove("is-ok");
 }
 
 function isUnplayablePlayError(error) {
@@ -13647,6 +13705,7 @@ function renderPlayerSourceOptions() {
     if (refs.playerSourceControl) {
       refs.playerSourceControl.hidden = true;
     }
+    updateZenixStatus();
     return;
   }
 
@@ -13667,6 +13726,7 @@ function renderPlayerSourceOptions() {
       const mobileLabel = describeCompatibilityLabel(mobileScore);
       const mobileCompatText = `Mobile ${mobileLabel} ${mobileScore}%`;
       const okBadge = hasSourceSuccess(entry) ? '<span class="player-source-chip-meta-pill player-source-chip-ok">Lecture OK</span>' : "";
+      const zenixBadge = entry?.isZenix ? '<span class="player-source-chip-meta-pill player-source-chip-zenix">Zenix</span>' : "";
       const chip = document.createElement("button");
       chip.type = "button";
       chip.className = "player-source-chip";
@@ -13687,6 +13747,7 @@ function renderPlayerSourceOptions() {
           <span class="player-source-chip-compat" data-score="${score}">${escapeHtml(compatibilityLabel)} ${score}%</span>
         </span>
         <span class="player-source-chip-meta">
+          ${zenixBadge}
           <span class="player-source-chip-meta-pill">${escapeHtml(language)}</span>
           <span class="player-source-chip-meta-pill">${escapeHtml(quality)}</span>
           <span class="player-source-chip-meta-pill">${escapeHtml(format)}</span>
@@ -13714,6 +13775,7 @@ function renderPlayerSourceOptions() {
   if (refs.playerSourceControl) {
     refs.playerSourceControl.hidden = false;
   }
+  updateZenixStatus();
 }
 
 function scheduleHlsLanguageProbe(sources) {

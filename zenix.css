@@ -2705,6 +2705,20 @@ body.in-app-browser .catalog-grid {
   line-height: 1.25;
 }
 
+.player-zenix-status {
+  margin: 6px 0 0;
+  font-size: 0.74rem;
+  color: rgba(255, 255, 255, 0.68);
+}
+
+.player-zenix-status.is-ok {
+  color: rgba(140, 255, 198, 0.95);
+}
+
+.player-zenix-status.is-warn {
+  color: rgba(255, 200, 120, 0.95);
+}
+
 .player-source-control .btn {
   width: 100%;
   justify-content: center;
@@ -5951,6 +5965,13 @@ img[data-image-ready="1"] {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.player-source-chip-zenix {
+  border-color: rgba(126, 255, 176, 0.55);
+  color: rgba(15, 15, 15, 0.95);
+  background: linear-gradient(135deg, rgba(126, 255, 176, 0.95), rgba(77, 214, 255, 0.95));
+  box-shadow: 0 8px 18px rgba(68, 214, 255, 0.22);
 }
 
 .player-source-chip-tags {
