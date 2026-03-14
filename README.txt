@@ -1048,6 +1048,11 @@ LATEST MOBILE HLS PROXY PRIORITY (2026-03-14, c257)
 - Reduces direct 403 stalls on hosts like `xalaflix/fastflux` by trying the relay before direct.
 - Cache-bust bumped to `20260314-c257`.
 
+LATEST MOBILE ZENIX BOOST (2026-03-14, c258)
+- Zenix relay sources now get a mobile-only score boost to rank ahead of premium hotlink sources.
+- Helps iPhone pick the proxy path faster on titles like La Femme de menage.
+- Cache-bust bumped to `20260314-c258`.
+
 IOS13 ZENIX READER BRUTE (LIVE, 2026-03-14)
 - Script: `__tmp_ios13_zenix_5s_battery.js` (5s per title, WebKit iPhone 13).
 - Selection:

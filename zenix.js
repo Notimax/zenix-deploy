@@ -13314,7 +13314,16 @@ function normalizeSourceEntry(entry, index) {
   const quality = String(entry?.quality || entry?.resolution || entry?.label || "").trim();
   const language = normalizeSourceLanguage(entry);
   const host = getSourceHost(url);
-  const score = getSourceScore(format, quality, language, index, host);
+  const isZenix = Boolean(
+    entry?.isZenix ||
+      entry?.zenix ||
+      /zenix/i.test(String(entry?.source_name || "")) ||
+      /\/api\/hls-proxy\?url=/i.test(url)
+  );
+  let score = getSourceScore(format, quality, language, index, host);
+  if (isZenix && isLikelyMobileDevice()) {
+    score += 40;
+  }
   const premiumHint = isPremiumLikeSource({
     url,
     source_name: entry?.source_name,
@@ -13322,12 +13331,6 @@ function normalizeSourceEntry(entry, index) {
     quality,
   });
   const origin = String(entry?.origin || entry?.provider || entry?.source || "").trim();
-  const isZenix = Boolean(
-    entry?.isZenix ||
-      entry?.zenix ||
-      /zenix/i.test(String(entry?.source_name || "")) ||
-      /\/api\/hls-proxy\?url=/i.test(url)
-  );
 
   return {
     url,
