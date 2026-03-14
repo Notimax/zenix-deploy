@@ -366,6 +366,7 @@ const state = {
   itemQualityMap: loadItemQualityMap(),
   hlsLangProbeToken: 0,
   sourceLoading: false,
+  sourceLoadingSince: 0,
   sourceLoadTicket: 0,
   embedLoadStartedAt: 0,
   embedLoadFinishedAt: 0,
@@ -12744,7 +12745,24 @@ function startPlaybackGuard() {
     if (switchingSource) {
       return;
     }
+    const hasNextCandidate = state.sourceIndex + 1 < state.sourcePool.length;
+    const loadingTooLong =
+      state.sourceLoading &&
+      state.sourceLoadingSince &&
+      Date.now() - state.sourceLoadingSince > fallbackStallMs &&
+      hasNextCandidate;
     if (state.sourceLoading || state.sourceIndex < 0 || isManualSourceLockActive()) {
+      if (loadingTooLong) {
+        switchingSource = true;
+        setPlayerStatus("Lecture bloquee, bascule automatique...", true);
+        trySwitchToNextSource()
+          .catch(() => {
+            setPlayerStatus("Erreur video detectee. Choisis une autre source.", true);
+          })
+          .finally(() => {
+            switchingSource = false;
+          });
+      }
       return;
     }
     const activePlayToken = Number(state.playToken || 0);
@@ -12756,7 +12774,6 @@ function startPlaybackGuard() {
     }
     const currentSource = state.sourcePool[state.sourceIndex] || null;
     const statusText = String(refs.playerStatus?.textContent || "").toLowerCase();
-    const hasNextCandidate = state.sourceIndex + 1 < state.sourcePool.length;
     if (isEmbedSource(currentSource)) {
       const embedSince = Number(state.embedLoadFinishedAt || 0) || Number(state.embedLoadStartedAt || 0);
       const embedStallMs = mobileGuard ? MOBILE_EMBED_STALL_SWITCH_MS : EMBED_STALL_SWITCH_MS;
@@ -14816,6 +14833,7 @@ async function startPlayerSource(source, resumeTime, token) {
 
   const loadTicket = ++state.sourceLoadTicket;
   state.sourceLoading = true;
+  state.sourceLoadingSince = Date.now();
   setPlayerLoading(true, "Chargement de la source...");
   if (refs.playerSourceMeta) {
     refs.playerSourceMeta.textContent = formatSourceLabel(
@@ -14941,6 +14959,7 @@ async function startPlayerSource(source, resumeTime, token) {
   } finally {
     if (loadTicket === state.sourceLoadTicket) {
       state.sourceLoading = false;
+      state.sourceLoadingSince = 0;
     }
     if (!sourceStarted) {
       setPlayerLoading(false);
@@ -15609,6 +15628,7 @@ function closePlayer(options = {}) {
   state.sourcePool = [];
   state.sourceIndex = -1;
   state.sourceLoading = false;
+  state.sourceLoadingSince = 0;
   clearManualSourceLock();
   state.allEpisodeSources = [];
   state.availableLanguages = [];
