@@ -607,9 +607,9 @@ const refs = {
   nativeAdDetailSection: document.getElementById("nativeAdDetailSection"),
   nativeAdDetailMount: document.getElementById("nativeAdDetailMount"),
   nativeAdUnit: document.getElementById("nativeAdUnit"),
-  adblockGate: document.getElementById("adblockGate"),
-  adblockRetryBtn: document.getElementById("adblockRetryBtn"),
-  adblockGateStatus: document.getElementById("adblockGateStatus"),
+  adblockGate: document.getElementById("accessGate"),
+  adblockRetryBtn: document.getElementById("accessRetryBtn"),
+  adblockGateStatus: document.getElementById("accessGateStatus"),
   discordGate: document.getElementById("discordGate"),
   discordJoinBtn: document.getElementById("discordJoinBtn"),
   discordLaterBtn: document.getElementById("discordLaterBtn"),
@@ -1456,6 +1456,10 @@ function scheduleUiRecovery(reason = "post-boot") {
     const cards = document.querySelectorAll(".media-card[data-card-id]").length;
     const hasNav = Array.isArray(refs.navPills) && refs.navPills.length > 0;
     if (cards >= 6 && hasNav) {
+      return;
+    }
+    if (state.adblockDetected) {
+      setAdblockGateVisible(true);
       return;
     }
     if (document.body.classList.contains("startup-lock")) {
@@ -4035,7 +4039,7 @@ function setAdblockGateVisible(visible) {
   }
   const nextVisible = Boolean(visible);
   refs.adblockGate.hidden = !nextVisible;
-  document.body.classList.toggle("adblock-locked", nextVisible);
+  document.body.classList.toggle("access-locked", nextVisible);
   if (nextVisible) {
     setDiscordGateVisible(false);
   } else if (isLikelyMobileDevice()) {

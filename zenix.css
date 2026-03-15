@@ -6278,7 +6278,7 @@ img[data-image-ready="1"] {
 }
 
 /* ===== Adblock gate + type classification hardening UI (c154) ===== */
-.adblock-gate {
+.access-gate {
   position: fixed;
   inset: 0;
   z-index: 210;
@@ -6292,7 +6292,7 @@ img[data-image-ready="1"] {
   backdrop-filter: blur(8px);
 }
 
-.adblock-gate-card {
+.access-gate-card {
   width: min(560px, 100%);
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 18px;
@@ -6303,7 +6303,7 @@ img[data-image-ready="1"] {
   box-shadow: 0 24px 62px rgba(0, 0, 0, 0.62);
 }
 
-.adblock-gate-kicker {
+.access-gate-kicker {
   margin: 0 0 8px;
   font-size: 0.76rem;
   letter-spacing: 0.14em;
@@ -6311,45 +6311,45 @@ img[data-image-ready="1"] {
   color: rgba(255, 199, 145, 0.9);
 }
 
-.adblock-gate-card h2 {
+.access-gate-card h2 {
   margin: 0;
   font-size: clamp(1.28rem, 4.8vw, 1.78rem);
 }
 
-.adblock-gate-card p {
+.access-gate-card p {
   margin: 12px 0 0;
   color: var(--muted);
   line-height: 1.55;
 }
 
-.adblock-gate-actions {
+.access-gate-actions {
   margin-top: 16px;
   display: flex;
   justify-content: flex-start;
 }
 
-.adblock-gate-status {
+.access-gate-status {
   margin-top: 12px;
   font-size: 0.82rem;
   color: rgba(255, 255, 255, 0.78);
 }
 
-.adblock-gate-status.is-error {
+.access-gate-status.is-error {
   color: #ff949b;
 }
 
-body.adblock-locked {
+body.access-locked {
   overflow: hidden;
 }
 
-body.adblock-locked main,
-body.adblock-locked .topbar,
-body.adblock-locked .detail-modal,
-body.adblock-locked .player-overlay,
-body.adblock-locked .mobile-tabbar,
-body.adblock-locked .design-updates,
-body.adblock-locked .toast,
-body.adblock-locked .back-to-top {
+body.access-locked main,
+body.access-locked .topbar,
+body.access-locked .detail-modal,
+body.access-locked .player-overlay,
+body.access-locked .mobile-tabbar,
+body.access-locked .design-updates,
+body.access-locked .toast,
+body.access-locked .back-to-top {
   pointer-events: none;
   user-select: none;
 }

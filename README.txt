@@ -155,6 +155,12 @@ LAST BRUTE RESULT (LIVE RERUN, 2026-03-08)
   - F1 + Mercredi runs stayed stable on desktop and iPhone 13 WebKit.
   - iOS fallback statuses (`Fallback iOS actif`, `Lecture segment ...`) can appear transiently without playback failure.
 
+LATEST FIX LOG (2026-03-15)
+- Anti-adblock gate UI hardening:
+  - renamed gate DOM classes/ids to avoid adblock CSS hiding the overlay.
+  - body lock class renamed to `access-locked`.
+  - UI recovery now stops if adblock is detected to avoid reload loops hiding the gate.
+
 LAST BRUTE RESULT (LOCAL AFTER NAKIOS MIGRATION, 2026-03-08)
 - Source: `__tmp_brut_f1_mercredi_matrix_result_after_nakios_local_v2.json`
 - Summary:
