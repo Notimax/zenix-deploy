@@ -39,6 +39,7 @@ const NOCTA_FORCE_MEDIA_IDS = new Set([1507947720]);
 const NOCTA_SCREAM7_DEBUG_URL = "https://cdn.fastflux.xyz/movies/Scream-7-2026.mp4";
 const NOCTA_BANLIEUSARDS3_DEBUG_URL = "https://cdn.fastflux.xyz/movies/Banlieusards-3-2026.mp4";
 const PURSTREAM_CARS_DEBUG_URL = "https://zebi.xalaflix.design/movie/920/free-ibr0mx/master.m3u8";
+const PURSTREAM_CARS_DEBUG_URL_ALT = "https://zebi.xalaflix.design/movie/920/premium-6g65wx/master.m3u8";
 const STRICT_NAKIOS_MATCH = true;
 const MOVIX_BASE62_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const DEFAULT_BROWSER_UA =
@@ -13296,6 +13297,7 @@ async function handleZenixSource(req, res, requestUrl) {
   const isCarsQuatreRoues = isCarsQuatreRouesTarget(title, tmdbId);
   if (mediaType === "movie" && isCarsQuatreRoues && PURSTREAM_CARS_DEBUG_URL) {
     const proxiedUrl = buildHlsProxyPath(PURSTREAM_CARS_DEBUG_URL);
+    const proxiedAlt = PURSTREAM_CARS_DEBUG_URL_ALT ? buildHlsProxyPath(PURSTREAM_CARS_DEBUG_URL_ALT) : "";
     sendJson(res, 200, {
       apiVersion: "zenix-source-v1",
       type: "success",
@@ -13306,7 +13308,7 @@ async function handleZenixSource(req, res, requestUrl) {
         season: 1,
         episode: 1,
         tmdbId: tmdbId > 0 ? tmdbId : 920,
-        count: 1,
+        count: proxiedAlt ? 2 : 1,
         sources: [
           {
             stream_url: proxiedUrl,
@@ -13317,6 +13319,19 @@ async function handleZenixSource(req, res, requestUrl) {
             format: "m3u8",
             priority: 402,
           },
+          ...(proxiedAlt
+            ? [
+                {
+                  stream_url: proxiedAlt,
+                  source_name: "Cars Debug 2",
+                  debug: true,
+                  quality: "Full HD",
+                  language: "MULTI",
+                  format: "m3u8",
+                  priority: 398,
+                },
+              ]
+            : []),
         ],
       },
     });

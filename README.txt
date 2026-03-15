@@ -173,6 +173,7 @@ LATEST FIX LOG (2026-03-15)
   - player now forces the debug-only Banlieusards 3 source and ignores all other readers.
 - Cars : Quatre roues debug hard override:
   - player now forces the debug-only Cars source and ignores all other readers.
+  - added a second debug reader for iPhone fallback (FULL HD MULTI).
 - Start menu validation behavior:
   - sequentially probes all readers (2s window) before locking the first valid one.
   - auto-switch is locked after validation to avoid mid-play source hopping.
