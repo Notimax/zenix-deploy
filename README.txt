@@ -1211,3 +1211,9 @@ LATEST UI BOOT WATCHDOG (2026-03-15, c293)
 LATEST CSS INLINE FALLBACK (2026-03-15, c294)
 - If CSS fails to load, we retry link and inject inline CSS as a fallback.
 - Prevents the “CSS missing” blank style bug on weak connections/CDN hiccups.
+
+LATEST UI SELF-HEAL MONITOR (2026-03-15, c295)
+- Added a periodic UI health monitor (20s) to re-init popups, rebind events, reload catalog if empty, and retry CSS silently.
+- Exposed __zenixCssEnsure in index.html and invoked it during health checks when CSS is missing.
+- One-time hard reload only if repeated health failures and no overlay is open (to avoid disrupting playback).
+

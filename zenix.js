@@ -103,6 +103,10 @@ const HEARTBEAT_KEY = "zenix-client-id-v1";
 const ONLINE_COUNT_BASE = 50;
 const ONLINE_COUNT_POLL_MS = 30 * 1000;
 const ONLINE_COUNT_STALE_MS = ONLINE_COUNT_POLL_MS * 2;
+const UI_HEALTH_INTERVAL_MS = 20000;
+const UI_HEALTH_MIN_CARDS = 3;
+const UI_HEALTH_SOFT_FAILS = 2;
+const UI_HEALTH_HARD_FAILS = 4;
 const UI_PREFS_KEY = "zenix-ui-prefs-v1";
 const RECENT_SEARCHES_KEY = "zenix-recent-searches-v1";
 const SEARCH_SIGNALS_KEY = "zenix-search-signals-v1";
@@ -437,6 +441,10 @@ const state = {
   analyticsClientId: "",
   analyticsDisabled: false,
   analyticsInFlight: false,
+  uiHealthFails: 0,
+  uiHealthLastAt: 0,
+  uiHealthInFlight: false,
+  uiHealthTimer: 0,
   heartbeatTimer: null,
   heartbeatBound: false,
   onlineCount: null,
@@ -1429,6 +1437,185 @@ async function completeStartupSplash(startedAt = 0, options = {}) {
   forceHideStartupSplash();
 }
 
+function hasZenixCssLoaded() {
+  if (typeof document === "undefined") {
+    return true;
+  }
+  if (document.getElementById("zenixInlineCss")) {
+    return true;
+  }
+  const sheets = document.styleSheets || [];
+  for (let i = 0; i < sheets.length; i += 1) {
+    const href = sheets[i]?.href || "";
+    if (href.includes("/zenix.css")) {
+      return true;
+    }
+  }
+  const link = document.getElementById("zenixStylesheet");
+  if (link && link.sheet) {
+    return true;
+  }
+  return false;
+}
+
+function ensureZenixCssLoaded() {
+  if (typeof window === "undefined") {
+    return;
+  }
+  if (hasZenixCssLoaded()) {
+    return;
+  }
+  if (typeof window.__zenixCssEnsure === "function") {
+    window.__zenixCssEnsure();
+    return;
+  }
+  if (typeof window.__zenixCssRetry === "function") {
+    window.__zenixCssRetry();
+  }
+}
+
+function forceUiReloadOnce() {
+  try {
+    if (sessionStorage.getItem("zenix-hard-reload")) {
+      return;
+    }
+    sessionStorage.setItem("zenix-hard-reload", String(Date.now()));
+  } catch {
+    // ignore
+  }
+  try {
+    localStorage.removeItem(CATALOG_CACHE_KEY);
+    localStorage.removeItem(CLEANUP_KEY);
+  } catch {
+    // ignore
+  }
+  try {
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.getRegistrations().then((regs) => {
+        regs.forEach((reg) => reg.unregister());
+      });
+    }
+  } catch {
+    // ignore
+  }
+  setTimeout(() => {
+    if (typeof window !== "undefined") {
+      window.location.reload();
+    }
+  }, 250);
+}
+
+function getUiHealthSnapshot() {
+  const cards = document.querySelectorAll(".media-card[data-card-id]").length;
+  const navCount = Array.isArray(refs.navPills) ? refs.navPills.length : 0;
+  const catalogCount = Array.isArray(state.catalog) ? state.catalog.length : 0;
+  const ready = document.body.classList.contains("is-ready") || Boolean(window.__zenixBooted);
+  const cssOk = hasZenixCssLoaded();
+  return { cards, navCount, catalogCount, ready, cssOk };
+}
+
+function isUiHealthySnapshot(snapshot) {
+  if (!snapshot) {
+    return true;
+  }
+  const hasNav = snapshot.navCount >= 4;
+  const hasCards =
+    snapshot.cards >= UI_HEALTH_MIN_CARDS ||
+    (snapshot.cards >= 1 && snapshot.catalogCount > 0) ||
+    state.loadingCatalog;
+  const hasReady = snapshot.ready || snapshot.catalogCount > 0;
+  return snapshot.cssOk && hasNav && hasCards && hasReady;
+}
+
+async function attemptUiHeal(reason = "health", snapshot = null) {
+  if (state.uiHealthInFlight) {
+    return;
+  }
+  state.uiHealthInFlight = true;
+  try {
+    ensureZenixCssLoaded();
+    ensureRecoveryModules();
+    if (state.adblockDetected) {
+      setAdblockGateVisible(true);
+      return;
+    }
+
+    const overlayOpen = Boolean(!refs.playerOverlay?.hidden || !refs.detailModal?.hidden);
+    const cards = snapshot?.cards ?? document.querySelectorAll(".media-card[data-card-id]").length;
+    const needsCatalog = state.catalog.length === 0 || cards < UI_HEALTH_MIN_CARDS;
+
+    if (!overlayOpen && !state.loadingCatalog && needsCatalog) {
+      await refreshGateToken({ force: true }).catch(() => {});
+      await loadInitialCatalog().catch(() => {});
+      if (state.catalog.length === 0) {
+        state.catalog = FALLBACK_ITEMS.slice();
+        state.page = 1;
+        state.hasMore = false;
+      }
+      renderAll();
+    } else if (!overlayOpen && cards < UI_HEALTH_MIN_CARDS && state.catalog.length > 0) {
+      renderAll();
+    }
+
+    if (state.discordPromptReady) {
+      maybeShowDiscordGate({ delayMs: 200 });
+      scheduleBackupAfterDiscord(BACKUP_PROMPT_DELAY_MS);
+    }
+
+    if (!state.loadingCatalog && state.catalog.length === 0 && !overlayOpen) {
+      if (refs.syncInfo) {
+        refs.syncInfo.textContent = "Synchronisation en cours... merci de patienter.";
+      }
+    }
+  } finally {
+    state.uiHealthInFlight = false;
+  }
+}
+
+function startUiHealthMonitor() {
+  if (typeof window === "undefined") {
+    return;
+  }
+  if (window.__zenixUiHealthMonitorStarted) {
+    return;
+  }
+  window.__zenixUiHealthMonitorStarted = true;
+
+  const run = () => {
+    if (document.visibilityState === "hidden") {
+      return;
+    }
+    const now = Date.now();
+    if (now - state.uiHealthLastAt < Math.max(4000, UI_HEALTH_INTERVAL_MS / 3)) {
+      return;
+    }
+    state.uiHealthLastAt = now;
+
+    const snapshot = getUiHealthSnapshot();
+    if (isUiHealthySnapshot(snapshot)) {
+      state.uiHealthFails = 0;
+      return;
+    }
+
+    state.uiHealthFails += 1;
+    attemptUiHeal("monitor", snapshot).catch(() => {});
+
+    if (
+      state.uiHealthFails >= UI_HEALTH_HARD_FAILS &&
+      !state.loadingCatalog &&
+      refs.playerOverlay?.hidden &&
+      refs.detailModal?.hidden
+    ) {
+      forceUiReloadOnce();
+    } else if (state.uiHealthFails >= UI_HEALTH_SOFT_FAILS && refs.syncInfo) {
+      refs.syncInfo.textContent = "Synchronisation en cours... merci de patienter.";
+    }
+  };
+
+  state.uiHealthTimer = window.setInterval(run, UI_HEALTH_INTERVAL_MS);
+  setTimeout(run, 6000);
+}
+
 function ensureRecoveryModules() {
   if (typeof window === "undefined") {
     return;
@@ -1469,37 +1656,7 @@ function scheduleUiRecovery(reason = "post-boot") {
     return;
   }
   window.__zenixUiRecoveryScheduled = true;
-
-  const forceUiReloadOnce = () => {
-    try {
-      if (sessionStorage.getItem("zenix-hard-reload")) {
-        return;
-      }
-      sessionStorage.setItem("zenix-hard-reload", String(Date.now()));
-    } catch {
-      // ignore
-    }
-    try {
-      localStorage.removeItem(CATALOG_CACHE_KEY);
-      localStorage.removeItem(CLEANUP_KEY);
-    } catch {
-      // ignore
-    }
-    try {
-      if ("serviceWorker" in navigator) {
-        navigator.serviceWorker.getRegistrations().then((regs) => {
-          regs.forEach((reg) => reg.unregister());
-        });
-      }
-    } catch {
-      // ignore
-    }
-    setTimeout(() => {
-      if (typeof window !== "undefined") {
-        window.location.reload();
-      }
-    }, 250);
-  };
+  startUiHealthMonitor();
 
   const runCheck = async () => {
     const cards = document.querySelectorAll(".media-card[data-card-id]").length;
