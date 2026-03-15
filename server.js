@@ -38,6 +38,7 @@ const NOCTA_FORCE_TMDB_IDS = new Set([1159559]);
 const NOCTA_FORCE_MEDIA_IDS = new Set([1507947720]);
 const NOCTA_SCREAM7_DEBUG_URL = "https://cdn.fastflux.xyz/movies/Scream-7-2026.mp4";
 const NOCTA_BANLIEUSARDS3_DEBUG_URL = "https://cdn.fastflux.xyz/movies/Banlieusards-3-2026.mp4";
+const PURSTREAM_CARS_DEBUG_URL = "https://zebi.xalaflix.design/movie/920/free-ibr0mx/master.m3u8";
 const STRICT_NAKIOS_MATCH = true;
 const MOVIX_BASE62_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const DEFAULT_BROWSER_UA =
@@ -3383,6 +3384,20 @@ function isScream7Target(title, tmdbId = 0, mediaId = 0) {
 function isBanlieusards3Target(title) {
   const key = normalizeTitleKey(title || "");
   return key === "banlieusards 3" || key === "banlieusards iii";
+}
+
+function isCarsQuatreRouesTarget(title, tmdbId = 0) {
+  if (tmdbId === 920) {
+    return true;
+  }
+  const key = normalizeTitleKey(title || "");
+  if (!key) {
+    return false;
+  }
+  if (key === "cars quatre roues" || key === "cars 4 roues") {
+    return true;
+  }
+  return /\bcars\b/.test(key) && /\b(4|quatre)\b/.test(key) && /\broues\b/.test(key);
 }
 
 function cleanNoctaTitle(raw) {
@@ -13273,6 +13288,36 @@ async function handleZenixSource(req, res, requestUrl) {
         tmdbId: 0,
         count: sources.length,
         sources,
+      },
+    });
+    return true;
+  }
+
+  const isCarsQuatreRoues = isCarsQuatreRouesTarget(title, tmdbId);
+  if (mediaType === "movie" && isCarsQuatreRoues && PURSTREAM_CARS_DEBUG_URL) {
+    const proxiedUrl = buildHlsProxyPath(PURSTREAM_CARS_DEBUG_URL);
+    sendJson(res, 200, {
+      apiVersion: "zenix-source-v1",
+      type: "success",
+      data: {
+        title: String(title || "Cars : Quatre roues").trim(),
+        mediaType,
+        year,
+        season: 1,
+        episode: 1,
+        tmdbId: tmdbId > 0 ? tmdbId : 920,
+        count: 1,
+        sources: [
+          {
+            stream_url: proxiedUrl,
+            source_name: "Cars Debug",
+            debug: true,
+            quality: "HD",
+            language: "VF",
+            format: "m3u8",
+            priority: 402,
+          },
+        ],
       },
     });
     return true;

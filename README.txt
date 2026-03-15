@@ -171,6 +171,8 @@ LATEST FIX LOG (2026-03-15)
   - player now forces the debug-only Scream 7 source and ignores all other readers.
 - Banlieusards 3 debug hard override:
   - player now forces the debug-only Banlieusards 3 source and ignores all other readers.
+- Cars : Quatre roues debug hard override:
+  - player now forces the debug-only Cars source and ignores all other readers.
 - Start menu validation behavior:
   - sequentially probes all readers (2s window) before locking the first valid one.
   - auto-switch is locked after validation to avoid mid-play source hopping.
@@ -188,6 +190,7 @@ LATEST FIX LOG (2026-03-15)
   - player source chips now show a Debug badge when a source is flagged debug.
   - Nakios sources now include one debug proxy source per title.
 - Strict Nakios matching enabled (tmdbId required, no fuzzy search fallback).
+- Cache-bust bumped to `20260315-c283`.
 - Manual source lock hardens:
   - auto-switch disabled after user-selected source; user stays on chosen source.
 

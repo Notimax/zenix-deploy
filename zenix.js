@@ -5353,6 +5353,17 @@ function isBanlieusards3Item(item) {
   return /\bbanlieusards\b/.test(key) && /\b3\b/.test(key);
 }
 
+function isCarsQuatreRouesItem(item) {
+  const key = normalizeTitleKey(item?.title || "");
+  if (!key) {
+    return false;
+  }
+  if (key === "cars quatre roues" || key === "cars 4 roues") {
+    return true;
+  }
+  return /\bcars\b/.test(key) && /\b(4|quatre)\b/.test(key) && /\broues\b/.test(key);
+}
+
 function resolveCalendarDetailId(entry) {
   const directId = Number(entry?.mediaId || 0);
   if (directId > 0) {
@@ -11498,7 +11509,11 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
 
   const { season: externalSeason, episode: externalEpisode } = getExternalPlaybackContext(selectedItem || item);
 
-  if (selectedItem && selectedItem.type !== "tv" && (isScream7Item(selectedItem) || isBanlieusards3Item(selectedItem))) {
+  if (
+    selectedItem &&
+    selectedItem.type !== "tv" &&
+    (isScream7Item(selectedItem) || isBanlieusards3Item(selectedItem) || isCarsQuatreRouesItem(selectedItem))
+  ) {
     setPlayerStatus("Connexion au lecteur debug...");
     const debugSources = await fetchDebugOnlySources(selectedItem);
     if (token !== state.playToken) {
@@ -12537,7 +12552,7 @@ async function resolveNakiosTmdbId(item) {
 }
 
 async function fetchDebugOnlySources(item) {
-  if (!item || !(isScream7Item(item) || isBanlieusards3Item(item))) {
+  if (!item || !(isScream7Item(item) || isBanlieusards3Item(item) || isCarsQuatreRouesItem(item))) {
     return [];
   }
   const title = String(item?.title || "").trim();
