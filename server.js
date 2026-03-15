@@ -10761,8 +10761,8 @@ async function resolveAnimeSeasons(title, language = "vf", options = {}) {
   return payload;
 }
 
-function buildHlsProxyPath(targetUrl) {
-  return `/api/hls-proxy?url=${encodeURIComponent(String(targetUrl || "").trim())}`;
+function buildHlsProxyPath(targetUrl, proxyPath = "/api/hls-proxy") {
+  return `${proxyPath}?url=${encodeURIComponent(String(targetUrl || "").trim())}`;
 }
 
 function decodeNumericPlaylistTokens(tokens) {
@@ -10902,7 +10902,7 @@ function decodeNumericPlaylistBody(rawBody) {
   return text;
 }
 
-function rewriteHlsPlaylistUri(rawUri, baseUrl) {
+function rewriteHlsPlaylistUri(rawUri, baseUrl, proxyPath = "/api/hls-proxy") {
   const value = String(rawUri || "").trim();
   if (!value || value.startsWith("data:")) {
     return value;
@@ -10914,13 +10914,13 @@ function rewriteHlsPlaylistUri(rawUri, baseUrl) {
     if (!safe) {
       return value;
     }
-    return buildHlsProxyPath(safe.href);
+    return buildHlsProxyPath(safe.href, proxyPath);
   } catch {
     return value;
   }
 }
 
-function rewriteHlsPlaylistBody(playlistBody, baseUrl) {
+function rewriteHlsPlaylistBody(playlistBody, baseUrl, proxyPath = "/api/hls-proxy") {
   const text = String(playlistBody || "");
   const lines = text.split(/\r?\n/);
   const rewritten = lines.map((line) => {
@@ -10935,12 +10935,12 @@ function rewriteHlsPlaylistBody(playlistBody, baseUrl) {
         return rawLine;
       }
       return rawLine.replace(/URI="([^"]+)"/g, (_match, uriValue) => {
-        const proxied = rewriteHlsPlaylistUri(uriValue, baseUrl);
+        const proxied = rewriteHlsPlaylistUri(uriValue, baseUrl, proxyPath);
         return `URI="${proxied}"`;
       });
     }
 
-    return rewriteHlsPlaylistUri(trimmed, baseUrl);
+    return rewriteHlsPlaylistUri(trimmed, baseUrl, proxyPath);
   });
   return rewritten.join("\n");
 }
@@ -11083,6 +11083,9 @@ function isGateProtectedPath(pathname) {
   if (pathname === "/api/suggestions") {
     return false;
   }
+  if (pathname === "/api/hls-proxy-mobile") {
+    return false;
+  }
   if (/^\/api\/gate\//i.test(pathname)) {
     return false;
   }
@@ -11200,8 +11203,17 @@ async function handleGateScript(req, res, requestUrl) {
   return true;
 }
 
+const HLS_PROXY_PATH = "/api/hls-proxy";
+const HLS_PROXY_MOBILE_PATH = "/api/hls-proxy-mobile";
+
+function isAllowedMobileProxyTarget(targetUrl) {
+  const safe = String(targetUrl || "");
+  return /https?:\/\/zebi\.xalaflix\.design\/movie\/920\//i.test(safe);
+}
+
 async function handleHlsProxy(req, res, requestUrl) {
-  if (requestUrl.pathname !== "/api/hls-proxy") {
+  const isMobileProxy = requestUrl.pathname === HLS_PROXY_MOBILE_PATH;
+  if (!isMobileProxy && requestUrl.pathname !== HLS_PROXY_PATH) {
     return false;
   }
   const requestMethod = String(req.method || "GET").toUpperCase();
@@ -11216,6 +11228,11 @@ async function handleHlsProxy(req, res, requestUrl) {
     sendJson(res, 400, { error: "Invalid HLS url" });
     return true;
   }
+  if (isMobileProxy && !isAllowedMobileProxyTarget(target.href)) {
+    sendJson(res, 403, { error: "Forbidden" });
+    return true;
+  }
+  const proxyPath = isMobileProxy ? HLS_PROXY_MOBILE_PATH : HLS_PROXY_PATH;
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), Math.max(18000, PROXY_TIMEOUT_MS));
@@ -11270,11 +11287,11 @@ async function handleHlsProxy(req, res, requestUrl) {
       const buffer = Buffer.from(await upstream.arrayBuffer());
       const rawPlaylist = buffer.toString("utf8");
       const bodyText = decodeNumericPlaylistBody(rawPlaylist);
-      let rewritten = rewriteHlsPlaylistBody(bodyText, target.href);
+      let rewritten = rewriteHlsPlaylistBody(bodyText, target.href, proxyPath);
       if (!rewritten.includes("#EXTM3U")) {
         const rescueDecoded = decodeNumericPlaylistBySeparators(rewritten) || decodeNumericPlaylistBySeparators(rawPlaylist);
         if (rescueDecoded.includes("#EXTM3U")) {
-          rewritten = rewriteHlsPlaylistBody(rescueDecoded, target.href);
+          rewritten = rewriteHlsPlaylistBody(rescueDecoded, target.href, proxyPath);
         }
       }
       if (!rewritten.includes("#EXTM3U")) {
@@ -13298,7 +13315,7 @@ async function handleZenixSource(req, res, requestUrl) {
   if (mediaType === "movie" && isCarsQuatreRoues && PURSTREAM_CARS_DEBUG_URL) {
     const proxiedUrl = buildHlsProxyPath(PURSTREAM_CARS_DEBUG_URL);
     const proxiedAlt = PURSTREAM_CARS_DEBUG_URL_ALT ? buildHlsProxyPath(PURSTREAM_CARS_DEBUG_URL_ALT) : "";
-    const proxiedMobile = `${proxiedUrl}&mobile=1`;
+    const proxiedMobile = buildHlsProxyPath(PURSTREAM_CARS_DEBUG_URL, HLS_PROXY_MOBILE_PATH);
     sendJson(res, 200, {
       apiVersion: "zenix-source-v1",
       type: "success",

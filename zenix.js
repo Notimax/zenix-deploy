@@ -12249,7 +12249,7 @@ function toZenixRelayUrl(source) {
   if (!/^https?:\/\//i.test(absolute)) {
     return "";
   }
-  if (/\/api\/hls-proxy\?url=/i.test(absolute)) {
+  if (isHlsProxyUrl(absolute)) {
     return absolute;
   }
   if (isEmbedSource(source, absolute)) {
@@ -13879,7 +13879,7 @@ function normalizeSourceEntry(entry, index) {
     entry?.isZenix ||
       entry?.zenix ||
       /zenix/i.test(String(entry?.source_name || "")) ||
-      /\/api\/hls-proxy\?url=/i.test(url)
+      /\/api\/hls-proxy(?:-mobile)?\?url=/i.test(url)
   );
   let score = getSourceScore(format, quality, language, index, host);
   if (isZenix && isLikelyMobileDevice()) {
@@ -14919,7 +14919,7 @@ function extractProxyTargetUrl(url) {
   }
   try {
     const parsed = new URL(raw, window.location.href);
-    if (!/\/api\/hls-proxy$/i.test(parsed.pathname)) {
+    if (!/\/api\/hls-proxy(?:-mobile)?$/i.test(parsed.pathname)) {
       return "";
     }
     const target = String(parsed.searchParams.get("url") || "").trim();
@@ -15013,16 +15013,31 @@ function toAbsoluteUrl(raw, fallbackBase = window.location.href) {
   }
 }
 
+function getHlsProxyBasePath(url) {
+  if (/\/api\/hls-proxy-mobile\?url=/i.test(url)) {
+    return "hls-proxy-mobile";
+  }
+  if (/\/api\/hls-proxy\?url=/i.test(url)) {
+    return "hls-proxy";
+  }
+  return "";
+}
+
+function isHlsProxyUrl(url) {
+  return Boolean(getHlsProxyBasePath(url));
+}
+
 function normalizeExistingHlsProxyUrl(rawUrl) {
   const absolute = toAbsoluteUrl(rawUrl);
-  if (!absolute || !/\/api\/hls-proxy(?:\?|$)/i.test(absolute)) {
+  const basePath = absolute ? getHlsProxyBasePath(absolute) : "";
+  if (!basePath) {
     return "";
   }
   const target = extractProxyTargetUrl(absolute);
   if (!target) {
     return "";
   }
-  return `${API_BASE}/hls-proxy?url=${encodeURIComponent(target)}`;
+  return `${API_BASE}/${basePath}?url=${encodeURIComponent(target)}`;
 }
 
 function toHlsProxyUrl(rawUrl) {
@@ -15083,7 +15098,7 @@ function rewritePlaylistLineUriForClient(rawUri, baseUrl) {
   if (/^blob:/i.test(absolute)) {
     return absolute;
   }
-  if (/\/api\/hls-proxy\?url=/i.test(absolute)) {
+  if (isHlsProxyUrl(absolute)) {
     const normalized = toHlsProxyUrl(absolute);
     return normalized ? toAbsoluteUrl(normalized) : absolute;
   }
@@ -15130,7 +15145,7 @@ function pickFirstHlsVariantUrl(masterText, baseUrl) {
         continue;
       }
       const absolute = toAbsoluteUrl(candidate, resolveBase);
-      if (/\/api\/hls-proxy\?url=/i.test(absolute)) {
+      if (isHlsProxyUrl(absolute)) {
         const normalized = toHlsProxyUrl(absolute);
         return normalized ? toAbsoluteUrl(normalized) : absolute;
       }
@@ -15378,7 +15393,7 @@ function buildPlayableSourceCandidates(source, options = {}) {
   }
 
   const candidates = [];
-  const isProxied = /\/api\/hls-proxy\?url=/i.test(absolute);
+  const isProxied = isHlsProxyUrl(absolute);
   const isRemoteHttp = /^https?:\/\//i.test(absolute);
   const looksLikeHls = source?.format === "hls" || /m3u8/i.test(absolute);
   const normalizedProxyAbsolute = toAbsoluteUrl(toHlsProxyUrl(absolute) || absolute);
