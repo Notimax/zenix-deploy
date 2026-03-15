@@ -8486,6 +8486,24 @@ async function resolveNakiosSourcesByTmdbId(mediaType, tmdbId, season = 1, episo
       priority: (language === "VF" ? 390 : language === "MULTI" ? 368 : language === "VOSTFR" ? 356 : 330) - Math.min(40, index * 4),
     });
   });
+  if (out.length > 0) {
+    const debugCandidate = out.find((entry) => entry && entry.format && entry.format !== "embed") || out[0];
+    if (debugCandidate && debugCandidate.stream_url) {
+      const debugUrl = buildHlsProxyPath(debugCandidate.stream_url);
+      const alreadyDebug = out.some(
+        (entry) => String(entry?.stream_url || "") === debugUrl && entry?.debug === true
+      );
+      if (!alreadyDebug) {
+        out.unshift({
+          ...debugCandidate,
+          stream_url: debugUrl,
+          source_name: "Debug",
+          debug: true,
+          priority: Number(debugCandidate.priority || 360) + 2,
+        });
+      }
+    }
+  }
   return out;
 }
 

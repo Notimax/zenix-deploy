@@ -13654,6 +13654,11 @@ function normalizeSourceEntry(entry, index) {
   const quality = String(entry?.quality || entry?.resolution || entry?.label || "").trim();
   const language = normalizeSourceLanguage(entry);
   const host = getSourceHost(url);
+  const debug = Boolean(
+    entry?.debug ||
+      /debug/i.test(String(entry?.source_name || entry?.name || "")) ||
+      /debug/i.test(String(entry?.label || ""))
+  );
   const isZenix = Boolean(
     entry?.isZenix ||
       entry?.zenix ||
@@ -13678,6 +13683,7 @@ function normalizeSourceEntry(entry, index) {
     quality,
     language,
     host,
+    debug,
     score,
     premiumHint,
     origin,
@@ -14069,6 +14075,9 @@ function formatSourceLabel(source, index, total) {
   if (source?.isZenix) {
     chunks.push("Zenix");
   }
+  if (source?.debug) {
+    chunks.push("Debug");
+  }
   const qualityLabel = getSourceDisplayQuality(source);
   const languageLabel = getSourceDisplayLanguage(source);
   if (qualityLabel && qualityLabel !== "Auto") {
@@ -14224,6 +14233,7 @@ function renderPlayerSourceOptions() {
           ? '<span class="player-source-chip-meta-pill player-source-chip-ok">Lecture OK</span>'
           : "";
       const zenixBadge = entry?.isZenix ? '<span class="player-source-chip-meta-pill player-source-chip-zenix">Zenix</span>' : "";
+      const debugBadge = entry?.debug ? '<span class="player-source-chip-meta-pill player-source-chip-debug">Debug</span>' : "";
       const chip = document.createElement("button");
       chip.type = "button";
       chip.className = "player-source-chip";
@@ -14245,6 +14255,7 @@ function renderPlayerSourceOptions() {
         </span>
         <span class="player-source-chip-meta">
           ${zenixBadge}
+          ${debugBadge}
           <span class="player-source-chip-meta-pill">${escapeHtml(language)}</span>
           <span class="player-source-chip-meta-pill">${escapeHtml(quality)}</span>
           <span class="player-source-chip-meta-pill">${escapeHtml(format)}</span>
