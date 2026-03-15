@@ -1123,6 +1123,12 @@ LATEST UI RECOVERY HARD RELOAD (2026-03-15, c271)
 - Clears catalog cache + unregisters service workers before reloading to prevent blank states.
 - Cache-bust bumped to `20260315-c271`.
 
+LATEST PRETTY URLS + SHARE (2026-03-15, c272)
+- URLs now reflect the current view (e.g., `/movie/1234-title`, `/series/5678-title`, `/anime/9876-title`).
+- Watch routes use `/watch/...` with season/episode query when needed.
+- Share now uses the pretty URL for details and playback.
+- Cache-bust bumped to `20260315-c272`.
+
 IOS13 ZENIX READER BRUTE (LIVE, 2026-03-14)
 - Script: `__tmp_ios13_zenix_5s_battery.js` (5s per title, WebKit iPhone 13).
 - Selection:

@@ -236,7 +236,7 @@ const THEME_PREFETCH_LIMIT_ACTIVE = 240;
 const THEME_PREFETCH_BATCH = 8;
 const SEARCH_SIGNAL_MAX = 220;
 const SEARCH_SIGNAL_MAX_AGE_MS = 180 * 24 * 60 * 60 * 1000;
-const LOCK_VISIBLE_ROOT_URL = true;
+const LOCK_VISIBLE_ROOT_URL = false;
 const EXTERNAL_GUARD_ALLOW_HOSTS = new Set(["zenix.best", "www.zenix.best", "discord.com", "www.discord.com", "discord.gg", "www.discord.gg"]);
 const EXTERNAL_GUARD_TRUST_WINDOW_MS = 1300;
 const NATIVE_AD_SCRIPT_SRC = "https://maddenwiped.com/6724b59b8680ca68d3195556ffa48409/invoke.js";
@@ -17080,11 +17080,12 @@ async function copyCurrentLink() {
       watchId: Number(state.nowPlaying.id || 0),
       season: Number(state.nowPlaying.season || 1),
       episode: Number(state.nowPlaying.episode || 1),
+      item: findItemById(state.nowPlaying.id) || state.nowPlaying,
     });
     title = String(state.nowPlaying.title || title).trim();
   } else if (state.selectedDetailId) {
     const item = findItemById(state.selectedDetailId);
-    url = buildShareUrl({ detailId: Number(state.selectedDetailId || 0) });
+    url = buildShareUrl({ detailId: Number(state.selectedDetailId || 0), item });
     title = String(item?.title || title).trim();
   }
   const usedNative = await shareLink(url, title);
@@ -17122,11 +17123,12 @@ async function shareLink(url, title) {
 }
 
 function buildShareUrl(options = {}) {
-  const base = new URL("/", window.location.origin);
+  let base = new URL("/", window.location.origin);
   const watchId = Number(options.watchId || 0);
   const detailId = Number(options.detailId || 0);
+  const item = options.item || null;
   if (watchId > 0) {
-    base.searchParams.set("watch", String(watchId));
+    base = new URL(window.location.origin + buildPrettyRoutePath(item, watchId, true));
     const season = Number(options.season || 0);
     const episode = Number(options.episode || 0);
     if (season > 0) {
@@ -17136,7 +17138,7 @@ function buildShareUrl(options = {}) {
       base.searchParams.set("e", String(episode));
     }
   } else if (detailId > 0) {
-    base.searchParams.set("detail", String(detailId));
+    base = new URL(window.location.origin + buildPrettyRoutePath(item, detailId, false));
   }
   return base.toString();
 }
@@ -17473,6 +17475,43 @@ function applyBrowseParamsToUrl(url) {
   }
 }
 
+function slugifyRouteTitle(value) {
+  const raw = String(value || "").trim().toLowerCase();
+  if (!raw) {
+    return "";
+  }
+  const normalized = raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return normalized || "";
+}
+
+function getRouteTypeSlug(item) {
+  if (!item) {
+    return "movie";
+  }
+  if (item.isAnime) {
+    return "anime";
+  }
+  return item.type === "tv" ? "series" : "movie";
+}
+
+function buildPrettyRoutePath(item, id, isWatch = false) {
+  const safeId = Number(id || 0);
+  if (safeId <= 0) {
+    return "/";
+  }
+  const typeSlug = getRouteTypeSlug(item);
+  const titleSlug = slugifyRouteTitle(item?.title || item?.name || "");
+  const suffix = titleSlug ? `-${titleSlug}` : "";
+  if (isWatch) {
+    return `/watch/${typeSlug}/${safeId}${suffix}`;
+  }
+  return `/${typeSlug}/${safeId}${suffix}`;
+}
+
 function keepVisibleRootUrl(options = {}) {
   if (!LOCK_VISIBLE_ROOT_URL || typeof window === "undefined" || typeof history === "undefined") {
     return;
@@ -17525,16 +17564,11 @@ function setAppRoute(route, options = {}) {
   }
 
   const replace = Boolean(options.replace);
-  const url = new URL(window.location.href);
-  applyBrowseParamsToUrl(url);
-
-  url.searchParams.delete("detail");
-  url.searchParams.delete("watch");
-  url.searchParams.delete("s");
-  url.searchParams.delete("e");
+  let url = new URL(window.location.origin + "/");
 
   if (route?.watch) {
-    url.searchParams.set("watch", String(route.watch));
+    const item = findItemById(route.watch) || state.nowPlaying || null;
+    url = new URL(window.location.origin + buildPrettyRoutePath(item, route.watch, true));
     if (route.season) {
       url.searchParams.set("s", String(route.season));
     }
@@ -17542,7 +17576,10 @@ function setAppRoute(route, options = {}) {
       url.searchParams.set("e", String(route.episode));
     }
   } else if (route?.detail) {
-    url.searchParams.set("detail", String(route.detail));
+    const item = findItemById(route.detail) || null;
+    url = new URL(window.location.origin + buildPrettyRoutePath(item, route.detail, false));
+  } else {
+    applyBrowseParamsToUrl(url);
   }
 
   const next =
@@ -17561,8 +17598,19 @@ function setAppRoute(route, options = {}) {
 
 function readAppRoute() {
   const url = new URL(window.location.href);
-  const watch = Number(url.searchParams.get("watch") || 0);
-  const detail = Number(url.searchParams.get("detail") || 0);
+  let watch = 0;
+  let detail = 0;
+  const path = String(url.pathname || "");
+  const watchMatch = path.match(/^\/watch\/(movie|series|anime)\/(?<id>\d+)/i);
+  const detailMatch = path.match(/^\/(movie|series|anime)\/(?<id>\d+)/i);
+  if (watchMatch?.groups?.id) {
+    watch = Number(watchMatch.groups.id) || 0;
+  } else if (detailMatch?.groups?.id) {
+    detail = Number(detailMatch.groups.id) || 0;
+  } else {
+    watch = Number(url.searchParams.get("watch") || 0);
+    detail = Number(url.searchParams.get("detail") || 0);
+  }
   const season = Number(url.searchParams.get("s") || 0);
   const episode = Number(url.searchParams.get("e") || 0);
   return {
