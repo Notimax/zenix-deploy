@@ -12999,14 +12999,7 @@ function clearPlaybackGuard() {
 }
 
 function isManualSourceLockActive() {
-  if (!state.manualSourceLock) {
-    return false;
-  }
-  const current = state.sourcePool[state.sourceIndex] || null;
-  if (isZenixSource(current)) {
-    return false;
-  }
-  return true;
+  return Boolean(state.manualSourceLock);
 }
 
 function startPlaybackGuard() {
@@ -13037,6 +13030,16 @@ function startPlaybackGuard() {
     if (switchingSource) {
       return;
     }
+    if (isManualSourceLockActive()) {
+      if (
+        state.sourceLoading &&
+        state.sourceLoadingSince &&
+        Date.now() - state.sourceLoadingSince > fallbackStallMs
+      ) {
+        setPlayerStatus("Lecture bloquee. Change la source manuellement.", true);
+      }
+      return;
+    }
     const autoSwitchCooldownActive =
       mobileGuard && Date.now() - Number(state.lastAutoSwitchAt || 0) < MOBILE_AUTO_SWITCH_COOLDOWN_MS;
     const hasNextCandidate = state.sourceIndex + 1 < state.sourcePool.length;
@@ -13045,7 +13048,7 @@ function startPlaybackGuard() {
       state.sourceLoadingSince &&
       Date.now() - state.sourceLoadingSince > fallbackStallMs &&
       hasNextCandidate;
-    if (state.sourceLoading || state.sourceIndex < 0 || isManualSourceLockActive()) {
+    if (state.sourceLoading || state.sourceIndex < 0) {
       if (loadingTooLong && !autoSwitchCooldownActive) {
         switchingSource = true;
         setPlayerStatus("Lecture bloquee, bascule automatique...", true);
@@ -13265,6 +13268,13 @@ function schedulePlaybackHealthMonitor(token, step = 0) {
     if (state.segmentFallback) {
       return;
     }
+    if (isManualSourceLockActive()) {
+      const video = refs.playerVideo;
+      if (video && Number(video.error?.code || 0) > 0) {
+        setPlayerStatus("Erreur video. Change la source manuellement.", true);
+      }
+      return;
+    }
     const currentSource = state.sourcePool[state.sourceIndex] || null;
     if (isEmbedSource(currentSource)) {
       clearPlaybackHealthMonitor();
@@ -13367,6 +13377,10 @@ async function retryCurrentSource(options = {}) {
 }
 
 async function handlePlayerPlaybackError() {
+  if (isManualSourceLockActive()) {
+    setPlayerStatus("Erreur video. Change la source manuellement.", true);
+    return;
+  }
   const videoErrorCode = Number(refs.playerVideo?.error?.code || 0);
   const nearStart = Number(refs.playerVideo?.currentTime || 0) < 1.2;
   if (videoErrorCode === 3 && nearStart) {
@@ -14376,9 +14390,9 @@ async function switchPlayerSource(index) {
     return;
   }
   const nextSource = state.sourcePool[safeIndex] || null;
-  const shouldLock = !isZenixSource(nextSource);
+  const shouldLock = true;
   state.manualSourceLock = shouldLock;
-  state.manualSourceLockedIndex = shouldLock ? safeIndex : -1;
+  state.manualSourceLockedIndex = safeIndex;
   const token = ++state.playToken;
   const resumeTime = Number(refs.playerVideo.currentTime || 0);
   try {

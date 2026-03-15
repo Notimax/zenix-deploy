@@ -174,6 +174,8 @@ LATEST FIX LOG (2026-03-15)
   - player source chips now show a Debug badge when a source is flagged debug.
   - Nakios sources now include one debug proxy source per title.
 - Strict Nakios matching enabled (tmdbId required, no fuzzy search fallback).
+- Manual source lock hardens:
+  - auto-switch disabled after user-selected source; user stays on chosen source.
 
 LAST BRUTE RESULT (LOCAL AFTER NAKIOS MIGRATION, 2026-03-08)
 - Source: `__tmp_brut_f1_mercredi_matrix_result_after_nakios_local_v2.json`
