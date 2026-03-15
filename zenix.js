@@ -417,6 +417,8 @@ const state = {
   detailLangCache: new Map(),
   detailToken: 0,
   playToken: 0,
+  lastPlayerOpenAt: 0,
+  lastPlayerOpenId: 0,
   ignoreVideoErrorUntil: 0,
   manualSourceLock: false,
   manualSourceLockedIndex: -1,
@@ -1545,6 +1547,42 @@ function scheduleUiRecovery(reason = "post-boot") {
   setTimeout(runCheck, 11000);
 }
 
+function bindPlayFallbackDelegation() {
+  if (typeof window !== "undefined") {
+    if (window.__zenixPlayFallbackBound) {
+      return;
+    }
+    window.__zenixPlayFallbackBound = true;
+  }
+
+  document.addEventListener("click", (event) => {
+    if (event.defaultPrevented || !(event.target instanceof HTMLElement)) {
+      return;
+    }
+    const target = event.target.closest(
+      "[data-card-play],[data-top-play],[data-reco-play],#detailPlayBtn"
+    );
+    if (!(target instanceof HTMLElement)) {
+      return;
+    }
+
+    const fallbackId =
+      Number(target.dataset.cardPlay || 0) ||
+      Number(target.dataset.topPlay || 0) ||
+      Number(target.dataset.recoPlay || 0) ||
+      Number(state.selectedDetailId || 0);
+
+    if (!fallbackId) {
+      return;
+    }
+
+    openPlayer(fallbackId).catch(() => {
+      showMessage("Impossible de lancer la lecture.", true);
+    });
+    event.preventDefault();
+  });
+}
+
 init().catch((error) => {
   try {
     console.error("Zenix init failed", error);
@@ -2550,6 +2588,8 @@ function bindEvents() {
     }
     saveLanguagePrefsMap(state.selectedLanguageByMedia);
   });
+
+  bindPlayFallbackDelegation();
 
   bindFastPress(refs.playerCloseBtn, () => {
     closePlayer();
@@ -10837,9 +10877,20 @@ async function toggleTrailerInline(id, forceOpen = false) {
 }
 
 async function openPlayer(id, options = {}) {
+  const nowOpenAt = Date.now();
+  const numericId = Number(id || 0);
+  if (numericId > 0 && state.lastPlayerOpenId === numericId && nowOpenAt - state.lastPlayerOpenAt < 360) {
+    return;
+  }
+  if (numericId > 0) {
+    state.lastPlayerOpenId = numericId;
+    state.lastPlayerOpenAt = nowOpenAt;
+  }
+
   captureModalScrollPosition();
   const item = findItemById(id) || (await buildItemFromDetails(id));
   if (!item) {
+    showMessage("Lecture indisponible pour ce titre.", true);
     throw new Error("Item not found");
   }
   if (!state.gateReady && !state.adblockDetected) {

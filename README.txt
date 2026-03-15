@@ -161,6 +161,9 @@ LATEST FIX LOG (2026-03-15)
   - body lock class renamed to `access-locked`.
   - UI recovery now stops if adblock is detected to avoid reload loops hiding the gate.
 - Access gate renamed again to avoid filters on "gate" keyword (access-layer).
+- Player start menu fallback:
+  - added delegated click fallback for play buttons (card/top/reco/detail) if bindings fail.
+  - guards against double open within 360ms to avoid duplicate overlays.
 - Scream 7 Noctaflix hardening:
   - forced Noctaflix override now triggers by TMDB id/media id + title.
   - Noctaflix fetch headers include full browser UA to avoid HTML blocks.
