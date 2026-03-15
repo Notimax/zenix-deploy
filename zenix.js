@@ -15050,6 +15050,42 @@ function getHlsProxyBasePath(url) {
   return "";
 }
 
+const FSVID_PROXY_HOSTS = new Set(["s1.fsvid.lol"]);
+const FSVID_DIRECT_HOSTS = new Set(["r1.fsvid.lol"]);
+
+function normalizeStreamHost(raw) {
+  if (!raw) {
+    return "";
+  }
+  try {
+    return String(raw).trim().toLowerCase().replace(/^www\./, "");
+  } catch {
+    return "";
+  }
+}
+
+function getStreamHost(rawUrl) {
+  const absolute = toAbsoluteUrl(rawUrl || "");
+  if (!absolute) {
+    return "";
+  }
+  const target = extractProxyTargetUrl(absolute) || absolute;
+  try {
+    const host = new URL(target).hostname || "";
+    return normalizeStreamHost(host);
+  } catch {
+    return "";
+  }
+}
+
+function shouldForceProxyForHost(host) {
+  return FSVID_PROXY_HOSTS.has(normalizeStreamHost(host));
+}
+
+function shouldAvoidProxyForHost(host) {
+  return FSVID_DIRECT_HOSTS.has(normalizeStreamHost(host));
+}
+
 function isHlsProxyUrl(url) {
   return Boolean(getHlsProxyBasePath(url));
 }
@@ -15434,16 +15470,24 @@ function buildPlayableSourceCandidates(source, options = {}) {
   }
 
   const candidates = [];
-  const isProxied = isHlsProxyUrl(absolute);
+  const targetHost = getStreamHost(absolute);
+  const forceProxyHost = shouldForceProxyForHost(targetHost);
+  const avoidProxyHost = shouldAvoidProxyForHost(targetHost);
+  let isProxied = isHlsProxyUrl(absolute);
   const isRemoteHttp = /^https?:\/\//i.test(absolute);
   const looksLikeHls = source?.format === "hls" || /m3u8/i.test(absolute);
   const proxyBase = String(source?.proxyPath || "");
+  let proxiedTarget = isProxied ? extractProxyTargetUrl(absolute) : "";
+  if (avoidProxyHost && isProxied && proxiedTarget) {
+    absolute = proxiedTarget;
+    isProxied = false;
+    proxiedTarget = "";
+  }
   const normalizedProxyAbsolute = toAbsoluteUrl(toHlsProxyUrlWithPath(absolute, proxyBase) || absolute);
-  const proxyUrl = !isProxied && isRemoteHttp ? toHlsProxyUrlWithPath(absolute, proxyBase) : "";
-  const proxiedTarget = isProxied ? extractProxyTargetUrl(absolute) : "";
+  const proxyUrl = !isProxied && isRemoteHttp && !avoidProxyHost ? toHlsProxyUrlWithPath(absolute, proxyBase) : "";
   const forceProxyHls = Boolean(options.forceProxyHls);
   const requireProxy = Boolean(
-    source?.proxyOnly || source?.mobileOnly || (source?.debug && isLikelyMobileDevice())
+    source?.proxyOnly || source?.mobileOnly || (source?.debug && isLikelyMobileDevice()) || forceProxyHost
   );
 
   if (looksLikeHls && forceProxyHls) {
@@ -15510,12 +15554,15 @@ function shouldPreferProxyFirstForHls(video, source) {
       return true;
     }
     try {
-      const targetHost = String(new URL(target).hostname || "")
-        .trim()
-        .toLowerCase()
-        .replace(/^www\./, "");
+      const targetHost = normalizeStreamHost(new URL(target).hostname || "");
       if (!targetHost) {
         return false;
+      }
+      if (shouldAvoidProxyForHost(targetHost)) {
+        return false;
+      }
+      if (shouldForceProxyForHost(targetHost)) {
+        return true;
       }
       if (/xalaflix|fastflux|fsvid|fsvideo|fembed|dood|uqload|uptostream|vidoza|netu|sibnet/.test(targetHost)) {
         return true;
@@ -15532,16 +15579,19 @@ function shouldPreferProxyFirstForHls(video, source) {
   }
   const target = extractProxyTargetUrl(absolute) || absolute;
   try {
-    const targetHost = String(new URL(target).hostname || "")
-      .trim()
-      .toLowerCase()
-      .replace(/^www\./, "");
+    const targetHost = normalizeStreamHost(new URL(target).hostname || "");
     const currentHost = String(window.location.hostname || "")
       .trim()
       .toLowerCase()
       .replace(/^www\./, "");
     if (!targetHost || !currentHost) {
       return false;
+    }
+    if (shouldAvoidProxyForHost(targetHost)) {
+      return false;
+    }
+    if (shouldForceProxyForHost(targetHost)) {
+      return true;
     }
     return targetHost !== currentHost;
   } catch {
