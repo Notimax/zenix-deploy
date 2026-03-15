@@ -32,6 +32,8 @@ const NOCTA_FORCE_OVERRIDES = new Map([
   ["scream 7", `${NOCTA_BASE}/movie/scream-7`],
   ["scream 7 2026", `${NOCTA_BASE}/movie/scream-7`],
 ]);
+const NOCTA_FORCE_TMDB_IDS = new Set([1159559]);
+const NOCTA_FORCE_MEDIA_IDS = new Set([1507947720]);
 const MOVIX_BASE62_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const DEFAULT_BROWSER_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
@@ -71,6 +73,10 @@ const NOCTA_FETCH_HEADERS = {
   Referer: `${NOCTA_BASE}/`,
   Origin: NOCTA_BASE,
   "Accept-Language": DEFAULT_ACCEPT_LANGUAGE,
+  "User-Agent":
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0",
+  Accept:
+    "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
 };
 const NAKIOS_CATALOG_FEEDS = [
   { mediaType: "movie", path: "/api/movies/popular" },
@@ -3344,7 +3350,13 @@ function parseNoctaUrl(input) {
   };
 }
 
-function resolveNoctaForcedUrl(title) {
+function resolveNoctaForcedUrl(title, tmdbId = 0, mediaId = 0) {
+  if (tmdbId > 0 && NOCTA_FORCE_TMDB_IDS.has(tmdbId)) {
+    return NOCTA_FORCE_OVERRIDES.get("scream 7") || "";
+  }
+  if (mediaId > 0 && NOCTA_FORCE_MEDIA_IDS.has(mediaId)) {
+    return NOCTA_FORCE_OVERRIDES.get("scream 7") || "";
+  }
   const key = normalizeTitleKey(title || "");
   if (!key) {
     return "";
@@ -13144,7 +13156,7 @@ async function handleZenixSource(req, res, requestUrl) {
     externalKey: externalKeyParam,
     mediaId,
   });
-  const forcedNoctaUrl = !noctaEntry ? resolveNoctaForcedUrl(title) : "";
+  const forcedNoctaUrl = !noctaEntry ? resolveNoctaForcedUrl(title, tmdbId, mediaId) : "";
   if (noctaEntry || forcedNoctaUrl) {
     const detailUrl =
       String(noctaEntry?.external_detail_url || noctaEntry?.detailUrl || noctaEntry?.pageUrl || forcedNoctaUrl || "")

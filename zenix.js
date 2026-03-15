@@ -12251,6 +12251,14 @@ async function appendZenixOwnedSources(item, season, episode, sources) {
     season: String(safeSeason),
     episode: String(safeEpisode),
   });
+  const title = String(item?.title || "").trim();
+  if (title) {
+    params.set("title", title);
+  }
+  const year = getItemReleaseYear(item);
+  if (year > 0) {
+    params.set("year", String(year));
+  }
 
   try {
     const payload = await fetchJson(`${API_BASE}/zenix-source?${params.toString()}`, {
