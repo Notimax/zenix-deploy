@@ -2067,7 +2067,8 @@ function bindEvents() {
     });
   }
 
-  refs.searchInput.addEventListener("input", (event) => {
+  if (refs.searchInput) {
+    refs.searchInput.addEventListener("input", (event) => {
     const nextQuery = String(event.target.value || "").trim();
     updateSearchInputControls(nextQuery);
     renderSearchSuggestions(nextQuery);
@@ -2126,27 +2127,32 @@ function bindEvents() {
         renderAll();
       }
     }, SEARCH_DEBOUNCE_MS);
-  });
+    });
 
-  refs.searchInput.addEventListener("focus", () => {
-    updateSearchInputControls(refs.searchInput.value || "");
-    renderSearchSuggestions(String(refs.searchInput.value || "").trim());
-  });
+    refs.searchInput.addEventListener("focus", () => {
+      updateSearchInputControls(refs.searchInput.value || "");
+      renderSearchSuggestions(String(refs.searchInput.value || "").trim());
+    });
 
-  refs.searchInput.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") {
-      refs.searchSuggestPanel.hidden = true;
-      return;
-    }
-    if (event.key !== "Enter") {
-      return;
-    }
-    const query = String(refs.searchInput.value || "").trim();
-    if (query.length > 1) {
-      rememberSearchQuery(query);
-    }
-    refs.searchSuggestPanel.hidden = true;
-  });
+    refs.searchInput.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        if (refs.searchSuggestPanel) {
+          refs.searchSuggestPanel.hidden = true;
+        }
+        return;
+      }
+      if (event.key !== "Enter") {
+        return;
+      }
+      const query = String(refs.searchInput.value || "").trim();
+      if (query.length > 1) {
+        rememberSearchQuery(query);
+      }
+      if (refs.searchSuggestPanel) {
+        refs.searchSuggestPanel.hidden = true;
+      }
+    });
+  }
 
   if (refs.searchSuggestPanel) {
     refs.searchSuggestPanel.addEventListener("click", (event) => {
@@ -2460,11 +2466,13 @@ function bindEvents() {
   bindFastPress(refs.detailCloseBtn, () => {
     closeDetails();
   }, { stopPropagation: true });
-  refs.detailModal.addEventListener("click", (event) => {
-    if (event.target === refs.detailModal) {
-      closeDetails();
-    }
-  });
+  if (refs.detailModal) {
+    refs.detailModal.addEventListener("click", (event) => {
+      if (event.target === refs.detailModal) {
+        closeDetails();
+      }
+    });
+  }
 
   bindFastPress(refs.detailPlayBtn, () => {
     if (!state.selectedDetailId) {
@@ -2601,11 +2609,13 @@ function bindEvents() {
   bindFastPress(refs.playerCloseBtn, () => {
     closePlayer();
   }, { stopPropagation: true });
-  refs.playerOverlay.addEventListener("click", (event) => {
-    if (event.target === refs.playerOverlay) {
-      closePlayer();
-    }
-  });
+  if (refs.playerOverlay) {
+    refs.playerOverlay.addEventListener("click", (event) => {
+      if (event.target === refs.playerOverlay) {
+        closePlayer();
+      }
+    });
+  }
 
   if (refs.playerSeasonSelect) {
     refs.playerSeasonSelect.addEventListener("change", () => {
@@ -2753,67 +2763,69 @@ function bindEvents() {
     });
   }
 
-  refs.playerVideo.addEventListener("timeupdate", onPlayerProgress);
-  refs.playerVideo.addEventListener("loadedmetadata", () => {
-    updateActiveSourceLanguageFromPlayback(refs.playerVideo);
-  });
-  refs.playerVideo.addEventListener("canplay", () => {
-    updateActiveSourceLanguageFromPlayback(refs.playerVideo);
-  });
-  refs.playerVideo.addEventListener("play", () => {
-    clearAwaitingUserPlay();
-    setPlayerLoading(false);
-    updateActiveSourceLanguageFromPlayback(refs.playerVideo);
-  });
-  refs.playerVideo.addEventListener("playing", () => {
-    clearAwaitingUserPlay();
-    setPlayerLoading(false);
-    updateActiveSourceLanguageFromPlayback(refs.playerVideo);
-  });
-  refs.playerVideo.addEventListener("pause", () => {
-    saveNowPlayingProgress({ force: true });
-    if (state.segmentFallback) {
-      return;
-    }
-    const currentSource = state.sourcePool[state.sourceIndex] || null;
-    if (isEmbedSource(currentSource)) {
-      return;
-    }
-    const errorCode = Number(refs.playerVideo?.error?.code || 0);
-    const nearStart = Number(refs.playerVideo?.currentTime || 0) < 1;
-    if (
-      errorCode > 0 &&
-      nearStart &&
-      !refs.playerOverlay.hidden &&
-      !state.sourceLoading &&
-      !isManualSourceLockActive()
-    ) {
-      window.setTimeout(() => {
-        if (refs.playerOverlay.hidden || state.sourceLoading || isManualSourceLockActive()) {
-          return;
-        }
-        const stillErrorCode = Number(refs.playerVideo?.error?.code || 0);
-        if (stillErrorCode <= 0) {
-          return;
-        }
-        trySwitchToNextSource().catch(() => {
-          setPlayerStatus("Source indisponible. Aucun secours disponible.", true);
-        });
-      }, 140);
-    }
-  });
-  refs.playerVideo.addEventListener("seeked", () => {
-    saveNowPlayingProgress({ force: true });
-  });
-  refs.playerVideo.addEventListener("ended", onPlayerEnded);
-  refs.playerVideo.addEventListener("error", () => {
-    if (shouldIgnoreVideoErrorFallback()) {
-      return;
-    }
-    handlePlayerPlaybackError().catch(() => {
-      setPlayerStatus("Erreur video detectee. Choisis un autre titre.", true);
+  if (refs.playerVideo) {
+    refs.playerVideo.addEventListener("timeupdate", onPlayerProgress);
+    refs.playerVideo.addEventListener("loadedmetadata", () => {
+      updateActiveSourceLanguageFromPlayback(refs.playerVideo);
     });
-  });
+    refs.playerVideo.addEventListener("canplay", () => {
+      updateActiveSourceLanguageFromPlayback(refs.playerVideo);
+    });
+    refs.playerVideo.addEventListener("play", () => {
+      clearAwaitingUserPlay();
+      setPlayerLoading(false);
+      updateActiveSourceLanguageFromPlayback(refs.playerVideo);
+    });
+    refs.playerVideo.addEventListener("playing", () => {
+      clearAwaitingUserPlay();
+      setPlayerLoading(false);
+      updateActiveSourceLanguageFromPlayback(refs.playerVideo);
+    });
+    refs.playerVideo.addEventListener("pause", () => {
+      saveNowPlayingProgress({ force: true });
+      if (state.segmentFallback) {
+        return;
+      }
+      const currentSource = state.sourcePool[state.sourceIndex] || null;
+      if (isEmbedSource(currentSource)) {
+        return;
+      }
+      const errorCode = Number(refs.playerVideo?.error?.code || 0);
+      const nearStart = Number(refs.playerVideo?.currentTime || 0) < 1;
+      if (
+        errorCode > 0 &&
+        nearStart &&
+        !refs.playerOverlay.hidden &&
+        !state.sourceLoading &&
+        !isManualSourceLockActive()
+      ) {
+        window.setTimeout(() => {
+          if (refs.playerOverlay.hidden || state.sourceLoading || isManualSourceLockActive()) {
+            return;
+          }
+          const stillErrorCode = Number(refs.playerVideo?.error?.code || 0);
+          if (stillErrorCode <= 0) {
+            return;
+          }
+          trySwitchToNextSource().catch(() => {
+            setPlayerStatus("Source indisponible. Aucun secours disponible.", true);
+          });
+        }, 140);
+      }
+    });
+    refs.playerVideo.addEventListener("seeked", () => {
+      saveNowPlayingProgress({ force: true });
+    });
+    refs.playerVideo.addEventListener("ended", onPlayerEnded);
+    refs.playerVideo.addEventListener("error", () => {
+      if (shouldIgnoreVideoErrorFallback()) {
+        return;
+      }
+      handlePlayerPlaybackError().catch(() => {
+        setPlayerStatus("Erreur video detectee. Choisis un autre titre.", true);
+      });
+    });
+  }
   bindFastPress(refs.playerRestartBtn, async () => {
     refs.playerVideo.currentTime = 0;
     try {
@@ -2892,31 +2904,33 @@ function bindEvents() {
     applyPlayerRate(rate, { save: true });
   });
 
-  refs.playerVideo.addEventListener("volumechange", () => {
-    state.uiPrefs.playerVolume = Math.max(0, Math.min(1, Number(refs.playerVideo.volume || 0)));
-    state.uiPrefs.playerMuted = Boolean(refs.playerVideo.muted);
-    saveUiPrefs(state.uiPrefs);
-  });
+  if (refs.playerVideo) {
+    refs.playerVideo.addEventListener("volumechange", () => {
+      state.uiPrefs.playerVolume = Math.max(0, Math.min(1, Number(refs.playerVideo.volume || 0)));
+      state.uiPrefs.playerMuted = Boolean(refs.playerVideo.muted);
+      saveUiPrefs(state.uiPrefs);
+    });
 
-  refs.playerVideo.addEventListener("ratechange", () => {
-    const rate = Number(refs.playerVideo.playbackRate || 1);
-    if (!Number.isFinite(rate)) {
-      return;
-    }
-    state.uiPrefs.playbackRate = Math.min(2, Math.max(0.75, rate));
-    saveUiPrefs(state.uiPrefs);
-    if (refs.playerSpeedSelect) {
-      refs.playerSpeedSelect.value = String(state.uiPrefs.playbackRate);
-    }
-  });
+    refs.playerVideo.addEventListener("ratechange", () => {
+      const rate = Number(refs.playerVideo.playbackRate || 1);
+      if (!Number.isFinite(rate)) {
+        return;
+      }
+      state.uiPrefs.playbackRate = Math.min(2, Math.max(0.75, rate));
+      saveUiPrefs(state.uiPrefs);
+      if (refs.playerSpeedSelect) {
+        refs.playerSpeedSelect.value = String(state.uiPrefs.playbackRate);
+      }
+    });
 
-  refs.playerVideo.addEventListener("dblclick", () => {
-    if (typeof refs.playerVideo.requestFullscreen === "function") {
-      refs.playerVideo.requestFullscreen().catch(() => {
-        // no-op
-      });
-    }
-  });
+    refs.playerVideo.addEventListener("dblclick", () => {
+      if (typeof refs.playerVideo.requestFullscreen === "function") {
+        refs.playerVideo.requestFullscreen().catch(() => {
+          // no-op
+        });
+      }
+    });
+  }
 
   window.addEventListener("keydown", (event) => {
     bumpInteractionWindow(850);

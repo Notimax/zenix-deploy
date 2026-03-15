@@ -1186,3 +1186,20 @@ IOS13 ZENIX READER BRUTE (LIVE, 2026-03-14)
   - Anime: One Piece
 - Result: 5/5 passed (Zenix reader active, playback/iframe stable for 5s).
 - Note: `La Femme de ménage` was attempted but openPlayer failed in the harness; requires a targeted rerun.
+
+LATEST FIX LOG (2026-03-15, c289)
+- iOS debug fallback now keeps proxy path for segment fallback and prefers decoded HLS on debug mobile sources.
+- Mobile-only debug fallback lock window extended to reduce mid-play source hopping.
+- Debug sources on mobile skip validation to avoid false manual locks.
+- Cache-bust bumped to `20260315-c289`.
+
+BRUTE TEST (LIVE, 2026-03-15)
+- Script: `__tmp_ios13_cars_debug_20s.js`
+- Result: 3/3 failed in Playwright WebKit (error code 4, HLS not playable in this environment).
+- Direct HLS probe on WebKit (public stream) also fails, indicating a WebKit/HLS limitation in this environment.
+- Action: rely on real iPhone Safari check; find alternate MP4 source if real device still fails.
+
+LATEST UI EMPTY FIX (2026-03-15, c292)
+- Guard missing DOM nodes so `bindEvents()` cannot crash on partial HTML loads.
+- Fix prevents: categories unclickable, popups missing, catalog not rendering.
+- Keep this guard on every future change if the “UI vide” bug reappears.
