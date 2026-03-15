@@ -30,6 +30,7 @@ const NOCTA_BASE = "https://noctaflix.lol";
 const NOCTA_HOST = "noctaflix.lol";
 const NOCTA_FORCE_OVERRIDES = new Map([
   ["scream 7", `${NOCTA_BASE}/movie/scream-7`],
+  ["scream 7 2026", `${NOCTA_BASE}/movie/scream-7`],
 ]);
 const MOVIX_BASE62_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const DEFAULT_BROWSER_UA =
