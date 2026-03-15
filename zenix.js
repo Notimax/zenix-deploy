@@ -16062,13 +16062,17 @@ async function startHlsPlayback(video, streamUrl, token, options = {}) {
   const keepProxySegments = Boolean(proxyPath || options?.keepProxySegments);
   if (shouldUseNativeHls(video)) {
     const isIOSMobile = isLikelyMobileDevice();
+    const debugBoost = isIOSMobile && Boolean(options?.source?.debug || options?.source?.mobileOnly);
     video.src = streamUrl;
     video.load();
     let nativeError = null;
     try {
-      const nativeTimeout = isIOSMobile
+      let nativeTimeout = isIOSMobile
         ? Math.min(hlsReadyTimeout, IOS_NATIVE_HLS_BOOT_TIMEOUT_MS)
         : Math.min(hlsReadyTimeout, 5200);
+      if (debugBoost && !probeOnly) {
+        nativeTimeout = Math.max(nativeTimeout, 7000);
+      }
       await waitVideoReady(video, nativeTimeout);
       return;
     } catch (error) {
@@ -16078,15 +16082,8 @@ async function startHlsPlayback(video, streamUrl, token, options = {}) {
       }
 
       if (isIOSMobile) {
-        try {
-          const segmentFallbackStarted = await startTsSegmentFallbackPlayback(video, streamUrl, token, {
-            proxyPath,
-            keepProxy: keepProxySegments,
-          });
-          if (segmentFallbackStarted) {
-            return;
-          }
-        } catch (segmentError) {
+        const preferDecoded = debugBoost;
+        if (preferDecoded) {
           try {
             await tryDecodedHlsBlobPlayback(
               video,
@@ -16096,7 +16093,39 @@ async function startHlsPlayback(video, streamUrl, token, options = {}) {
             );
             return;
           } catch (decodedError) {
-            throw decodedError || segmentError || nativeError || new Error("Native HLS bootstrap failed");
+            try {
+              const segmentFallbackStarted = await startTsSegmentFallbackPlayback(video, streamUrl, token, {
+                proxyPath,
+                keepProxy: keepProxySegments,
+              });
+              if (segmentFallbackStarted) {
+                return;
+              }
+            } catch (segmentError) {
+              throw decodedError || segmentError || nativeError || new Error("Native HLS bootstrap failed");
+            }
+          }
+        } else {
+          try {
+            const segmentFallbackStarted = await startTsSegmentFallbackPlayback(video, streamUrl, token, {
+              proxyPath,
+              keepProxy: keepProxySegments,
+            });
+            if (segmentFallbackStarted) {
+              return;
+            }
+          } catch (segmentError) {
+            try {
+              await tryDecodedHlsBlobPlayback(
+                video,
+                streamUrl,
+                Math.min(hlsReadyTimeout + 2600, IOS_DECODED_HLS_BOOT_TIMEOUT_MS),
+                { proxyPath }
+              );
+              return;
+            } catch (decodedError) {
+              throw decodedError || segmentError || nativeError || new Error("Native HLS bootstrap failed");
+            }
           }
         }
       }
