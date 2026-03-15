@@ -35,6 +35,7 @@ const NOCTA_FORCE_OVERRIDES = new Map([
 const NOCTA_FORCE_TMDB_IDS = new Set([1159559]);
 const NOCTA_FORCE_MEDIA_IDS = new Set([1507947720]);
 const NOCTA_SCREAM7_DEBUG_URL = "https://cdn.fastflux.xyz/movies/Scream-7-2026.mp4";
+const STRICT_NAKIOS_MATCH = true;
 const MOVIX_BASE62_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const DEFAULT_BROWSER_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
@@ -12999,10 +13000,12 @@ async function handleZenixSeasons(req, res, requestUrl) {
   }
 
   if (tmdbId <= 0 && title.length >= 2) {
-    try {
-      tmdbId = await resolveNakiosTmdbIdBySearch(title, mediaType, year);
-    } catch {
-      tmdbId = 0;
+    if (!STRICT_NAKIOS_MATCH) {
+      try {
+        tmdbId = await resolveNakiosTmdbIdBySearch(title, mediaType, year);
+      } catch {
+        tmdbId = 0;
+      }
     }
   }
 
@@ -13218,6 +13221,7 @@ async function handleZenixSource(req, res, requestUrl) {
         noctaSources.unshift({
           stream_url: proxiedUrl,
           source_name: "Scream 7 Debug",
+          debug: true,
           quality: "HD",
           language: "VF",
           format: "mp4",
@@ -13255,6 +13259,23 @@ async function handleZenixSource(req, res, requestUrl) {
   }
 
   if (tmdbId <= 0) {
+    if (STRICT_NAKIOS_MATCH) {
+      sendJson(res, 200, {
+        apiVersion: "zenix-source-v1",
+        type: "success",
+        data: {
+          title,
+          mediaType,
+          year,
+          season: mediaType === "tv" ? season : 1,
+          episode: mediaType === "tv" ? episode : 1,
+          tmdbId: 0,
+          count: 0,
+          sources: [],
+        },
+      });
+      return true;
+    }
     if (title.length < 2) {
       sendJson(res, 200, {
         apiVersion: "zenix-source-v1",
@@ -13302,7 +13323,9 @@ async function handleZenixSource(req, res, requestUrl) {
   }
 
   if (!movixEntry && sources.length === 0 && title.length >= 2) {
-    if (year > 0) {
+    if (STRICT_NAKIOS_MATCH) {
+      // strict mode: no fuzzy fallback when tmdbId missing/mismatched
+    } else if (year > 0) {
       try {
         const altTmdbId = await resolveNakiosTmdbIdBySearch(cleanedTitle || title, mediaType, 0);
         if (altTmdbId > 0 && altTmdbId !== tmdbId) {
@@ -13459,6 +13482,23 @@ async function handleNakiosSource(req, res, requestUrl) {
   let tmdbId = toInt(requestUrl.searchParams.get("tmdbId"), 0, 0, 999999999);
 
   if (tmdbId <= 0) {
+    if (STRICT_NAKIOS_MATCH) {
+      sendJson(res, 200, {
+        apiVersion: "zenix-source-v1",
+        type: "success",
+        data: {
+          title,
+          mediaType,
+          year,
+          season: mediaType === "tv" ? season : 1,
+          episode: mediaType === "tv" ? episode : 1,
+          tmdbId: 0,
+          count: 0,
+          sources: [],
+        },
+      });
+      return true;
+    }
     if (title.length < 2) {
       sendJson(res, 400, { error: "Missing title or tmdbId" });
       return true;
