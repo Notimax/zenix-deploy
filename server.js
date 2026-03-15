@@ -14361,7 +14361,9 @@ const server = http.createServer((req, res) => {
       });
     })
     .catch(() => {
-      sendJson(res, 500, { error: "Internal server error" });
+      if (!res.headersSent) {
+        sendJson(res, 500, { error: "Internal server error" });
+      }
     });
 });
 
