@@ -1207,3 +1207,7 @@ LATEST UI EMPTY FIX (2026-03-15, c292)
 LATEST UI BOOT WATCHDOG (2026-03-15, c293)
 - If core JS fails to boot, a one-time watchdog re-injects `zenix.js` and reloads.
 - Prevents intermittent blank UI when CDN or network drops the JS/CSS load.
+
+LATEST CSS INLINE FALLBACK (2026-03-15, c294)
+- If CSS fails to load, we retry link and inject inline CSS as a fallback.
+- Prevents the “CSS missing” blank style bug on weak connections/CDN hiccups.

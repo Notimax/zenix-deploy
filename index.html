@@ -101,13 +101,61 @@
           };
           document.head.appendChild(link);
         }
+        function injectCssInline(text) {
+          if (!text || text.length < 500) {
+            return;
+          }
+          if (document.getElementById("zenixInlineCss")) {
+            return;
+          }
+          var style = document.createElement("style");
+          style.id = "zenixInlineCss";
+          style.textContent = text;
+          document.head.appendChild(style);
+        }
+        function fetchCssInline() {
+          if (window.__zenixCssInlineInFlight) {
+            return;
+          }
+          window.__zenixCssInlineInFlight = true;
+          var inlineHref = cssHref + (cssHref.indexOf("?") === -1 ? "?" : "&") + "inline=" + Date.now();
+          fetch(inlineHref, { cache: "no-store" })
+            .then(function (res) {
+              if (!res.ok) {
+                return "";
+              }
+              return res.text();
+            })
+            .then(function (text) {
+              injectCssInline(text);
+            })
+            .catch(function () {})
+            .finally(function () {
+              window.__zenixCssInlineInFlight = false;
+            });
+        }
+        function ensureCss() {
+          if (hasCss()) {
+            return;
+          }
+          retryCss();
+          setTimeout(function () {
+            if (!hasCss()) {
+              fetchCssInline();
+            }
+          }, 1200);
+        }
         window.__zenixCssRetry = retryCss;
         window.addEventListener("load", function () {
           setTimeout(function () {
-            if (!hasCss()) {
-              retryCss();
-            }
+            ensureCss();
           }, 200);
+          setTimeout(function () {
+            ensureCss();
+          }, 2000);
+          setTimeout(function () {
+            ensureCss();
+          }, 4200);
         });
       })();
     </script>
@@ -142,7 +190,7 @@
         }
       })();
     </script>
-    <script id="zenixCoreScript" defer src="/zenix.js?v=20260315-c293"></script>
+    <script id="zenixCoreScript" defer src="/zenix.js?v=20260315-c294"></script>
     <script>
       (function () {
         var core = document.getElementById("zenixCoreScript");
@@ -175,7 +223,7 @@
             }
             var script = document.createElement("script");
             script.defer = true;
-            script.src = "/zenix.js?v=20260315-c293&retry=" + Date.now();
+            script.src = "/zenix.js?v=20260315-c294&retry=" + Date.now();
             document.head.appendChild(script);
           }, 4200);
         });
@@ -203,7 +251,7 @@
             }
             var script = document.createElement("script");
             script.defer = true;
-            script.src = "/zenix.js?v=20260315-c293&watch=" + Date.now();
+            script.src = "/zenix.js?v=20260315-c294&watch=" + Date.now();
             document.head.appendChild(script);
             setTimeout(function () {
               if (!window.__zenixBooted) {
