@@ -5330,7 +5330,13 @@ function isScream7Item(item) {
   if (!key) {
     return false;
   }
-  return key.includes("scream 7");
+  if (key.includes("scream 7")) {
+    return true;
+  }
+  if (key.includes("scream vii")) {
+    return true;
+  }
+  return /\bscream\b/.test(key) && /\b7\b/.test(key);
 }
 
 function resolveCalendarDetailId(entry) {
@@ -13161,7 +13167,7 @@ function clearPlaybackGuard() {
 }
 
 function isManualSourceLockActive() {
-  return Boolean(state.manualSourceLock);
+  return Boolean(state.manualSourceLock || state.sourceValidationActive);
 }
 
 function startPlaybackGuard() {
@@ -14091,10 +14097,11 @@ async function playFromSourcePoolWithValidation(resumeTime, token, options = {})
     ? sourceIndexes.filter((index) => !isEmbedSource(state.sourcePool[index]))
     : sourceIndexes.slice();
   const probeIndexes = primary.length > 0 ? primary : sourceIndexes;
-  const maxTries = Math.min(probeIndexes.length, Math.max(1, SOURCE_VALIDATION_MAX_TRIES));
+  const maxTries = Math.max(1, probeIndexes.length);
 
   setPlayerLoading(true, "Validation des lecteurs...");
   setPlayerStatus("Validation des lecteurs...");
+  state.sourceValidationActive = true;
 
   for (let idx = 0; idx < maxTries; idx += 1) {
     const sourceIndex = probeIndexes[idx];
@@ -14106,7 +14113,6 @@ async function playFromSourcePoolWithValidation(resumeTime, token, options = {})
       return;
     }
     state.sourceIndex = sourceIndex;
-    renderPlayerSourceOptions();
     try {
       await startPlayerSource(source, resumeTime, token, {
         probeTimeoutMs: SOURCE_VALIDATION_TIMEOUT_MS,
@@ -14119,6 +14125,9 @@ async function playFromSourcePoolWithValidation(resumeTime, token, options = {})
       source.validated = true;
       state.lastAutoSwitchAt = Date.now();
       state.lastAutoSwitchReason = "validated";
+      state.manualSourceLock = true;
+      state.manualSourceLockedIndex = sourceIndex;
+      state.sourceValidationActive = false;
       rememberSourceSuccess(source, Number(options?.itemId || 0));
       renderPlayerSourceOptions();
       return;
@@ -14127,6 +14136,7 @@ async function playFromSourcePoolWithValidation(resumeTime, token, options = {})
     }
   }
 
+  state.sourceValidationActive = false;
   return playFromSourcePoolWithRescue(resumeTime, token, { ...options, skipValidation: true });
 }
 
@@ -15457,19 +15467,22 @@ async function startPlayerSource(source, resumeTime, token, options = {}) {
   state.sourceLoading = true;
   state.sourceLoadingSince = Date.now();
   setPlayerLoading(true, "Chargement de la source...");
-  if (refs.playerSourceMeta) {
+  const suppressUi = probeOnly || state.sourceValidationActive;
+  if (refs.playerSourceMeta && !suppressUi) {
     refs.playerSourceMeta.textContent = formatSourceLabel(
       source,
       Math.max(0, state.sourceIndex),
       state.sourcePool.length || 1
     );
   }
-  const qualityLabel = [String(source?.quality || "").trim(), String(source?.format || "").toUpperCase().trim()]
-    .filter(Boolean)
-    .join(" - ");
-  setPlayerPill(refs.playerQualityPill, qualityLabel || "Qualite auto");
-  if (source?.language) {
-    setPlayerPill(refs.playerLanguagePill, source.language);
+  if (!suppressUi) {
+    const qualityLabel = [String(source?.quality || "").trim(), String(source?.format || "").toUpperCase().trim()]
+      .filter(Boolean)
+      .join(" - ");
+    setPlayerPill(refs.playerQualityPill, qualityLabel || "Qualite auto");
+    if (source?.language) {
+      setPlayerPill(refs.playerLanguagePill, source.language);
+    }
   }
   let embedReadyTimeout = mobilePlayback ? Math.min(EMBED_READY_TIMEOUT_MS, MOBILE_EMBED_READY_TIMEOUT_MS) : EMBED_READY_TIMEOUT_MS;
   let directReadyTimeout = mobilePlayback ? Math.min(VIDEO_READY_TIMEOUT_MS, MOBILE_VIDEO_READY_TIMEOUT_MS) : VIDEO_READY_TIMEOUT_MS;

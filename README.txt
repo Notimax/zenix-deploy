@@ -169,6 +169,9 @@ LATEST FIX LOG (2026-03-15)
   - player warns when incompatible sources are removed and no reliable reader remains.
 - Scream 7 debug hard override:
   - player now forces the debug-only Scream 7 source and ignores all other readers.
+- Start menu validation behavior:
+  - sequentially probes all readers (2s window) before locking the first valid one.
+  - auto-switch is locked after validation to avoid mid-play source hopping.
 - Scream 7 Noctaflix hardening:
   - forced Noctaflix override now triggers by TMDB id/media id + title.
   - Noctaflix fetch headers include full browser UA to avoid HTML blocks.
