@@ -11539,14 +11539,19 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
     renderPlayerSourceOptions();
     scheduleHlsLanguageProbe(state.allEpisodeSources);
     const allowPremiumRescue = shouldAllowPremiumRescueForMovie(state.sourcePool, refs.playerVideo);
+    const debugPlayOptions = {
+      startIndex: 0,
+      skipPremiumFallback: true,
+      allowPremiumRescue,
+      probeTimeoutMs: isLikelyMobileDevice() ? 6000 : SOURCE_VALIDATION_TIMEOUT_MS,
+      itemId: selectedItem.id,
+    };
     try {
-      await playFromSourcePoolWithValidation(resumeTime, token, {
-        startIndex: 0,
-        skipPremiumFallback: true,
-        allowPremiumRescue,
-        probeTimeoutMs: isLikelyMobileDevice() ? 6000 : SOURCE_VALIDATION_TIMEOUT_MS,
-        itemId: selectedItem.id,
-      });
+      if (isLikelyMobileDevice()) {
+        await playFromSourcePoolWithRescue(resumeTime, token, { ...debugPlayOptions, skipValidation: true });
+      } else {
+        await playFromSourcePoolWithValidation(resumeTime, token, debugPlayOptions);
+      }
     } catch {
       // handled by player status updates
     }
