@@ -1129,6 +1129,12 @@ LATEST PRETTY URLS + SHARE (2026-03-15, c272)
 - Share now uses the pretty URL for details and playback.
 - Cache-bust bumped to `20260315-c272`.
 
+LATEST NOCTA PROVIDER + DUPLICATE HIDE (2026-03-15, c273)
+- Added Noctaflix admin import + source resolver (Livewire snapshot + embed decrypt).
+- Zenix source routing can now return Noctaflix sources for matching admin entries.
+- Hard-hide duplicate media id `1507947720`.
+- Provider masking now strips `noctaflix` from public payloads.
+
 IOS13 ZENIX READER BRUTE (LIVE, 2026-03-14)
 - Script: `__tmp_ios13_zenix_5s_battery.js` (5s per title, WebKit iPhone 13).
 - Selection:

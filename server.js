@@ -26,6 +26,8 @@ const MOVIX_API_BASE = String(process.env.MOVIX_API_BASE || "https://api.movix.b
   .replace(/\/+$/, "");
 const MOVIX_ACCESS_KEY = String(process.env.MOVIX_ACCESS_KEY || "").trim();
 const MOVIX_HOSTS = new Set(["movix.blog", "movix.club", "movix.website"]);
+const NOCTA_BASE = "https://noctaflix.lol";
+const NOCTA_HOST = "noctaflix.lol";
 const MOVIX_BASE62_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const DEFAULT_BROWSER_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
@@ -59,6 +61,11 @@ const FILMER2_FETCH_HEADERS = {
 const MOVIX_FETCH_HEADERS = {
   ...(MOVIX_BASE_URL ? { Referer: `${MOVIX_BASE_URL}/`, Origin: MOVIX_BASE_URL } : {}),
   ...(MOVIX_ACCESS_KEY ? { "x-access-key": MOVIX_ACCESS_KEY } : {}),
+  "Accept-Language": DEFAULT_ACCEPT_LANGUAGE,
+};
+const NOCTA_FETCH_HEADERS = {
+  Referer: `${NOCTA_BASE}/`,
+  Origin: NOCTA_BASE,
   "Accept-Language": DEFAULT_ACCEPT_LANGUAGE,
 };
 const NAKIOS_CATALOG_FEEDS = [
@@ -171,6 +178,9 @@ const FILMER2_DETAIL_CACHE_MS = Math.max(
   5 * 60 * 1000,
   Number(process.env.FILMER2_DETAIL_CACHE_MS || 60 * 60 * 1000)
 );
+const NOCTA_DETAIL_CACHE_MS = Math.max(5 * 60 * 1000, Number(process.env.NOCTA_DETAIL_CACHE_MS || 20 * 60 * 1000));
+const NOCTA_EMBED_CACHE_MS = Math.max(60 * 1000, Number(process.env.NOCTA_EMBED_CACHE_MS || 30 * 60 * 1000));
+const NOCTA_SOURCE_TIMEOUT_MS = Math.max(8000, Number(process.env.NOCTA_SOURCE_TIMEOUT_MS || 16000));
 const SUPPLEMENTAL_CATALOG_PAGE_SIZE = Math.max(
   20,
   toInt(process.env.SUPPLEMENTAL_CATALOG_PAGE_SIZE, 84, 20, 180)
@@ -275,6 +285,7 @@ const adminLoginAttempts = new Map();
 const adminSessions = new Map();
 const adminDataCache = { loadedAt: 0, value: null };
 const backupConfigCache = { loadedAt: 0, value: null };
+const HARD_HIDDEN_MEDIA_IDS = new Set([1507947720]);
 const NAKIOS_PINNED_TITLES = [
   { title: "Go Karts", mediaType: "movie", year: 2020 },
   { title: "Minions", mediaType: "movie", year: 2015 },
@@ -448,6 +459,8 @@ const filmer2CatalogCache = {
   inFlight: null,
 };
 const filmer2DetailCache = new Map();
+const noctaDetailCache = new Map();
+const noctaEmbedCache = new Map();
 const nakiosCatalogCache = {
   loadedAt: 0,
   entries: [],
@@ -2129,6 +2142,10 @@ function applyAdminOverride(entry, adminData) {
   if (!entry || typeof entry !== "object") {
     return null;
   }
+  const hardId = Number(entry?.id || 0);
+  if (hardId > 0 && HARD_HIDDEN_MEDIA_IDS.has(hardId)) {
+    return null;
+  }
   const overrides = adminData?.overrides || {};
   const byId = overrides.byId || {};
   const byExternalKey = overrides.byExternalKey || {};
@@ -3263,6 +3280,166 @@ function parseMovixUrl(input) {
     isAnime,
     detailUrl: parsed.href,
   };
+}
+
+function isNoctaHost(host) {
+  const safe = String(host || "").toLowerCase();
+  if (!safe) {
+    return false;
+  }
+  return safe === NOCTA_HOST || safe.endsWith(`.${NOCTA_HOST}`);
+}
+
+function parseNoctaExternalKey(value) {
+  const raw = String(value || "").trim();
+  if (!raw.startsWith("nocta:")) {
+    return null;
+  }
+  const parts = raw.split(":").filter(Boolean);
+  if (parts.length < 3) {
+    return null;
+  }
+  const mediaType = parts[1] === "tv" ? "tv" : "movie";
+  const slug = parts.slice(2).join(":").trim();
+  if (!slug) {
+    return null;
+  }
+  return { mediaType, slug, key: raw };
+}
+
+function parseNoctaUrl(input) {
+  const raw = String(input || "").trim();
+  if (!raw) {
+    return null;
+  }
+  let parsed = null;
+  try {
+    parsed = new URL(raw, NOCTA_BASE);
+  } catch {
+    return null;
+  }
+  if (!isNoctaHost(parsed.hostname)) {
+    return null;
+  }
+  const pathName = String(parsed.pathname || "").replace(/\/+$/, "");
+  const match = pathName.match(/\/(movie|movies|film|films|serie|series|tv|show)\/([^/?#]+)/i);
+  if (!match) {
+    return null;
+  }
+  const typeToken = String(match[1] || "").toLowerCase();
+  const slug = String(match[2] || "").trim();
+  if (!slug) {
+    return null;
+  }
+  const mediaType = /serie|series|tv|show/.test(typeToken) ? "tv" : "movie";
+  return {
+    provider: "nocta",
+    mediaType,
+    slug,
+    detailUrl: parsed.href,
+  };
+}
+
+function cleanNoctaTitle(raw) {
+  const value = String(raw || "").replace(/\s+/g, " ").trim();
+  if (!value) {
+    return "";
+  }
+  let next = value;
+  next = next.replace(/\s*[–-]\s*Film.+$/i, "");
+  next = next.replace(/\s*\|\s*Noctaflix.+$/i, "");
+  next = next.replace(/\s*-\s*Noctaflix.+$/i, "");
+  return next.trim() || value;
+}
+
+function extractNoctaTitle(html) {
+  const metaTitle = extractMetaContent(html, "og:title") || extractMetaContent(html, "twitter:title");
+  const titleTag = extractTagText(html, "title");
+  return cleanNoctaTitle(decodeHtmlEntities(metaTitle || titleTag || ""));
+}
+
+function extractNoctaDescription(html) {
+  const metaDesc = extractMetaContent(html, "og:description") || extractMetaContent(html, "description");
+  return decodeHtmlEntities(String(metaDesc || "")).replace(/\s+/g, " ").trim();
+}
+
+function extractNoctaPoster(html) {
+  const meta = extractMetaContent(html, "og:image") || extractMetaContent(html, "twitter:image");
+  return String(meta || "").trim();
+}
+
+function extractNoctaSnapshot(html) {
+  const body = String(html || "");
+  const match = body.match(/wire:snapshot=\"([^\"]+)\"/i) || body.match(/wire:snapshot='([^']+)'/i);
+  if (!match?.[1]) {
+    return null;
+  }
+  const decoded = decodeHtmlEntities(match[1]);
+  return parseJsonSafe(decoded);
+}
+
+function isLivewireMarker(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value) && Object.keys(value).length === 1 && value.s);
+}
+
+function stripLivewireMarkers(value) {
+  if (Array.isArray(value)) {
+    const cleaned = value
+      .map((entry) => stripLivewireMarkers(entry))
+      .filter((entry) => entry !== null && !isLivewireMarker(entry));
+    if (cleaned.length === 1) {
+      return cleaned[0];
+    }
+    return cleaned;
+  }
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+  if (isLivewireMarker(value)) {
+    return null;
+  }
+  const next = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (key === "s" && Object.keys(value).length === 1) {
+      continue;
+    }
+    const cleaned = stripLivewireMarkers(entry);
+    if (cleaned !== null) {
+      next[key] = cleaned;
+    }
+  }
+  return next;
+}
+
+function extractNoctaVideos(html) {
+  const snapshot = extractNoctaSnapshot(html);
+  if (!snapshot || typeof snapshot !== "object") {
+    return [];
+  }
+  const data = snapshot.data || snapshot?.effects?.data || {};
+  const raw = stripLivewireMarkers(data?.videos ?? data?.video ?? data?.sources ?? null);
+  if (!raw) {
+    return [];
+  }
+  const collected = [];
+  const visit = (node) => {
+    if (!node) {
+      return;
+    }
+    if (Array.isArray(node)) {
+      node.forEach(visit);
+      return;
+    }
+    if (typeof node === "object") {
+      if (node.link || node.url || node.src) {
+        collected.push(node);
+      } else {
+        Object.values(node).forEach(visit);
+      }
+    }
+  };
+  visit(raw);
+  return collected;
 }
 
 function normalizePidoovLanguage(value) {
@@ -6012,6 +6189,8 @@ function isAllowedSupplementalDetailHost(hostname) {
     safeHost.endsWith(`.${NAKIOS_API_HOST}`) ||
     safeHost === FILMER2_HOST ||
     safeHost.endsWith(`.${FILMER2_HOST}`) ||
+    safeHost === NOCTA_HOST ||
+    safeHost.endsWith(`.${NOCTA_HOST}`) ||
     safeHost === PIDOOV_HOST ||
     safeHost.endsWith(`.${PIDOOV_HOST}`) ||
     safeHost === RENDEZVOUS_HOST ||
@@ -7889,6 +8068,41 @@ async function buildAdminCustomEntryFromMovix(parsed) {
   return entry;
 }
 
+async function buildAdminCustomEntryFromNocta(parsed) {
+  if (!parsed || typeof parsed !== "object") {
+    return null;
+  }
+  const normalizedType = String(parsed.mediaType || "").toLowerCase() === "tv" ? "tv" : "movie";
+  const safeUrl = String(parsed.detailUrl || "").trim();
+  if (!safeUrl) {
+    return null;
+  }
+  const html = await fetchNoctaDetailHtml(safeUrl);
+  const title = extractNoctaTitle(html) || String(parsed.slug || "").replace(/[-_]+/g, " ").trim() || "Noctaflix";
+  const overview = extractNoctaDescription(html);
+  const poster = extractNoctaPoster(html);
+  const yearHint = parseYearFromText(`${title} ${overview}`) || parseYearFromText(extractTagText(html, "title"));
+  const year = toInt(yearHint, 0, 0, 2099);
+  const slugKey = normalizeTitleKey(parsed.slug || title);
+  const externalKey = `nocta:${normalizedType}:${slugKey || normalizeTitleKey(title)}`;
+  return normalizeAdminCustomEntry({
+    type: normalizedType,
+    title,
+    year,
+    overview,
+    small_poster_path: poster,
+    large_poster_path: poster,
+    wallpaper_poster_path: poster,
+    external_key: externalKey,
+    external_detail_url: safeUrl,
+    providerLabel: ZENIX_BRAND_LABEL,
+    language: "VF",
+    lang: "VF",
+    availability_status: "available",
+    external_status: "available",
+  });
+}
+
 function extractYoutubePlaylistIdFromKey(externalKey) {
   const raw = String(externalKey || "").trim();
   if (!raw) {
@@ -7998,6 +8212,76 @@ function resolveMovixAdminEntry(options = {}) {
     return null;
   }
   const parsed = parseMovixExternalKey(resolved?.external_key || "");
+  if (!parsed) {
+    return null;
+  }
+  return resolved;
+}
+
+function resolveNoctaAdminEntry(options = {}) {
+  const title = String(options.title || "").trim();
+  const mediaType = String(options.mediaType || "").toLowerCase() === "tv" ? "tv" : "movie";
+  const externalKeyParam = String(options.externalKey || "").trim();
+  const mediaId = toInt(options.mediaId, 0, 0, 999999999);
+  const adminData = loadAdminData();
+  const custom = Array.isArray(adminData?.custom) ? adminData.custom : [];
+  let entry = null;
+
+  if (externalKeyParam && externalKeyParam.startsWith("nocta:")) {
+    entry = custom.find((row) => String(row?.external_key || row?.externalKey || "") === externalKeyParam) || null;
+  }
+  if (!entry && mediaId > 0) {
+    entry =
+      custom.find((row) => {
+        const rowKey = String(row?.external_key || row?.externalKey || "");
+        return Number(row?.id || 0) === mediaId && rowKey.startsWith("nocta:");
+      }) || null;
+  }
+  if (!entry && title) {
+    const key = normalizeTitleKey(title);
+    if (key) {
+      entry =
+        custom.find((row) => {
+          const rowKey = String(row?.external_key || row?.externalKey || "");
+          if (!rowKey.startsWith("nocta:")) {
+            return false;
+          }
+          return normalizeTitleKey(row?.title || "") === key;
+        }) || null;
+    }
+    if (!entry && key && key.length >= 4) {
+      entry =
+        custom.find((row) => {
+          const rowKey = String(row?.external_key || row?.externalKey || "");
+          if (!rowKey.startsWith("nocta:")) {
+            return false;
+          }
+          const rowTitleKey = normalizeTitleKey(row?.title || "");
+          if (!rowTitleKey) {
+            return false;
+          }
+          const shorter = key.length <= rowTitleKey.length ? key : rowTitleKey;
+          const longer = key.length <= rowTitleKey.length ? rowTitleKey : key;
+          if (shorter.length < 4) {
+            return false;
+          }
+          return longer.includes(shorter);
+        }) || null;
+    }
+  }
+
+  if (!entry) {
+    return null;
+  }
+  const resolved = applyAdminOverride(entry, adminData);
+  if (!resolved) {
+    return null;
+  }
+  const entryType = String(resolved?.type || "").toLowerCase() === "tv" ? "tv" : "movie";
+  if (mediaType && mediaType !== entryType) {
+    return null;
+  }
+  const parsed = parseNoctaExternalKey(resolved?.external_key || "");
   if (!parsed) {
     return null;
   }
@@ -8268,6 +8552,152 @@ async function resolveMovixSourcesByTmdbId(mediaType, tmdbId, season = 1, episod
     return [];
   }
   return normalizeMovixLinks(links);
+}
+
+function decodeNoctaEncryptedSource(value) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return "";
+  }
+  try {
+    return Buffer.from(raw, "base64").toString("utf8").trim();
+  } catch {
+    return "";
+  }
+}
+
+async function resolveNoctaEmbedSource(embedUrl) {
+  const safeUrl = String(embedUrl || "").trim();
+  if (!safeUrl) {
+    return "";
+  }
+  const cached = noctaEmbedCache.get(safeUrl);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.value || "";
+  }
+  const response = await fetchRemoteWithTimeout(
+    safeUrl,
+    { ...NOCTA_FETCH_HEADERS, Accept: "text/html" },
+    NOCTA_SOURCE_TIMEOUT_MS
+  );
+  if (response.status < 200 || response.status >= 300) {
+    return "";
+  }
+  const body = String(response.body || "");
+  const match =
+    body.match(/id=["']encrypted-source["'][^>]*value=["']([^"']+)["']/i) ||
+    body.match(/encrypted-source\"[^>]+value=\"([^\"]+)\"/i);
+  let resolved = "";
+  if (match?.[1]) {
+    resolved = decodeNoctaEncryptedSource(match[1]);
+  }
+  if (!resolved) {
+    const sourceMatch = body.match(/<source[^>]+src=["']([^"']+)["']/i);
+    if (sourceMatch?.[1]) {
+      resolved = String(sourceMatch[1] || "").trim();
+    }
+  }
+  let finalUrl = "";
+  if (resolved) {
+    const parsed = parseSafeRemoteUrl(resolved);
+    if (parsed) {
+      finalUrl = parsed.href;
+    }
+  }
+  noctaEmbedCache.set(safeUrl, { value: finalUrl, expiresAt: Date.now() + NOCTA_EMBED_CACHE_MS });
+  return finalUrl;
+}
+
+async function fetchNoctaDetailHtml(detailUrl) {
+  const safeUrl = String(detailUrl || "").trim();
+  if (!safeUrl) {
+    return "";
+  }
+  const cached = noctaDetailCache.get(safeUrl);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.value || "";
+  }
+  const response = await fetchRemoteWithTimeout(
+    safeUrl,
+    { ...NOCTA_FETCH_HEADERS, Accept: "text/html" },
+    NOCTA_SOURCE_TIMEOUT_MS
+  );
+  if (response.status < 200 || response.status >= 300) {
+    return "";
+  }
+  const html = String(response.body || "");
+  noctaDetailCache.set(safeUrl, { value: html, expiresAt: Date.now() + NOCTA_DETAIL_CACHE_MS });
+  return html;
+}
+
+async function resolveNoctaSourcesByDetailUrl(detailUrl) {
+  const safeUrl = String(detailUrl || "").trim();
+  if (!safeUrl) {
+    return [];
+  }
+  const html = await fetchNoctaDetailHtml(safeUrl);
+  if (!html) {
+    return [];
+  }
+  const videos = extractNoctaVideos(html);
+  if (!Array.isArray(videos) || videos.length === 0) {
+    return [];
+  }
+  const dedupe = new Set();
+  const out = [];
+  for (let index = 0; index < videos.length; index += 1) {
+    const entry = videos[index];
+    if (!entry || typeof entry !== "object") {
+      continue;
+    }
+    const label = String(entry.label || entry.quality || entry.name || "").trim();
+    let link = String(entry.link || entry.url || entry.src || "").trim();
+    if (!link) {
+      continue;
+    }
+    try {
+      link = new URL(link, NOCTA_BASE).href;
+    } catch {
+      // keep original
+    }
+    let streamUrl = link;
+    if (/\/embed\//i.test(link)) {
+      const resolved = await resolveNoctaEmbedSource(link);
+      if (resolved) {
+        streamUrl = resolved;
+      }
+    }
+    const parsed = parseSafeRemoteUrl(streamUrl);
+    if (!parsed) {
+      continue;
+    }
+    const finalUrl = parsed.href;
+    if (!finalUrl || dedupe.has(finalUrl)) {
+      continue;
+    }
+    dedupe.add(finalUrl);
+    const language = normalizePidoovLanguage(label) || "VF";
+    const format = inferOwnedSourceFormat(finalUrl, String(entry.type || ""));
+    const quality = sanitizeToken(label || "HD", 24) || "HD";
+    const sourceName = /premium/i.test(label) ? `${ZENIX_BRAND_LABEL} Premium` : ZENIX_BRAND_LABEL;
+    const basePriority =
+      language === "VF"
+        ? 380
+        : language === "MULTI"
+          ? 360
+          : language === "VOSTFR"
+            ? 350
+            : 320;
+    out.push({
+      stream_url: finalUrl,
+      source_name: sourceName,
+      quality,
+      language,
+      format,
+      priority: basePriority - Math.min(30, index * 3),
+    });
+  }
+  return out;
 }
 
 async function fetchNakiosSeasonsByTmdbId(tmdbId) {
@@ -11288,6 +11718,10 @@ function parseAdminImportUrl(input) {
   if (movixParsed) {
     return movixParsed;
   }
+  const noctaParsed = parseNoctaUrl(parsed.href);
+  if (noctaParsed) {
+    return noctaParsed;
+  }
   if (/youtube\.com|youtu\.be/i.test(host)) {
     const playlistId = parseYoutubePlaylistId(parsed.href);
     if (!playlistId) {
@@ -11328,6 +11762,8 @@ async function importAdminEntryByUrl(url) {
     }
   } else if (parsed.provider === "movix") {
     entry = await buildAdminCustomEntryFromMovix(parsed);
+  } else if (parsed.provider === "nocta") {
+    entry = await buildAdminCustomEntryFromNocta(parsed);
   } else if (parsed.provider === "youtube") {
     entry = await buildAdminCustomEntryFromYoutubePlaylist(parsed.playlistId);
   }
@@ -12081,7 +12517,8 @@ function sanitizePublicEntry(entry) {
       provider.includes("nakios") ||
       provider.includes("anime-sama") ||
       provider.includes("animesama") ||
-      provider.includes("filmer2")
+      provider.includes("filmer2") ||
+      provider.includes("noctaflix")
     ) {
       next.provider = ZENIX_EXTERNAL_PROVIDER;
     }
@@ -12093,18 +12530,19 @@ function sanitizePublicEntry(entry) {
       source.includes("nakios") ||
       source.includes("anime-sama") ||
       source.includes("animesama") ||
-      source.includes("filmer2")
+      source.includes("filmer2") ||
+      source.includes("noctaflix")
     ) {
       next.source = "zenix";
     }
   }
   if (typeof next.supplemental === "string") {
-    if (/purstream|nakios|anime-sama|animesama|filmer2/i.test(next.supplemental)) {
+    if (/purstream|nakios|anime-sama|animesama|filmer2|noctaflix/i.test(next.supplemental)) {
       next.supplemental = ZENIX_BRAND_LABEL;
     }
   }
   if (typeof next.url === "string") {
-    if (/purstream|nakios|anime-sama|animesama|filmer2/i.test(next.url)) {
+    if (/purstream|nakios|anime-sama|animesama|filmer2|noctaflix/i.test(next.url)) {
       next.url = "";
     }
   }
@@ -12686,6 +13124,42 @@ async function handleZenixSource(req, res, requestUrl) {
       },
     });
     return true;
+  }
+
+  const noctaEntry = resolveNoctaAdminEntry({
+    title,
+    mediaType,
+    externalKey: externalKeyParam,
+    mediaId,
+  });
+  if (noctaEntry) {
+    const detailUrl =
+      String(noctaEntry?.external_detail_url || noctaEntry?.detailUrl || noctaEntry?.pageUrl || "").trim() || "";
+    let noctaSources = [];
+    if (detailUrl) {
+      try {
+        noctaSources = await resolveNoctaSourcesByDetailUrl(detailUrl);
+      } catch {
+        noctaSources = [];
+      }
+    }
+    if (noctaSources.length > 0) {
+      sendJson(res, 200, {
+        apiVersion: "zenix-source-v1",
+        type: "success",
+        data: {
+          title: String(noctaEntry?.title || title || "").trim(),
+          mediaType,
+          year: year > 0 ? year : toInt(noctaEntry?.year, 0, 0, 2099),
+          season: mediaType === "tv" ? season : 1,
+          episode: mediaType === "tv" ? episode : 1,
+          tmdbId: 0,
+          count: noctaSources.length,
+          sources: noctaSources,
+        },
+      });
+      return true;
+    }
   }
 
   let movixEntry = resolveMovixAdminEntry({
