@@ -8443,6 +8443,85 @@ function guessNakiosSourceFormat(source, resolvedUrl) {
   return "embed";
 }
 
+const NAKIOS_TITLE_STOPWORDS = new Set([
+  "le",
+  "la",
+  "les",
+  "de",
+  "du",
+  "des",
+  "un",
+  "une",
+  "the",
+  "and",
+  "of",
+  "a",
+  "an",
+]);
+
+function normalizeMatchText(value) {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function extractTitleTokens(title) {
+  const normalized = normalizeMatchText(title);
+  if (!normalized) {
+    return [];
+  }
+  const tokens = normalized
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 4 && !NAKIOS_TITLE_STOPWORDS.has(token));
+  return Array.from(new Set(tokens));
+}
+
+function isNakiosSourceCompatible(source, meta = {}) {
+  if (!source) {
+    return false;
+  }
+  if (source.debug) {
+    return true;
+  }
+  const title = String(meta.title || "").trim();
+  if (!title) {
+    return true;
+  }
+  const haystack = normalizeMatchText(
+    `${source?.stream_url || source?.url || ""} ${source?.source_name || source?.name || ""}`
+  );
+  if (!haystack) {
+    return false;
+  }
+  const tmdbId = Number(meta.tmdbId || 0);
+  if (Number.isFinite(tmdbId) && tmdbId > 0 && haystack.includes(String(tmdbId))) {
+    return true;
+  }
+  const tokens = extractTitleTokens(title);
+  if (tokens.length === 0) {
+    return true;
+  }
+  return tokens.some((token) => haystack.includes(token));
+}
+
+function filterNakiosSourcesByTitle(sources, meta = {}) {
+  const rows = Array.isArray(sources) ? sources : [];
+  const filtered = [];
+  let incompatible = 0;
+  rows.forEach((entry) => {
+    if (isNakiosSourceCompatible(entry, meta)) {
+      filtered.push(entry);
+    } else {
+      incompatible += 1;
+    }
+  });
+  return { sources: filtered, incompatible };
+}
+
 async function resolveNakiosSourcesByTmdbId(mediaType, tmdbId, season = 1, episode = 1) {
   const safeTmdbId = toInt(tmdbId, 0, 0, 999999999);
   if (safeTmdbId <= 0) {
@@ -13314,12 +13393,18 @@ async function handleZenixSource(req, res, requestUrl) {
   }
 
   let sources = [];
+  let incompatibleCount = 0;
   if (tmdbId > 0) {
     try {
       sources = await resolveNakiosSourcesByTmdbId(mediaType, tmdbId, season, episode);
     } catch {
       sources = [];
     }
+  }
+  if (sources.length > 0) {
+    const filtered = filterNakiosSourcesByTitle(sources, { title, year, tmdbId });
+    sources = filtered.sources;
+    incompatibleCount = filtered.incompatible;
   }
 
   if (!movixEntry && sources.length === 0 && title.length >= 2) {
@@ -13398,6 +13483,10 @@ async function handleZenixSource(req, res, requestUrl) {
     }
   }
 
+  const warning =
+    incompatibleCount > 0
+      ? "Sources incompatibles detectees et retirees automatiquement."
+      : "";
   sendJson(res, 200, {
     apiVersion: "zenix-source-v1",
     type: "success",
@@ -13410,6 +13499,7 @@ async function handleZenixSource(req, res, requestUrl) {
       tmdbId: tmdbId > 0 ? tmdbId : 0,
       count: sources.length,
       sources,
+      warning,
     },
   });
   return true;

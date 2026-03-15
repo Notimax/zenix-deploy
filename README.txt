@@ -164,6 +164,11 @@ LATEST FIX LOG (2026-03-15)
 - Player start menu fallback:
   - added delegated click fallback for play buttons (card/top/reco/detail) if bindings fail.
   - guards against double open within 360ms to avoid duplicate overlays.
+- Nakios compatibility guard:
+  - incompatible Nakios sources are filtered by title match to avoid wrong-film playback.
+  - player warns when incompatible sources are removed and no reliable reader remains.
+- Scream 7 debug hard override:
+  - player now forces the debug-only Scream 7 source and ignores all other readers.
 - Scream 7 Noctaflix hardening:
   - forced Noctaflix override now triggers by TMDB id/media id + title.
   - Noctaflix fetch headers include full browser UA to avoid HTML blocks.

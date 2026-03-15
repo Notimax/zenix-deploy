@@ -492,6 +492,7 @@ themeFilters: {
   },
   repairCache: new Map(),
   repairInFlight: new Map(),
+  sourceWarningMessage: "",
 };
 
 const refs = {
@@ -5322,6 +5323,14 @@ function normalizeTitleKey(value) {
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9]+/g, " ")
     .trim();
+}
+
+function isScream7Item(item) {
+  const key = normalizeTitleKey(item?.title || "");
+  if (!key) {
+    return false;
+  }
+  return key.includes("scream 7");
 }
 
 function resolveCalendarDetailId(entry) {
@@ -11458,6 +11467,7 @@ async function resolveExternalItemSources(item) {
 }
 
 async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
+  state.sourceWarningMessage = "";
   const externalContext = getExternalPlaybackContext(item);
   let selectedItem = item;
   let isExternalItem = Boolean(item?.isExternal && item?.externalProvider);
@@ -11467,6 +11477,40 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
   }
 
   const { season: externalSeason, episode: externalEpisode } = getExternalPlaybackContext(selectedItem || item);
+
+  if (selectedItem && selectedItem.type !== "tv" && isScream7Item(selectedItem)) {
+    setPlayerStatus("Connexion au lecteur debug...");
+    const debugSources = await fetchScream7DebugSources(selectedItem);
+    if (token !== state.playToken) {
+      return;
+    }
+    if (!Array.isArray(debugSources) || debugSources.length === 0) {
+      const message = "Lecteur debug indisponible pour ce titre.";
+      clearPlaybackGuard();
+      setPlayerStatus(message, true);
+      showMessage(message, true);
+      return;
+    }
+    clearManualSourceLock();
+    state.sourcePool = debugSources;
+    state.allEpisodeSources = debugSources.slice();
+    state.sourceRetryAttempts.clear();
+    state.sourceIndex = -1;
+    renderPlayerSourceOptions();
+    scheduleHlsLanguageProbe(state.allEpisodeSources);
+    const allowPremiumRescue = shouldAllowPremiumRescueForMovie(state.sourcePool, refs.playerVideo);
+    try {
+      await playFromSourcePoolWithValidation(resumeTime, token, {
+        startIndex: 0,
+        skipPremiumFallback: true,
+        allowPremiumRescue,
+        itemId: selectedItem.id,
+      });
+    } catch {
+      // handled by player status updates
+    }
+    return;
+  }
   const streamPath = `/stream/${selectedItem?.id || item.id}`;
   const refreshMovieSourcePool = async (statusLabel) => {
     if (token !== state.playToken) {
@@ -11652,18 +11696,26 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
       if (pendingHint) {
         markItemAvailability(selectedItem.id, "pending");
       }
+      const warningHint = String(state.sourceWarningMessage || "").trim();
       const message = pendingHint
         ? "En attente de mise en ligne. Contenu encore trop recent."
-        : "Lecture indisponible pour ce titre.";
+        : warningHint
+          ? "Sources incompatibles detectees. Aucun lecteur fiable."
+          : "Lecture indisponible pour ce titre.";
       clearPlaybackGuard();
       setPlayerStatus(message, true);
       showMessage(message, true);
+      state.sourceWarningMessage = "";
       return;
     }
   }
   state.sourceIndex = -1;
   renderPlayerSourceOptions();
   scheduleHlsLanguageProbe(state.allEpisodeSources);
+  if (state.sourceWarningMessage) {
+    notifyActionMessage(state.sourceWarningMessage, false);
+    state.sourceWarningMessage = "";
+  }
   const allowPremiumRescue = shouldAllowPremiumRescueForMovie(state.sourcePool, refs.playerVideo);
   try {
     await playFromSourcePoolWithValidation(resumeTime, token, {
@@ -11715,6 +11767,7 @@ async function loadEpisodeStream(
   preferredLanguage = "",
   syncRoute = true
 ) {
+  state.sourceWarningMessage = "";
   const safeSeason = Math.max(1, Number(season || 1));
   const safeEpisode = Math.max(1, Number(episode || 1));
   setPlayerStatus(`Chargement S${safeSeason}E${safeEpisode}...`);
@@ -11821,11 +11874,19 @@ async function loadEpisodeStream(
     refs.playerLanguageSelect.disabled = state.availableLanguages.length <= 1;
     setPlayerPill(refs.playerLanguagePill, nextLanguage || "Auto");
     if (state.sourcePool.length === 0) {
+      if (state.sourceWarningMessage) {
+        showMessage("Sources incompatibles detectees. Aucun lecteur fiable.", true);
+        state.sourceWarningMessage = "";
+      }
       throw new Error("No episode source");
     }
     state.sourceIndex = -1;
     renderPlayerSourceOptions();
     scheduleHlsLanguageProbe(state.allEpisodeSources);
+    if (state.sourceWarningMessage) {
+      notifyActionMessage(state.sourceWarningMessage, false);
+      state.sourceWarningMessage = "";
+    }
     return nextLanguage;
   };
 
@@ -12455,6 +12516,48 @@ async function resolveNakiosTmdbId(item) {
   }
 }
 
+async function fetchScream7DebugSources(item) {
+  if (!item || !isScream7Item(item)) {
+    return [];
+  }
+  const title = String(item?.title || "").trim();
+  if (title.length < 2) {
+    return [];
+  }
+
+  const params = new URLSearchParams({
+    title,
+    type: "movie",
+    season: "1",
+    episode: "1",
+  });
+  const externalKey = String(item?.externalKey || item?.external_key || "").trim();
+  if (externalKey) {
+    params.set("externalKey", externalKey);
+  }
+  const year = getItemReleaseYear(item);
+  if (year > 0) {
+    params.set("year", String(year));
+  }
+  const tmdbId = await resolveNakiosTmdbId(item);
+  if (tmdbId > 0) {
+    params.set("tmdbId", String(tmdbId));
+  }
+
+  try {
+    const payload = await fetchJson(`${API_BASE}/zenix-source?${params.toString()}`, {
+      timeoutMs: NAKIOS_SOURCE_TIMEOUT_MS,
+      retryDelays: [350, 900],
+    });
+    const raw = Array.isArray(payload?.data?.sources) ? payload.data.sources : [];
+    const normalized = raw.map((entry, index) => normalizeSourceEntry(entry, index)).filter(Boolean);
+    const debugOnly = normalized.filter((entry) => entry?.debug === true);
+    return debugOnly.length > 0 ? debugOnly : [];
+  } catch {
+    return [];
+  }
+}
+
 async function appendNakiosSources(item, season, episode, sources) {
   const base = Array.isArray(sources) ? sources.slice() : [];
   if (!item) {
@@ -12497,11 +12600,19 @@ async function appendNakiosSources(item, season, episode, sources) {
   try {
     let payload = await runFetch();
     let raw = Array.isArray(payload?.data?.sources) ? payload.data.sources : [];
+    const warning = String(payload?.data?.warning || "").trim();
+    if (warning) {
+      state.sourceWarningMessage = warning;
+    }
     if (raw.length === 0 && !state.adblockDetected) {
       const gateOk = await refreshGateToken({ force: true }).catch(() => false);
       if (gateOk) {
         payload = await runFetch();
         raw = Array.isArray(payload?.data?.sources) ? payload.data.sources : [];
+        const retryWarning = String(payload?.data?.warning || "").trim();
+        if (retryWarning) {
+          state.sourceWarningMessage = retryWarning;
+        }
       }
     }
     if (raw.length === 0) {
