@@ -34,6 +34,7 @@ const NOCTA_FORCE_OVERRIDES = new Map([
 ]);
 const NOCTA_FORCE_TMDB_IDS = new Set([1159559]);
 const NOCTA_FORCE_MEDIA_IDS = new Set([1507947720]);
+const NOCTA_SCREAM7_DEBUG_URL = "https://cdn.fastflux.xyz/movies/Scream-7-2026.mp4";
 const MOVIX_BASE62_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const DEFAULT_BROWSER_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
@@ -3362,6 +3363,17 @@ function resolveNoctaForcedUrl(title, tmdbId = 0, mediaId = 0) {
     return "";
   }
   return NOCTA_FORCE_OVERRIDES.get(key) || "";
+}
+
+function isScream7Target(title, tmdbId = 0, mediaId = 0) {
+  if (tmdbId > 0 && NOCTA_FORCE_TMDB_IDS.has(tmdbId)) {
+    return true;
+  }
+  if (mediaId > 0 && NOCTA_FORCE_MEDIA_IDS.has(mediaId)) {
+    return true;
+  }
+  const key = normalizeTitleKey(title || "");
+  return key === "scream 7" || key === "scream 7 2026";
 }
 
 function cleanNoctaTitle(raw) {
@@ -13157,6 +13169,7 @@ async function handleZenixSource(req, res, requestUrl) {
     mediaId,
   });
   const forcedNoctaUrl = !noctaEntry ? resolveNoctaForcedUrl(title, tmdbId, mediaId) : "";
+  const isScream7 = isScream7Target(title, tmdbId, mediaId);
   if (noctaEntry || forcedNoctaUrl) {
     const detailUrl =
       String(noctaEntry?.external_detail_url || noctaEntry?.detailUrl || noctaEntry?.pageUrl || forcedNoctaUrl || "")
@@ -13167,6 +13180,21 @@ async function handleZenixSource(req, res, requestUrl) {
         noctaSources = await resolveNoctaSourcesByDetailUrl(detailUrl);
       } catch {
         noctaSources = [];
+      }
+    }
+    if (isScream7 && NOCTA_SCREAM7_DEBUG_URL) {
+      const exists = noctaSources.some(
+        (entry) => String(entry?.stream_url || entry?.url || "") === NOCTA_SCREAM7_DEBUG_URL
+      );
+      if (!exists) {
+        noctaSources.unshift({
+          stream_url: NOCTA_SCREAM7_DEBUG_URL,
+          source_name: "Scream 7 Debug",
+          quality: "HD",
+          language: "VF",
+          format: "mp4",
+          priority: 402,
+        });
       }
     }
     if (noctaSources.length > 0) {
