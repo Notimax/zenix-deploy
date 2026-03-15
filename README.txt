@@ -1132,6 +1132,7 @@ LATEST PRETTY URLS + SHARE (2026-03-15, c272)
 LATEST NOCTA PROVIDER + DUPLICATE HIDE (2026-03-15, c273)
 - Added Noctaflix admin import + source resolver (Livewire snapshot + embed decrypt).
 - Zenix source routing can now return Noctaflix sources for matching admin entries.
+- Forced Noctaflix override for "Scream 7" title key.
 - Hard-hide duplicate media id `1507947720`.
 - Provider masking now strips `noctaflix` from public payloads.
 

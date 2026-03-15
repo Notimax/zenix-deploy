@@ -28,6 +28,9 @@ const MOVIX_ACCESS_KEY = String(process.env.MOVIX_ACCESS_KEY || "").trim();
 const MOVIX_HOSTS = new Set(["movix.blog", "movix.club", "movix.website"]);
 const NOCTA_BASE = "https://noctaflix.lol";
 const NOCTA_HOST = "noctaflix.lol";
+const NOCTA_FORCE_OVERRIDES = new Map([
+  ["scream 7", `${NOCTA_BASE}/movie/scream-7`],
+]);
 const MOVIX_BASE62_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const DEFAULT_BROWSER_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
@@ -3338,6 +3341,14 @@ function parseNoctaUrl(input) {
     slug,
     detailUrl: parsed.href,
   };
+}
+
+function resolveNoctaForcedUrl(title) {
+  const key = normalizeTitleKey(title || "");
+  if (!key) {
+    return "";
+  }
+  return NOCTA_FORCE_OVERRIDES.get(key) || "";
 }
 
 function cleanNoctaTitle(raw) {
@@ -13132,9 +13143,11 @@ async function handleZenixSource(req, res, requestUrl) {
     externalKey: externalKeyParam,
     mediaId,
   });
-  if (noctaEntry) {
+  const forcedNoctaUrl = !noctaEntry ? resolveNoctaForcedUrl(title) : "";
+  if (noctaEntry || forcedNoctaUrl) {
     const detailUrl =
-      String(noctaEntry?.external_detail_url || noctaEntry?.detailUrl || noctaEntry?.pageUrl || "").trim() || "";
+      String(noctaEntry?.external_detail_url || noctaEntry?.detailUrl || noctaEntry?.pageUrl || forcedNoctaUrl || "")
+        .trim() || "";
     let noctaSources = [];
     if (detailUrl) {
       try {
