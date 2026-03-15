@@ -13862,6 +13862,10 @@ function normalizeSourceEntry(entry, index) {
   if (isBlockedPlaybackSourceUrl(url, format)) {
     return null;
   }
+  const mobileOnly = Boolean(entry?.mobileOnly);
+  if (mobileOnly && !isLikelyMobileDevice()) {
+    return null;
+  }
   const quality = String(entry?.quality || entry?.resolution || entry?.label || "").trim();
   const language = normalizeSourceLanguage(entry);
   const host = getSourceHost(url);
@@ -13870,6 +13874,7 @@ function normalizeSourceEntry(entry, index) {
       /debug/i.test(String(entry?.source_name || entry?.name || "")) ||
       /debug/i.test(String(entry?.label || ""))
   );
+  const proxyOnly = Boolean(entry?.proxyOnly);
   const isZenix = Boolean(
     entry?.isZenix ||
       entry?.zenix ||
@@ -13895,10 +13900,12 @@ function normalizeSourceEntry(entry, index) {
     language,
     host,
     debug,
+    proxyOnly,
     score,
     premiumHint,
     origin,
     isZenix,
+    mobileOnly,
   };
 }
 
@@ -15378,27 +15385,31 @@ function buildPlayableSourceCandidates(source, options = {}) {
   const proxyUrl = !isProxied && isRemoteHttp ? `${API_BASE}/hls-proxy?url=${encodeURIComponent(absolute)}` : "";
   const proxiedTarget = isProxied ? extractProxyTargetUrl(absolute) : "";
   const forceProxyHls = Boolean(options.forceProxyHls);
+  const requireProxy = Boolean(source?.proxyOnly || (source?.debug && isLikelyMobileDevice()));
 
   if (looksLikeHls && forceProxyHls) {
     if (isProxied) {
       const fallbackRows = [normalizedProxyAbsolute];
-      if (proxiedTarget) {
+      if (proxiedTarget && !requireProxy) {
         fallbackRows.push(proxiedTarget);
       }
       return Array.from(new Set(fallbackRows.filter(Boolean)));
     }
     if (proxyUrl) {
-      return Array.from(new Set([proxyUrl, absolute].filter(Boolean)));
+      return Array.from(new Set([proxyUrl, requireProxy ? "" : absolute].filter(Boolean)));
     }
     return Array.from(new Set([absolute].filter(Boolean)));
   }
 
   if (looksLikeHls && isProxied) {
     if (options.preferDirectHls && proxiedTarget) {
-      candidates.push(proxiedTarget, normalizedProxyAbsolute);
+      if (!requireProxy) {
+        candidates.push(proxiedTarget);
+      }
+      candidates.push(normalizedProxyAbsolute);
     } else {
       candidates.push(normalizedProxyAbsolute);
-      if (proxiedTarget) {
+      if (proxiedTarget && !requireProxy) {
         candidates.push(proxiedTarget);
       }
     }
@@ -15406,8 +15417,10 @@ function buildPlayableSourceCandidates(source, options = {}) {
   }
 
   if (looksLikeHls && options.preferDirectHls) {
-    candidates.push(absolute);
-    if (proxyUrl) {
+    if (!requireProxy) {
+      candidates.push(absolute);
+    }
+    if (proxyUrl || requireProxy) {
       candidates.push(proxyUrl);
     }
     return Array.from(new Set(candidates.filter(Boolean)));
@@ -15416,7 +15429,9 @@ function buildPlayableSourceCandidates(source, options = {}) {
   if (proxyUrl && looksLikeHls) {
     candidates.push(proxyUrl);
   }
-  candidates.push(absolute);
+  if (!requireProxy) {
+    candidates.push(absolute);
+  }
   if (!looksLikeHls && proxyUrl) {
     // Non-HLS URLs usually play faster direct.
     candidates.unshift(absolute);

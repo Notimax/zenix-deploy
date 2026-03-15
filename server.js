@@ -13298,6 +13298,7 @@ async function handleZenixSource(req, res, requestUrl) {
   if (mediaType === "movie" && isCarsQuatreRoues && PURSTREAM_CARS_DEBUG_URL) {
     const proxiedUrl = buildHlsProxyPath(PURSTREAM_CARS_DEBUG_URL);
     const proxiedAlt = PURSTREAM_CARS_DEBUG_URL_ALT ? buildHlsProxyPath(PURSTREAM_CARS_DEBUG_URL_ALT) : "";
+    const proxiedMobile = `${proxiedUrl}&mobile=1`;
     sendJson(res, 200, {
       apiVersion: "zenix-source-v1",
       type: "success",
@@ -13308,7 +13309,7 @@ async function handleZenixSource(req, res, requestUrl) {
         season: 1,
         episode: 1,
         tmdbId: tmdbId > 0 ? tmdbId : 920,
-        count: proxiedAlt ? 2 : 1,
+        count: proxiedAlt ? 3 : 2,
         sources: [
           {
             stream_url: proxiedUrl,
@@ -13318,6 +13319,17 @@ async function handleZenixSource(req, res, requestUrl) {
             language: "VF",
             format: "m3u8",
             priority: 402,
+          },
+          {
+            stream_url: proxiedMobile,
+            source_name: "Cars Debug Mobile",
+            debug: true,
+            mobileOnly: true,
+            proxyOnly: true,
+            quality: "HD",
+            language: "VF",
+            format: "m3u8",
+            priority: 410,
           },
           ...(proxiedAlt
             ? [
