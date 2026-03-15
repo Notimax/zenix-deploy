@@ -11527,8 +11527,11 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
       return;
     }
     clearManualSourceLock();
-    state.sourcePool = debugSources;
-    state.allEpisodeSources = debugSources.slice();
+    const mobileFirst = isLikelyMobileDevice()
+      ? debugSources.filter((entry) => entry?.mobileOnly).concat(debugSources.filter((entry) => !entry?.mobileOnly))
+      : debugSources.slice();
+    state.sourcePool = mobileFirst;
+    state.allEpisodeSources = mobileFirst.slice();
     state.sourceRetryAttempts.clear();
     state.sourceIndex = -1;
     renderPlayerSourceOptions();
@@ -11539,6 +11542,7 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
         startIndex: 0,
         skipPremiumFallback: true,
         allowPremiumRescue,
+        probeTimeoutMs: isLikelyMobileDevice() ? 6000 : SOURCE_VALIDATION_TIMEOUT_MS,
         itemId: selectedItem.id,
       });
     } catch {
@@ -14127,6 +14131,7 @@ async function playFromSourcePoolWithValidation(resumeTime, token, options = {})
   if (!shouldValidate || state.sourcePool.length <= 1) {
     return playFromSourcePoolWithRescue(resumeTime, token, options);
   }
+  const probeTimeoutMs = Math.max(0, Number(options?.probeTimeoutMs || SOURCE_VALIDATION_TIMEOUT_MS));
 
   const sourceIndexes = state.sourcePool.map((_entry, index) => index);
   const primary = SOURCE_VALIDATION_SKIP_EMBEDS
@@ -14151,7 +14156,7 @@ async function playFromSourcePoolWithValidation(resumeTime, token, options = {})
     state.sourceIndex = sourceIndex;
     try {
       await startPlayerSource(source, resumeTime, token, {
-        probeTimeoutMs: SOURCE_VALIDATION_TIMEOUT_MS,
+        probeTimeoutMs,
         probeOnly: true,
         skipEmbeds: SOURCE_VALIDATION_SKIP_EMBEDS,
       });
