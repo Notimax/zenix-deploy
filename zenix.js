@@ -2517,7 +2517,8 @@ function bindEvents() {
     });
   });
 
-  refs.detailSeasonSelect.addEventListener("change", () => {
+  if (refs.detailSeasonSelect && refs.detailEpisodeSelect) {
+    refs.detailSeasonSelect.addEventListener("change", () => {
     const id = state.selectedDetailId;
     if (!id) {
       return;
@@ -2553,9 +2554,11 @@ function bindEvents() {
       .catch(() => {
         // no-op
       });
-  });
+    });
+  }
 
-  refs.detailEpisodeSelect.addEventListener("change", () => {
+  if (refs.detailSeasonSelect && refs.detailEpisodeSelect) {
+    refs.detailEpisodeSelect.addEventListener("change", () => {
     const id = state.selectedDetailId;
     if (!id) {
       return;
@@ -2574,7 +2577,8 @@ function bindEvents() {
       .catch(() => {
         // no-op
       });
-  });
+    });
+  }
 
   refs.detailLanguageSelect?.addEventListener("change", () => {
     const id = state.selectedDetailId;
