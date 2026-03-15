@@ -158,6 +158,10 @@ const MOBILE_STABLE_PLAYBACK_MIN_SEC = 4.5;
 const MOBILE_STABLE_PLAYBACK_GRACE_MS = 2300;
 const MOBILE_STABLE_LOCK_MS = 45000;
 const MOBILE_HARD_FREEZE_AFTER_STABLE_MS = 9500;
+const SOURCE_VALIDATION_ENABLED = true;
+const SOURCE_VALIDATION_TIMEOUT_MS = 2000;
+const SOURCE_VALIDATION_MAX_TRIES = 8;
+const SOURCE_VALIDATION_SKIP_EMBEDS = true;
 const PREVIEW_ENABLED = true;
 const PREVIEW_HOVER_DELAY_MS = 220;
 const PREVIEW_DURATION_MS = 10000;
@@ -11504,10 +11508,11 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
   scheduleHlsLanguageProbe(state.allEpisodeSources);
   const allowPremiumRescue = shouldAllowPremiumRescueForMovie(state.sourcePool, refs.playerVideo);
   try {
-    await playFromSourcePoolWithRescue(resumeTime, token, {
+    await playFromSourcePoolWithValidation(resumeTime, token, {
       startIndex: 0,
       skipPremiumFallback: true,
       allowPremiumRescue,
+      itemId: selectedItem.id,
     });
   } catch (firstError) {
     if (token !== state.playToken) {
@@ -11519,10 +11524,11 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
     if (state.sourcePool.length === 0) {
       throw firstError;
     }
-    await playFromSourcePoolWithRescue(resumeTime, token, {
+    await playFromSourcePoolWithValidation(resumeTime, token, {
       startIndex: 0,
       skipPremiumFallback: true,
       allowPremiumRescue,
+      itemId: selectedItem.id,
     });
     showToast("Source film actualisee automatiquement.");
   }
@@ -11667,10 +11673,11 @@ async function loadEpisodeStream(
 
   const playEpisodeSources = async () => {
     try {
-      await playFromSourcePoolWithRescue(resumeTime, token, {
+      await playFromSourcePoolWithValidation(resumeTime, token, {
         startIndex: 0,
         skipPremiumFallback: true,
         allowPremiumRescue: true,
+        itemId: selectedItem.id,
       });
     } catch (error) {
       if (state.allEpisodeSources.length <= state.sourcePool.length) {
@@ -11681,10 +11688,11 @@ async function loadEpisodeStream(
       state.sourceIndex = -1;
       renderPlayerSourceOptions();
       setPlayerPill(refs.playerLanguagePill, "Auto");
-      await playFromSourcePoolWithRescue(resumeTime, token, {
+      await playFromSourcePoolWithValidation(resumeTime, token, {
         startIndex: 0,
         skipPremiumFallback: true,
         allowPremiumRescue: true,
+        itemId: selectedItem.id,
       });
       showToast("Bascule auto vers une source plus compatible.");
     }
@@ -11930,10 +11938,11 @@ async function runPlayerRepair() {
     const resumeTime = Number(refs.playerVideo?.currentTime || 0);
     const token = ++state.playToken;
     try {
-      await playFromSourcePoolWithRescue(resumeTime, token, {
+      await playFromSourcePoolWithValidation(resumeTime, token, {
         startIndex: 0,
         strictIndex: false,
         skipPremiumFallback: false,
+        itemId: item.id,
       });
     } catch {
       // keep current state if retry fails
@@ -13429,7 +13438,7 @@ async function playFromSourcePool(resumeTime, token, startIndex = 0, options = {
     renderPlayerSourceOptions();
     setPlayerStatus(`Connexion source ${index + 1}/${state.sourcePool.length}...`);
     try {
-      await startPlayerSource(source, resumeTime, token);
+      await startPlayerSource(source, resumeTime, token, options);
       return;
     } catch (error) {
       lastError = error;
@@ -13774,6 +13783,56 @@ function rememberSourceSuccess(source, itemId = 0) {
   }
 }
 
+async function playFromSourcePoolWithValidation(resumeTime, token, options = {}) {
+  const shouldValidate = SOURCE_VALIDATION_ENABLED && options?.skipValidation !== true;
+  if (!shouldValidate || state.sourcePool.length <= 1) {
+    return playFromSourcePoolWithRescue(resumeTime, token, options);
+  }
+
+  const sourceIndexes = state.sourcePool.map((_entry, index) => index);
+  const primary = SOURCE_VALIDATION_SKIP_EMBEDS
+    ? sourceIndexes.filter((index) => !isEmbedSource(state.sourcePool[index]))
+    : sourceIndexes.slice();
+  const probeIndexes = primary.length > 0 ? primary : sourceIndexes;
+  const maxTries = Math.min(probeIndexes.length, Math.max(1, SOURCE_VALIDATION_MAX_TRIES));
+
+  setPlayerLoading(true, "Validation des lecteurs...");
+  setPlayerStatus("Validation des lecteurs...");
+
+  for (let idx = 0; idx < maxTries; idx += 1) {
+    const sourceIndex = probeIndexes[idx];
+    const source = state.sourcePool[sourceIndex];
+    if (!source) {
+      continue;
+    }
+    if (token !== state.playToken) {
+      return;
+    }
+    state.sourceIndex = sourceIndex;
+    renderPlayerSourceOptions();
+    try {
+      await startPlayerSource(source, resumeTime, token, {
+        probeTimeoutMs: SOURCE_VALIDATION_TIMEOUT_MS,
+        probeOnly: true,
+        skipEmbeds: SOURCE_VALIDATION_SKIP_EMBEDS,
+      });
+      if (token !== state.playToken) {
+        return;
+      }
+      source.validated = true;
+      state.lastAutoSwitchAt = Date.now();
+      state.lastAutoSwitchReason = "validated";
+      rememberSourceSuccess(source, Number(options?.itemId || 0));
+      renderPlayerSourceOptions();
+      return;
+    } catch {
+      // continue to next candidate
+    }
+  }
+
+  return playFromSourcePoolWithRescue(resumeTime, token, { ...options, skipValidation: true });
+}
+
 function hasSourceSuccess(source) {
   const key = getSourceSuccessKey(source);
   if (!key || !(state.sourceSuccessMap instanceof Map)) {
@@ -14044,7 +14103,11 @@ function renderPlayerSourceOptions() {
       const mobileScore = computeMobileCompatibilityScore(entry);
       const mobileLabel = describeCompatibilityLabel(mobileScore);
       const mobileCompatText = `Mobile ${mobileLabel} ${mobileScore}%`;
-      const okBadge = hasSourceSuccess(entry) ? '<span class="player-source-chip-meta-pill player-source-chip-ok">Lecture OK</span>' : "";
+      const okBadge = entry?.validated
+        ? '<span class="player-source-chip-meta-pill player-source-chip-ok">Lecteur valide</span>'
+        : hasSourceSuccess(entry)
+          ? '<span class="player-source-chip-meta-pill player-source-chip-ok">Lecture OK</span>'
+          : "";
       const zenixBadge = entry?.isZenix ? '<span class="player-source-chip-meta-pill player-source-chip-zenix">Zenix</span>' : "";
       const chip = document.createElement("button");
       chip.type = "button";
@@ -15071,7 +15134,7 @@ function shouldPreferProxyFirstForHls(video, source) {
   }
 }
 
-async function startPlayerSource(source, resumeTime, token) {
+async function startPlayerSource(source, resumeTime, token, options = {}) {
   const video = refs.playerVideo;
   const mobilePlayback = isLikelyMobileDevice();
   const forceProxyHls = shouldPreferProxyFirstForHls(video, source);
@@ -15085,6 +15148,9 @@ async function startPlayerSource(source, resumeTime, token) {
     throw new Error("Missing source URL");
   }
 
+  const probeTimeoutMs = Math.max(0, Number(options?.probeTimeoutMs || 0));
+  const probeOnly = Boolean(options?.probeOnly);
+  const skipEmbeds = Boolean(options?.skipEmbeds);
   const loadTicket = ++state.sourceLoadTicket;
   state.sourceLoading = true;
   state.sourceLoadingSince = Date.now();
@@ -15103,9 +15169,14 @@ async function startPlayerSource(source, resumeTime, token) {
   if (source?.language) {
     setPlayerPill(refs.playerLanguagePill, source.language);
   }
-  const embedReadyTimeout = mobilePlayback ? Math.min(EMBED_READY_TIMEOUT_MS, MOBILE_EMBED_READY_TIMEOUT_MS) : EMBED_READY_TIMEOUT_MS;
-  const directReadyTimeout = mobilePlayback ? Math.min(VIDEO_READY_TIMEOUT_MS, MOBILE_VIDEO_READY_TIMEOUT_MS) : VIDEO_READY_TIMEOUT_MS;
-  const bootstrapTimeout = mobilePlayback ? MOBILE_PLAYBACK_BOOTSTRAP_TIMEOUT_MS : 4200;
+  let embedReadyTimeout = mobilePlayback ? Math.min(EMBED_READY_TIMEOUT_MS, MOBILE_EMBED_READY_TIMEOUT_MS) : EMBED_READY_TIMEOUT_MS;
+  let directReadyTimeout = mobilePlayback ? Math.min(VIDEO_READY_TIMEOUT_MS, MOBILE_VIDEO_READY_TIMEOUT_MS) : VIDEO_READY_TIMEOUT_MS;
+  let bootstrapTimeout = mobilePlayback ? MOBILE_PLAYBACK_BOOTSTRAP_TIMEOUT_MS : 4200;
+  if (probeTimeoutMs > 0) {
+    embedReadyTimeout = Math.min(embedReadyTimeout, probeTimeoutMs);
+    directReadyTimeout = Math.min(directReadyTimeout, probeTimeoutMs);
+    bootstrapTimeout = Math.min(bootstrapTimeout, probeTimeoutMs);
+  }
 
   let lastError = null;
   let sourceStarted = false;
@@ -15113,6 +15184,9 @@ async function startPlayerSource(source, resumeTime, token) {
     for (const streamUrl of streamCandidates) {
       const useEmbed = isEmbedSource(source, streamUrl);
       const useHls = source?.format === "hls" || /m3u8/i.test(streamUrl);
+      if (skipEmbeds && useEmbed) {
+        throw new Error("Embed probe skipped");
+      }
       setPlayerLoading(
         true,
         useEmbed ? "Chargement du lecteur integre..." : useHls ? "Chargement du flux video..." : "Preparation du flux video..."
@@ -15134,7 +15208,7 @@ async function startPlayerSource(source, resumeTime, token) {
           video.hidden = false;
           video.controls = true;
           video.preload = "auto";
-          await startHlsPlayback(video, streamUrl, token);
+          await startHlsPlayback(video, streamUrl, token, { probeTimeoutMs, probeOnly });
         } else {
           resetPlayerEmbedFrame();
           video.hidden = false;
@@ -15556,7 +15630,11 @@ async function startTsSegmentFallbackPlayback(video, streamUrl, token) {
   return true;
 }
 
-async function startHlsPlayback(video, streamUrl, token) {
+async function startHlsPlayback(video, streamUrl, token, options = {}) {
+  const probeTimeoutMs = Math.max(0, Number(options?.probeTimeoutMs || 0));
+  const probeOnly = Boolean(options?.probeOnly);
+  const hlsReadyTimeout = probeTimeoutMs > 0 ? Math.max(1200, probeTimeoutMs) : HLS_READY_TIMEOUT_MS;
+  const hlsManifestTimeout = probeTimeoutMs > 0 ? Math.max(1200, probeTimeoutMs) : HLS_MANIFEST_TIMEOUT_MS;
   if (shouldUseNativeHls(video)) {
     const isIOSMobile = isLikelyMobileDevice();
     video.src = streamUrl;
@@ -15564,12 +15642,15 @@ async function startHlsPlayback(video, streamUrl, token) {
     let nativeError = null;
     try {
       const nativeTimeout = isIOSMobile
-        ? Math.min(HLS_READY_TIMEOUT_MS, IOS_NATIVE_HLS_BOOT_TIMEOUT_MS)
-        : Math.min(HLS_READY_TIMEOUT_MS, 5200);
+        ? Math.min(hlsReadyTimeout, IOS_NATIVE_HLS_BOOT_TIMEOUT_MS)
+        : Math.min(hlsReadyTimeout, 5200);
       await waitVideoReady(video, nativeTimeout);
       return;
     } catch (error) {
       nativeError = error;
+      if (probeOnly || probeTimeoutMs > 0) {
+        throw nativeError;
+      }
 
       if (isIOSMobile) {
         try {
@@ -15582,7 +15663,7 @@ async function startHlsPlayback(video, streamUrl, token) {
             await tryDecodedHlsBlobPlayback(
               video,
               streamUrl,
-              Math.min(HLS_READY_TIMEOUT_MS + 2600, IOS_DECODED_HLS_BOOT_TIMEOUT_MS)
+              Math.min(hlsReadyTimeout + 2600, IOS_DECODED_HLS_BOOT_TIMEOUT_MS)
             );
             return;
           } catch (decodedError) {
@@ -15594,7 +15675,7 @@ async function startHlsPlayback(video, streamUrl, token) {
       // Retry once with a decoded blob playlist for encoded/quirky upstream manifests.
       // This is especially useful on Safari when native HLS rejects rewritten proxy URLs.
       try {
-        await tryDecodedHlsBlobPlayback(video, streamUrl, Math.min(HLS_READY_TIMEOUT_MS + 2600, 7600));
+        await tryDecodedHlsBlobPlayback(video, streamUrl, Math.min(hlsReadyTimeout + 2600, 7600));
         return;
       } catch (decodedError) {
         try {
@@ -15637,7 +15718,7 @@ async function startHlsPlayback(video, streamUrl, token) {
     const timeoutId = setTimeout(() => {
       cleanup();
       reject(new Error("HLS timeout"));
-    }, HLS_MANIFEST_TIMEOUT_MS);
+    }, hlsManifestTimeout);
 
     const onMediaAttached = () => {
       hls.loadSource(streamUrl);
@@ -15688,7 +15769,7 @@ async function startHlsPlayback(video, streamUrl, token) {
     });
   });
 
-  await waitVideoReady(video, HLS_READY_TIMEOUT_MS);
+  await waitVideoReady(video, hlsReadyTimeout);
 }
 
 function teardownPlayerEngine(video) {

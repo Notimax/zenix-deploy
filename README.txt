@@ -1112,6 +1112,12 @@ LATEST MOBILE AUTOSWITCH LOCK (2026-03-15, c269)
 - Only a true hard-freeze/error can trigger a switch during the stable lock window.
 - Cache-bust bumped to `20260315-c269`.
 
+LATEST SOURCE VALIDATION PASS (2026-03-15, c270)
+- Added a 2s per-source validation pass on entry to pick a working reader quickly.
+- Validation prefers non-embed readers first, then falls back to normal playback if none validate.
+- Validated reader shows a local badge "Lecteur valide" on the source chip.
+- Cache-bust bumped to `20260315-c270`.
+
 IOS13 ZENIX READER BRUTE (LIVE, 2026-03-14)
 - Script: `__tmp_ios13_zenix_5s_battery.js` (5s per title, WebKit iPhone 13).
 - Selection:
