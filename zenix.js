@@ -103,7 +103,7 @@ const HEARTBEAT_KEY = "zenix-client-id-v1";
 const ONLINE_COUNT_BASE = 50;
 const ONLINE_COUNT_POLL_MS = 30 * 1000;
 const ONLINE_COUNT_STALE_MS = ONLINE_COUNT_POLL_MS * 2;
-const UI_HEALTH_INTERVAL_MS = 20000;
+const UI_HEALTH_INTERVAL_MS = 12000;
 const UI_HEALTH_MIN_CARDS = 3;
 const UI_HEALTH_SOFT_FAILS = 2;
 const UI_HEALTH_HARD_FAILS = 4;
@@ -1613,7 +1613,15 @@ function startUiHealthMonitor() {
   };
 
   state.uiHealthTimer = window.setInterval(run, UI_HEALTH_INTERVAL_MS);
-  setTimeout(run, 6000);
+  setTimeout(run, 3500);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+      run();
+    }
+  });
+  window.addEventListener("online", () => {
+    run();
+  });
 }
 
 function ensureRecoveryModules() {

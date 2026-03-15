@@ -1217,3 +1217,8 @@ LATEST UI SELF-HEAL MONITOR (2026-03-15, c295)
 - Exposed __zenixCssEnsure in index.html and invoked it during health checks when CSS is missing.
 - One-time hard reload only if repeated health failures and no overlay is open (to avoid disrupting playback).
 
+
+LATEST UI HEALTH TUNING (2026-03-15, c296)
+- UI health monitor now runs every 12s with a 3.5s first check.
+- Health checks now re-run on tab focus and when the network returns (online).
+
