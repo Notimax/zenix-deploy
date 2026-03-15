@@ -1624,8 +1624,12 @@ async function init() {
   initCalendarControls();
   state.analyticsClientId = getOrCreateAnalyticsClientId();
 
-  refs.syncInfo.textContent = "Synchronisation initiale en cours...";
-  refs.supportInfo.textContent = "Films, series et anime gratuits, lecture directe sans compte.";
+  if (refs.syncInfo) {
+    refs.syncInfo.textContent = "Synchronisation initiale en cours...";
+  }
+  if (refs.supportInfo) {
+    refs.supportInfo.textContent = "Films, series et anime gratuits, lecture directe sans compte.";
+  }
   applyBrowseStateFromRoute();
   applySavedBrowseState();
   renderFilterChips();
@@ -2938,14 +2942,14 @@ function bindEvents() {
     const typing =
       target instanceof HTMLElement &&
       (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
-    if (event.key === "/" && document.activeElement !== refs.searchInput) {
+    if (event.key === "/" && refs.searchInput && document.activeElement !== refs.searchInput) {
       if (!typing) {
         event.preventDefault();
         refs.searchInput.focus();
       }
     }
 
-    if (!refs.playerOverlay.hidden && !typing) {
+    if (refs.playerOverlay && refs.playerVideo && !refs.playerOverlay.hidden && !typing) {
       const key = String(event.key || "").toLowerCase();
       if (key === " " || key === "k") {
         event.preventDefault();

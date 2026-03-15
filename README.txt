@@ -1203,3 +1203,7 @@ LATEST UI EMPTY FIX (2026-03-15, c292)
 - Guard missing DOM nodes so `bindEvents()` cannot crash on partial HTML loads.
 - Fix prevents: categories unclickable, popups missing, catalog not rendering.
 - Keep this guard on every future change if the “UI vide” bug reappears.
+
+LATEST UI BOOT WATCHDOG (2026-03-15, c293)
+- If core JS fails to boot, a one-time watchdog re-injects `zenix.js` and reloads.
+- Prevents intermittent blank UI when CDN or network drops the JS/CSS load.

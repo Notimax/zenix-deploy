@@ -142,7 +142,7 @@
         }
       })();
     </script>
-    <script id="zenixCoreScript" defer src="/zenix.js?v=20260315-c292"></script>
+    <script id="zenixCoreScript" defer src="/zenix.js?v=20260315-c293"></script>
     <script>
       (function () {
         var core = document.getElementById("zenixCoreScript");
@@ -175,9 +175,42 @@
             }
             var script = document.createElement("script");
             script.defer = true;
-            script.src = "/zenix.js?v=20260315-c292&retry=" + Date.now();
+            script.src = "/zenix.js?v=20260315-c293&retry=" + Date.now();
             document.head.appendChild(script);
           }, 4200);
+        });
+      })();
+    </script>
+    <script>
+      (function () {
+        if (window.__zenixBootWatchdog) {
+          return;
+        }
+        window.__zenixBootWatchdog = true;
+        window.addEventListener("load", function () {
+          setTimeout(function () {
+            if (window.__zenixBooted) {
+              return;
+            }
+            var key = "zenix-boot-watchdog-v1";
+            try {
+              if (sessionStorage.getItem(key)) {
+                return;
+              }
+              sessionStorage.setItem(key, String(Date.now()));
+            } catch (e) {
+              // ignore
+            }
+            var script = document.createElement("script");
+            script.defer = true;
+            script.src = "/zenix.js?v=20260315-c293&watch=" + Date.now();
+            document.head.appendChild(script);
+            setTimeout(function () {
+              if (!window.__zenixBooted) {
+                window.location.reload();
+              }
+            }, 3500);
+          }, 5200);
         });
       })();
     </script>
