@@ -13217,8 +13217,8 @@ async function handleZenixSource(req, res, requestUrl) {
         const value = String(entry?.stream_url || entry?.url || "");
         return value === NOCTA_SCREAM7_DEBUG_URL || value === proxiedUrl;
       });
-      if (!exists) {
-        noctaSources.unshift({
+      noctaSources = [
+        {
           stream_url: proxiedUrl,
           source_name: "Scream 7 Debug",
           debug: true,
@@ -13226,8 +13226,8 @@ async function handleZenixSource(req, res, requestUrl) {
           language: "VF",
           format: "mp4",
           priority: 402,
-        });
-      }
+        },
+      ];
     }
     if (noctaSources.length > 0) {
       sendJson(res, 200, {

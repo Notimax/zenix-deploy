@@ -170,6 +170,7 @@ LATEST FIX LOG (2026-03-15)
 - Scream 7 debug source:
   - added a fixed MP4 debug source from fastflux for Scream 7.
   - routed via `/api/hls-proxy` with Noctaflix referer fallback for fastflux hosts.
+  - forced Scream 7 to only expose the debug proxy source (all other sources hidden).
 - Debug badges:
   - player source chips now show a Debug badge when a source is flagged debug.
   - Nakios sources now include one debug proxy source per title.
