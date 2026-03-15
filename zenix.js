@@ -828,6 +828,12 @@ function scheduleFloatingNotificationGuard() {
 }
 
 function initFloatingNotificationGuard() {
+  if (typeof window !== "undefined") {
+    if (window.__zenixFloatingGuardInit) {
+      return;
+    }
+    window.__zenixFloatingGuardInit = true;
+  }
   enforceFloatingNotificationsPlacement();
   if (typeof MutationObserver !== "function") {
     return;
@@ -1216,6 +1222,12 @@ function isExternalHostWhitelisted(url) {
 }
 
 function initExternalNavigationGuard() {
+  if (typeof window !== "undefined") {
+    if (window.__zenixExternalGuardInit) {
+      return;
+    }
+    window.__zenixExternalGuardInit = true;
+  }
   const nativeOpen = typeof window.open === "function" ? window.open.bind(window) : null;
   if (!nativeOpen) {
     return;
@@ -1412,6 +1424,38 @@ async function completeStartupSplash(startedAt = 0, options = {}) {
   forceHideStartupSplash();
 }
 
+function ensureRecoveryModules() {
+  if (typeof window === "undefined") {
+    return;
+  }
+  if (!window.__zenixEventsBound) {
+    bindEvents();
+  }
+  if (!window.__zenixExternalGuardInit) {
+    initExternalNavigationGuard();
+  }
+  if (!window.__zenixDiscordInit) {
+    initDiscordGate();
+  }
+  if (!window.__zenixBackupInit) {
+    initBackupGate();
+  }
+  if (!window.__zenixAdblockInit) {
+    initAdblockGuard();
+  }
+  if (!window.__zenixFloatingGuardInit) {
+    initFloatingNotificationGuard();
+  }
+  loadAnnouncement();
+  if (!state.discordPromptReady) {
+    state.discordPromptReady = true;
+  }
+  if (state.discordPromptReady) {
+    maybeShowDiscordGate({ delayMs: 420 });
+    scheduleBackupAfterDiscord(BACKUP_PROMPT_DELAY_MS);
+  }
+}
+
 function scheduleUiRecovery(reason = "post-boot") {
   if (typeof window === "undefined") {
     return;
@@ -1462,6 +1506,7 @@ function scheduleUiRecovery(reason = "post-boot") {
       setAdblockGateVisible(true);
       return;
     }
+    ensureRecoveryModules();
     if (document.body.classList.contains("startup-lock")) {
       document.body.classList.remove("startup-lock");
       const splash = document.getElementById("startupSplash");
@@ -1802,6 +1847,12 @@ function bindSafeTap(target, callback, options = {}) {
 }
 
 function bindEvents() {
+  if (typeof window !== "undefined") {
+    if (window.__zenixEventsBound) {
+      return;
+    }
+    window.__zenixEventsBound = true;
+  }
 
   refs.navPills.forEach((button) => {
     button.addEventListener("click", () => {
@@ -3749,6 +3800,12 @@ function maybeShowDiscordGate(options = {}) {
 }
 
 function initDiscordGate() {
+  if (typeof window !== "undefined") {
+    if (window.__zenixDiscordInit) {
+      return;
+    }
+    window.__zenixDiscordInit = true;
+  }
   if (refs.discordJoinBtn) {
     bindFastPress(refs.discordJoinBtn, () => {
       setDiscordGateVisible(false);
@@ -3868,6 +3925,12 @@ function scheduleBackupAfterDiscord(delayMs = BACKUP_PROMPT_DELAY_MS) {
 }
 
 function initBackupGate() {
+  if (typeof window !== "undefined") {
+    if (window.__zenixBackupInit) {
+      return;
+    }
+    window.__zenixBackupInit = true;
+  }
   state.backupPromptReady = true;
   if (refs.backupGateUrl) {
     refs.backupGateUrl.textContent = BACKUP_PORTAL_URL;
@@ -4116,6 +4179,12 @@ async function runAdblockDetection(options = {}) {
 }
 
 function initAdblockGuard() {
+  if (typeof window !== "undefined") {
+    if (window.__zenixAdblockInit) {
+      return;
+    }
+    window.__zenixAdblockInit = true;
+  }
   if (refs.adblockRetryBtn) {
     bindFastPress(refs.adblockRetryBtn, () => {
       setAdblockGateStatus("Verification en cours...");

@@ -164,6 +164,8 @@ LATEST FIX LOG (2026-03-15)
   - forced Noctaflix override now triggers by TMDB id/media id + title.
   - Noctaflix fetch headers include full browser UA to avoid HTML blocks.
   - owned-source fetch now passes title/year to server for better overrides.
+- UI recovery hardening:
+  - recovery path now re-initializes popups, announcement, and event bindings if boot failed.
 
 LAST BRUTE RESULT (LOCAL AFTER NAKIOS MIGRATION, 2026-03-08)
 - Source: `__tmp_brut_f1_mercredi_matrix_result_after_nakios_local_v2.json`
