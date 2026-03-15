@@ -1118,6 +1118,11 @@ LATEST SOURCE VALIDATION PASS (2026-03-15, c270)
 - Validated reader shows a local badge "Lecteur valide" on the source chip.
 - Cache-bust bumped to `20260315-c270`.
 
+LATEST UI RECOVERY HARD RELOAD (2026-03-15, c271)
+- If the UI is still empty after recovery attempts, a one-time hard reload is triggered.
+- Clears catalog cache + unregisters service workers before reloading to prevent blank states.
+- Cache-bust bumped to `20260315-c271`.
+
 IOS13 ZENIX READER BRUTE (LIVE, 2026-03-14)
 - Script: `__tmp_ios13_zenix_5s_battery.js` (5s per title, WebKit iPhone 13).
 - Selection:

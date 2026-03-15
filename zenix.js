@@ -1421,6 +1421,37 @@ function scheduleUiRecovery(reason = "post-boot") {
   }
   window.__zenixUiRecoveryScheduled = true;
 
+  const forceUiReloadOnce = () => {
+    try {
+      if (sessionStorage.getItem("zenix-hard-reload")) {
+        return;
+      }
+      sessionStorage.setItem("zenix-hard-reload", String(Date.now()));
+    } catch {
+      // ignore
+    }
+    try {
+      localStorage.removeItem(CATALOG_CACHE_KEY);
+      localStorage.removeItem(CLEANUP_KEY);
+    } catch {
+      // ignore
+    }
+    try {
+      if ("serviceWorker" in navigator) {
+        navigator.serviceWorker.getRegistrations().then((regs) => {
+          regs.forEach((reg) => reg.unregister());
+        });
+      }
+    } catch {
+      // ignore
+    }
+    setTimeout(() => {
+      if (typeof window !== "undefined") {
+        window.location.reload();
+      }
+    }, 250);
+  };
+
   const runCheck = async () => {
     const cards = document.querySelectorAll(".media-card[data-card-id]").length;
     const hasNav = Array.isArray(refs.navPills) && refs.navPills.length > 0;
@@ -1455,6 +1486,9 @@ function scheduleUiRecovery(reason = "post-boot") {
       if (refs.syncInfo) {
         refs.syncInfo.textContent = "Synchronisation en cours... merci de patienter.";
       }
+    }
+    if (refreshedCards < 2 && !state.loadingCatalog) {
+      forceUiReloadOnce();
     }
   };
 
