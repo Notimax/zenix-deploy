@@ -418,6 +418,7 @@ const animeSibnetCache = new Map();
 const animeSeasonsCache = new Map();
 const nakiosSeasonsCache = new Map();
 const nakiosSeasonsInFlight = new Map();
+const nakiosDetailCache = new Map();
 const repairRateLimit = new Map();
 const purstreamSearchCache = new Map();
 const pidoovDetailCache = new Map();
@@ -7454,13 +7455,14 @@ async function fetchNakiosPinnedEntries(existingRows) {
   return task;
 }
 
-async function resolveNakiosTmdbIdBySearch(title, mediaType, year = 0) {
+async function resolveNakiosTmdbIdBySearch(title, mediaType, year = 0, options = {}) {
   const safeTitle = String(title || "").trim();
   if (safeTitle.length < 2) {
     return 0;
   }
   const normalizedType = String(mediaType || "").toLowerCase() === "tv" ? "tv" : "movie";
   const safeYear = toInt(year, 0, 0, 2099);
+  const requireStrongMatch = Boolean(options?.requireStrongMatch);
   const titleKey = normalizeTitleKey(safeTitle);
   const cacheKey = `nakios:${titleKey}:${normalizedType}:${safeYear}`;
   const cached = nakiosLookupCache.get(cacheKey);
@@ -7484,7 +7486,13 @@ async function resolveNakiosTmdbIdBySearch(title, mediaType, year = 0) {
   const scored = rows
     .filter((entry) => {
       const type = String(entry?.media_type || "").toLowerCase();
-      return type === normalizedType;
+      if (type !== normalizedType) {
+        return false;
+      }
+      if ((STRICT_NAKIOS_MATCH || requireStrongMatch) && !isStrongTitleMatch(safeTitle, entry?.title || entry?.name)) {
+        return false;
+      }
+      return true;
     })
     .map((entry) => {
       const rowTitle = String(entry?.title || entry?.name || "").trim();
@@ -7510,6 +7518,11 @@ async function resolveNakiosTmdbIdBySearch(title, mediaType, year = 0) {
           score += 16;
         } else {
           score -= diff * 4;
+        }
+      } else if ((STRICT_NAKIOS_MATCH || requireStrongMatch) && safeYear > 0 && rowYear > 0) {
+        const diff = Math.abs(rowYear - safeYear);
+        if (diff > 2) {
+          score -= 80;
         }
       }
       score += Math.max(0, Math.min(120, Number(entry?.popularity || 0)));
@@ -8419,7 +8432,13 @@ async function resolveNakiosSearchEntry(title, mediaType, year = 0) {
   const rows = Array.isArray(payload?.results) ? payload.results : [];
   const filtered = rows.filter((entry) => {
     const type = String(entry?.media_type || "").toLowerCase();
-    return type === normalizedType;
+    if (type !== normalizedType) {
+      return false;
+    }
+    if (STRICT_NAKIOS_MATCH && !isStrongTitleMatch(safeTitle, entry?.title || entry?.name)) {
+      return false;
+    }
+    return true;
   });
   if (filtered.length === 0) {
     return null;
@@ -8500,8 +8519,68 @@ function extractTitleTokens(title) {
   const tokens = normalized
     .split(/\s+/)
     .map((token) => token.trim())
-    .filter((token) => token.length >= 4 && !NAKIOS_TITLE_STOPWORDS.has(token));
+    .filter((token) => token.length >= 3 && !NAKIOS_TITLE_STOPWORDS.has(token));
   return Array.from(new Set(tokens));
+}
+
+function extractYearCandidates(text) {
+  const value = String(text || "");
+  if (!value) {
+    return [];
+  }
+  const years = new Set();
+  const regex = /(19|20)\d{2}/g;
+  let match = null;
+  while ((match = regex.exec(value)) !== null) {
+    const year = toInt(match[0], 0, 1900, 2099);
+    if (year > 0) {
+      years.add(year);
+    }
+  }
+  return Array.from(years);
+}
+
+function isStrongTitleMatch(left, right) {
+  const a = normalizeMatchText(left);
+  const b = normalizeMatchText(right);
+  if (!a || !b) {
+    return false;
+  }
+  if (a === b) {
+    return true;
+  }
+  const tokensA = extractTitleTokens(a);
+  const tokensB = extractTitleTokens(b);
+  if (tokensA.length === 0 || tokensB.length === 0) {
+    return a === b;
+  }
+  const shared = tokensA.filter((token) => tokensB.includes(token));
+  if (shared.length === 0) {
+    return false;
+  }
+  if (shared.length >= 3) {
+    return true;
+  }
+  const ratio = shared.length / Math.max(tokensA.length, tokensB.length);
+  if (shared.length >= 2 && ratio >= 0.5) {
+    return true;
+  }
+  if (tokensA.length === 1 && tokensB.length === 1 && shared.length === 1) {
+    return true;
+  }
+  return false;
+}
+
+function isTitleYearCompatible(metaYear, haystack) {
+  const year = toInt(metaYear, 0, 1900, 2099);
+  if (year <= 0) {
+    return true;
+  }
+  const years = extractYearCandidates(haystack);
+  if (years.length === 0) {
+    return true;
+  }
+  return years.some((entry) => Math.abs(entry - year) <= 1);
 }
 
 function isNakiosSourceCompatible(source, meta = {}) {
@@ -8529,7 +8608,17 @@ function isNakiosSourceCompatible(source, meta = {}) {
   if (tokens.length === 0) {
     return true;
   }
-  return tokens.some((token) => haystack.includes(token));
+  if (!isTitleYearCompatible(meta.year, haystack)) {
+    return false;
+  }
+  const matched = tokens.filter((token) => haystack.includes(token));
+  if (matched.length === 0) {
+    return false;
+  }
+  if (tokens.length >= 2) {
+    return matched.length >= 2;
+  }
+  return matched.length >= 1;
 }
 
 function filterNakiosSourcesByTitle(sources, meta = {}) {
@@ -8856,6 +8945,35 @@ async function resolveNoctaSourcesByDetailUrl(detailUrl) {
     });
   }
   return out;
+}
+
+async function fetchNakiosDetailByTmdbId(mediaType, tmdbId) {
+  const safeTmdbId = toInt(tmdbId, 0, 0, 999999999);
+  if (safeTmdbId <= 0) {
+    return null;
+  }
+  const normalizedType = String(mediaType || "").toLowerCase() === "tv" ? "series" : "movies";
+  const cacheKey = `${normalizedType}:${safeTmdbId}`;
+  const cached = nakiosDetailCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.value || null;
+  }
+  const target = `${NAKIOS_API_BASE}/api/${normalizedType}/${safeTmdbId}`;
+  const response = await fetchRemoteWithTimeout(target, NAKIOS_FETCH_HEADERS, NAKIOS_SOURCE_REMOTE_TIMEOUT_MS);
+  if (response.status < 200 || response.status >= 300) {
+    nakiosDetailCache.set(cacheKey, {
+      value: null,
+      expiresAt: Date.now() + Math.min(10 * 60 * 1000, NAKIOS_LOOKUP_CACHE_MS),
+    });
+    return null;
+  }
+  const detail = parseJsonSafe(response.body);
+  nakiosDetailCache.set(cacheKey, {
+    value: detail || null,
+    expiresAt: Date.now() + Math.max(30 * 60 * 1000, NAKIOS_LOOKUP_CACHE_MS),
+  });
+  prunePidoovTimedCache(nakiosDetailCache, 3000);
+  return detail || null;
 }
 
 async function fetchNakiosSeasonsByTmdbId(tmdbId) {
@@ -13432,23 +13550,56 @@ async function handleZenixSource(req, res, requestUrl) {
     tmdbId = toInt(movixEntry?.external_tmdb_id || movixEntry?.externalTmdbId, 0, 0, 999999999);
   }
 
+  if (tmdbId > 0 && title) {
+    try {
+      const detail = await fetchNakiosDetailByTmdbId(mediaType, tmdbId);
+      const detailTitle = String(detail?.title || detail?.name || "").trim();
+      const detailYear = toInt(parseYearFromText(detail?.release_date || detail?.first_air_date || ""), 0, 0, 2099);
+      if (detailTitle && !isStrongTitleMatch(title, detailTitle)) {
+        tmdbId = 0;
+      } else if (year > 0 && detailYear > 0 && Math.abs(detailYear - year) > 1) {
+        tmdbId = 0;
+      }
+    } catch {
+      // keep tmdbId if detail check fails
+    }
+  }
+
   if (tmdbId <= 0) {
     if (STRICT_NAKIOS_MATCH) {
-      sendJson(res, 200, {
-        apiVersion: "zenix-source-v1",
-        type: "success",
-        data: {
-          title,
-          mediaType,
-          year,
-          season: mediaType === "tv" ? season : 1,
-          episode: mediaType === "tv" ? episode : 1,
-          tmdbId: 0,
-          count: 0,
-          sources: [],
-        },
-      });
-      return true;
+      // Attempt a strict title-based lookup before returning empty.
+      if (title.length >= 2) {
+        try {
+          tmdbId = await resolveNakiosTmdbIdBySearch(title, mediaType, year, { requireStrongMatch: true });
+          if (tmdbId <= 0 && cleanedTitle && cleanedTitle !== title) {
+            tmdbId = await resolveNakiosTmdbIdBySearch(cleanedTitle, mediaType, year, { requireStrongMatch: true });
+          }
+          if (tmdbId <= 0 && year > 0) {
+            tmdbId = await resolveNakiosTmdbIdBySearch(cleanedTitle || title, mediaType, 0, {
+              requireStrongMatch: true,
+            });
+          }
+        } catch {
+          tmdbId = 0;
+        }
+      }
+      if (tmdbId <= 0) {
+        sendJson(res, 200, {
+          apiVersion: "zenix-source-v1",
+          type: "success",
+          data: {
+            title,
+            mediaType,
+            year,
+            season: mediaType === "tv" ? season : 1,
+            episode: mediaType === "tv" ? episode : 1,
+            tmdbId: 0,
+            count: 0,
+            sources: [],
+          },
+        });
+        return true;
+      }
     }
     if (title.length < 2) {
       sendJson(res, 200, {

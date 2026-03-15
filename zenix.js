@@ -722,6 +722,8 @@ const refs = {
   designUpdatesSection: document.getElementById("designUpdatesSection"),
 };
 
+let adblockFallbackOverlay = null;
+
 let searchDebounce = null;
 let lastProgressSave = 0;
 let toastTimer = null;
@@ -1656,6 +1658,22 @@ function ensureRecoveryModules() {
   }
 }
 
+function registerGlobalErrorHeal() {
+  if (typeof window === "undefined") {
+    return;
+  }
+  if (window.__zenixGlobalHealBound) {
+    return;
+  }
+  window.__zenixGlobalHealBound = true;
+  window.addEventListener("error", () => {
+    scheduleUiRecovery("runtime-error");
+  });
+  window.addEventListener("unhandledrejection", () => {
+    scheduleUiRecovery("runtime-rejection");
+  });
+}
+
 function scheduleUiRecovery(reason = "post-boot") {
   if (typeof window === "undefined") {
     return;
@@ -1766,6 +1784,7 @@ init().catch((error) => {
 async function init() {
   const splashStartedAt = startStartupSplash();
   applyRuntimeBrowserHints();
+  registerGlobalErrorHeal();
   initPerfTierMonitor();
   scheduleNativeAdWarmup();
   pruneProgressEntries();
@@ -4326,6 +4345,48 @@ function setAdblockGateStatus(message, isError = false) {
   refs.adblockGateStatus.classList.toggle("is-error", Boolean(isError));
 }
 
+function ensureAdblockFallbackOverlay(visible) {
+  if (!visible) {
+    if (adblockFallbackOverlay && adblockFallbackOverlay.parentNode) {
+      adblockFallbackOverlay.parentNode.removeChild(adblockFallbackOverlay);
+    }
+    adblockFallbackOverlay = null;
+    return;
+  }
+  if (adblockFallbackOverlay) {
+    return;
+  }
+  const overlay = document.createElement("div");
+  overlay.setAttribute("data-zenix-access", "fallback");
+  overlay.style.cssText =
+    "position:fixed;inset:0;z-index:999999;background:rgba(5,7,12,0.92);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:center;padding:24px;color:#f5f7ff;font-family:'Space Grotesk',sans-serif;";
+  const card = document.createElement("div");
+  card.style.cssText =
+    "max-width:520px;width:100%;background:rgba(14,18,26,0.92);border:1px solid rgba(255,255,255,0.08);border-radius:18px;padding:22px 20px;box-shadow:0 18px 60px rgba(0,0,0,0.45);text-align:center;";
+  const title = document.createElement("div");
+  title.textContent = "Acces requis";
+  title.style.cssText = "font-weight:700;font-size:18px;margin-bottom:6px;letter-spacing:.4px;";
+  const desc = document.createElement("div");
+  desc.textContent =
+    "Desactive ton bloqueur de pub pour continuer. Une fois fait, clique sur verifier.";
+  desc.style.cssText = "font-size:14px;opacity:.86;line-height:1.5;margin-bottom:16px;";
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.textContent = "Verifier de nouveau";
+  btn.style.cssText =
+    "appearance:none;border:none;border-radius:999px;padding:10px 18px;background:#1f63ff;color:#fff;font-weight:700;font-size:14px;cursor:pointer;box-shadow:0 10px 24px rgba(31,99,255,0.35);";
+  btn.addEventListener("click", () => {
+    setAdblockGateStatus("Verification en cours...");
+    runAdblockDetection({ manual: true }).catch(() => {});
+  });
+  card.appendChild(title);
+  card.appendChild(desc);
+  card.appendChild(btn);
+  overlay.appendChild(card);
+  document.body.appendChild(overlay);
+  adblockFallbackOverlay = overlay;
+}
+
 function setAdblockGateVisible(visible) {
   if (!refs.adblockGate) {
     return;
@@ -4333,6 +4394,7 @@ function setAdblockGateVisible(visible) {
   const nextVisible = Boolean(visible);
   refs.adblockGate.hidden = !nextVisible;
   document.body.classList.toggle("access-locked", nextVisible);
+  ensureAdblockFallbackOverlay(nextVisible);
   if (nextVisible) {
     setDiscordGateVisible(false);
   } else if (isLikelyMobileDevice()) {

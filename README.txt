@@ -1222,3 +1222,10 @@ LATEST UI HEALTH TUNING (2026-03-15, c296)
 - UI health monitor now runs every 12s with a 3.5s first check.
 - Health checks now re-run on tab focus and when the network returns (online).
 
+
+LATEST SOURCE MATCH + ADBLOCK FALLBACK (2026-03-15, c297)
+- Nakios strict matching tightened: strong title match required in search, stricter token checks + year compatibility in source filtering.
+- If tmdbId appears mismatched with title/year, we invalidate it and perform a strict title search before returning sources.
+- Added adblock fallback overlay (inline styles) to ensure gate is visible even when blockers hide standard UI.
+- Added global error/rejection hooks to trigger UI recovery if runtime errors occur.
+
