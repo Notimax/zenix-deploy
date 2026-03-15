@@ -5339,6 +5339,20 @@ function isScream7Item(item) {
   return /\bscream\b/.test(key) && /\b7\b/.test(key);
 }
 
+function isBanlieusards3Item(item) {
+  const key = normalizeTitleKey(item?.title || "");
+  if (!key) {
+    return false;
+  }
+  if (key.includes("banlieusards 3")) {
+    return true;
+  }
+  if (key.includes("banlieusards iii")) {
+    return true;
+  }
+  return /\bbanlieusards\b/.test(key) && /\b3\b/.test(key);
+}
+
 function resolveCalendarDetailId(entry) {
   const directId = Number(entry?.mediaId || 0);
   if (directId > 0) {
@@ -11484,9 +11498,9 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
 
   const { season: externalSeason, episode: externalEpisode } = getExternalPlaybackContext(selectedItem || item);
 
-  if (selectedItem && selectedItem.type !== "tv" && isScream7Item(selectedItem)) {
+  if (selectedItem && selectedItem.type !== "tv" && (isScream7Item(selectedItem) || isBanlieusards3Item(selectedItem))) {
     setPlayerStatus("Connexion au lecteur debug...");
-    const debugSources = await fetchScream7DebugSources(selectedItem);
+    const debugSources = await fetchDebugOnlySources(selectedItem);
     if (token !== state.playToken) {
       return;
     }
@@ -12522,8 +12536,8 @@ async function resolveNakiosTmdbId(item) {
   }
 }
 
-async function fetchScream7DebugSources(item) {
-  if (!item || !isScream7Item(item)) {
+async function fetchDebugOnlySources(item) {
+  if (!item || !(isScream7Item(item) || isBanlieusards3Item(item))) {
     return [];
   }
   const title = String(item?.title || "").trim();

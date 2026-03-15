@@ -31,10 +31,13 @@ const NOCTA_HOST = "noctaflix.lol";
 const NOCTA_FORCE_OVERRIDES = new Map([
   ["scream 7", `${NOCTA_BASE}/movie/scream-7`],
   ["scream 7 2026", `${NOCTA_BASE}/movie/scream-7`],
+  ["banlieusards 3", `${NOCTA_BASE}/movie/banlieusards-3`],
+  ["banlieusards iii", `${NOCTA_BASE}/movie/banlieusards-3`],
 ]);
 const NOCTA_FORCE_TMDB_IDS = new Set([1159559]);
 const NOCTA_FORCE_MEDIA_IDS = new Set([1507947720]);
 const NOCTA_SCREAM7_DEBUG_URL = "https://cdn.fastflux.xyz/movies/Scream-7-2026.mp4";
+const NOCTA_BANLIEUSARDS3_DEBUG_URL = "https://cdn.fastflux.xyz/movies/Banlieusards-3-2026.mp4";
 const STRICT_NAKIOS_MATCH = true;
 const MOVIX_BASE62_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const DEFAULT_BROWSER_UA =
@@ -3375,6 +3378,11 @@ function isScream7Target(title, tmdbId = 0, mediaId = 0) {
   }
   const key = normalizeTitleKey(title || "");
   return key === "scream 7" || key === "scream 7 2026";
+}
+
+function isBanlieusards3Target(title) {
+  const key = normalizeTitleKey(title || "");
+  return key === "banlieusards 3" || key === "banlieusards iii";
 }
 
 function cleanNoctaTitle(raw) {
@@ -13278,6 +13286,7 @@ async function handleZenixSource(req, res, requestUrl) {
   });
   const forcedNoctaUrl = !noctaEntry ? resolveNoctaForcedUrl(title, tmdbId, mediaId) : "";
   const isScream7 = isScream7Target(title, tmdbId, mediaId);
+  const isBanlieusards3 = isBanlieusards3Target(title);
   if (noctaEntry || forcedNoctaUrl) {
     const detailUrl =
       String(noctaEntry?.external_detail_url || noctaEntry?.detailUrl || noctaEntry?.pageUrl || forcedNoctaUrl || "")
@@ -13290,16 +13299,13 @@ async function handleZenixSource(req, res, requestUrl) {
         noctaSources = [];
       }
     }
-    if (isScream7 && NOCTA_SCREAM7_DEBUG_URL) {
-      const proxiedUrl = buildHlsProxyPath(NOCTA_SCREAM7_DEBUG_URL);
-      const exists = noctaSources.some((entry) => {
-        const value = String(entry?.stream_url || entry?.url || "");
-        return value === NOCTA_SCREAM7_DEBUG_URL || value === proxiedUrl;
-      });
+    if ((isScream7 && NOCTA_SCREAM7_DEBUG_URL) || (isBanlieusards3 && NOCTA_BANLIEUSARDS3_DEBUG_URL)) {
+      const debugUrl = isScream7 ? NOCTA_SCREAM7_DEBUG_URL : NOCTA_BANLIEUSARDS3_DEBUG_URL;
+      const proxiedUrl = buildHlsProxyPath(debugUrl);
       noctaSources = [
         {
           stream_url: proxiedUrl,
-          source_name: "Scream 7 Debug",
+          source_name: isScream7 ? "Scream 7 Debug" : "Banlieusards 3 Debug",
           debug: true,
           quality: "HD",
           language: "VF",
