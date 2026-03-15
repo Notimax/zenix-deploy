@@ -142,7 +142,7 @@
         }
       })();
     </script>
-    <script id="zenixCoreScript" defer src="/zenix.js?v=20260315-c275"></script>
+    <script id="zenixCoreScript" defer src="/zenix.js?v=20260315-c276"></script>
     <script>
       (function () {
         var core = document.getElementById("zenixCoreScript");
@@ -175,7 +175,7 @@
             }
             var script = document.createElement("script");
             script.defer = true;
-            script.src = "/zenix.js?v=20260315-c275&retry=" + Date.now();
+            script.src = "/zenix.js?v=20260315-c276&retry=" + Date.now();
             document.head.appendChild(script);
           }, 4200);
         });
@@ -796,18 +796,18 @@
     <button class="mobile-tab" type="button" data-mobile-view="list">Liste</button>
   </nav>
 
-  <section class="access-gate" id="accessGate" hidden role="dialog" aria-modal="true" aria-labelledby="accessGateTitle">
-    <article class="access-gate-card">
-      <p class="access-gate-kicker">Acces requis</p>
-      <h2 id="accessGateTitle">Bloqueur de pub detecte</h2>
+  <section class="access-layer" id="accessLayer" hidden role="dialog" aria-modal="true" aria-labelledby="accessLayerTitle">
+    <article class="access-layer-card">
+      <p class="access-layer-kicker">Acces requis</p>
+      <h2 id="accessLayerTitle">Bloqueur de pub detecte</h2>
       <p>
         Zenix est 100% gratuit. De petites pubs non intrusives financent l'hebergement et le domaine.
         Merci de desactiver le bloqueur de pub pour continuer la lecture.
       </p>
-      <div class="access-gate-actions">
+      <div class="access-layer-actions">
         <button class="btn btn-primary" id="accessRetryBtn" type="button">Verifier de nouveau</button>
       </div>
-      <p class="access-gate-status" id="accessGateStatus">Verification en cours...</p>
+      <p class="access-layer-status" id="accessStatus">Verification en cours...</p>
     </article>
   </section>
 

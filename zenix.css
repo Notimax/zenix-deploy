@@ -6278,7 +6278,7 @@ img[data-image-ready="1"] {
 }
 
 /* ===== Adblock gate + type classification hardening UI (c154) ===== */
-.access-gate {
+.access-layer {
   position: fixed;
   inset: 0;
   z-index: 210;
@@ -6292,7 +6292,7 @@ img[data-image-ready="1"] {
   backdrop-filter: blur(8px);
 }
 
-.access-gate-card {
+.access-layer-card {
   width: min(560px, 100%);
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 18px;
@@ -6303,7 +6303,7 @@ img[data-image-ready="1"] {
   box-shadow: 0 24px 62px rgba(0, 0, 0, 0.62);
 }
 
-.access-gate-kicker {
+.access-layer-kicker {
   margin: 0 0 8px;
   font-size: 0.76rem;
   letter-spacing: 0.14em;
@@ -6311,30 +6311,30 @@ img[data-image-ready="1"] {
   color: rgba(255, 199, 145, 0.9);
 }
 
-.access-gate-card h2 {
+.access-layer-card h2 {
   margin: 0;
   font-size: clamp(1.28rem, 4.8vw, 1.78rem);
 }
 
-.access-gate-card p {
+.access-layer-card p {
   margin: 12px 0 0;
   color: var(--muted);
   line-height: 1.55;
 }
 
-.access-gate-actions {
+.access-layer-actions {
   margin-top: 16px;
   display: flex;
   justify-content: flex-start;
 }
 
-.access-gate-status {
+.access-layer-status {
   margin-top: 12px;
   font-size: 0.82rem;
   color: rgba(255, 255, 255, 0.78);
 }
 
-.access-gate-status.is-error {
+.access-layer-status.is-error {
   color: #ff949b;
 }
 

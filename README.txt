@@ -160,6 +160,7 @@ LATEST FIX LOG (2026-03-15)
   - renamed gate DOM classes/ids to avoid adblock CSS hiding the overlay.
   - body lock class renamed to `access-locked`.
   - UI recovery now stops if adblock is detected to avoid reload loops hiding the gate.
+- Access gate renamed again to avoid filters on "gate" keyword (access-layer).
 - Scream 7 Noctaflix hardening:
   - forced Noctaflix override now triggers by TMDB id/media id + title.
   - Noctaflix fetch headers include full browser UA to avoid HTML blocks.
