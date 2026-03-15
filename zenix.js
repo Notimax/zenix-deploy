@@ -156,6 +156,8 @@ const MOBILE_EMBED_STALL_SWITCH_MS = 6200;
 const MOBILE_AUTO_SWITCH_COOLDOWN_MS = 12000;
 const MOBILE_STABLE_PLAYBACK_MIN_SEC = 4.5;
 const MOBILE_STABLE_PLAYBACK_GRACE_MS = 2300;
+const MOBILE_STABLE_LOCK_MS = 45000;
+const MOBILE_HARD_FREEZE_AFTER_STABLE_MS = 9500;
 const PREVIEW_ENABLED = true;
 const PREVIEW_HOVER_DELAY_MS = 220;
 const PREVIEW_DURATION_MS = 10000;
@@ -417,6 +419,7 @@ const state = {
   awaitingUserPlayUntil: 0,
   lastAutoSwitchAt: 0,
   lastAutoSwitchReason: "",
+  mobileStablePlaybackAt: 0,
   lastSyncAt: null,
   refreshFeedTimer: null,
   refreshTopTimer: null,
@@ -12937,6 +12940,7 @@ function startPlaybackGuard() {
       trackedPlayToken = activePlayToken;
       lastObservedTime = Number(refs.playerVideo?.currentTime || 0);
       lastAdvanceAt = Date.now();
+      state.mobileStablePlaybackAt = 0;
       return;
     }
     const currentSource = state.sourcePool[state.sourceIndex] || null;
@@ -13001,8 +13005,15 @@ function startPlaybackGuard() {
       recentlyAdvanced &&
       readyState >= 2;
     if (stablePlayback) {
+      if (!state.mobileStablePlaybackAt) {
+        state.mobileStablePlaybackAt = Date.now();
+      }
       return;
     }
+    const stableLockActive =
+      mobileGuard &&
+      state.mobileStablePlaybackAt > 0 &&
+      Date.now() - state.mobileStablePlaybackAt < MOBILE_STABLE_LOCK_MS;
     const canAutoRecoverWhileAwaiting =
       awaitingUser &&
       stalledForMs > statusRecoveryMs + (mobileGuard ? 800 : 1200) &&
@@ -13069,6 +13080,14 @@ function startPlaybackGuard() {
       startupLoadingStallWithAlternative ||
       statusDrivenRecovery ||
       prolongedFallbackStall;
+    if (stableLockActive) {
+      const hardFreezeAfterStable =
+        stalledForMs > MOBILE_HARD_FREEZE_AFTER_STABLE_MS &&
+        (readyState <= 2 || networkState === 0 || networkState === 2 || networkState === 3);
+      if (errorCode <= 0 && !hardFreezeAfterStable) {
+        return;
+      }
+    }
     if (autoSwitchCooldownActive && !severeAutoSwitch) {
       return;
     }
@@ -13142,9 +13161,16 @@ function schedulePlaybackHealthMonitor(token, step = 0) {
     const stablePlayback =
       mobileGuard && !video.paused && errorCode <= 0 && currentTime > MOBILE_STABLE_PLAYBACK_MIN_SEC && readyState >= 2;
     if (stablePlayback && !awaitingUser) {
+      if (!state.mobileStablePlaybackAt) {
+        state.mobileStablePlaybackAt = Date.now();
+      }
       clearPlaybackHealthMonitor();
       return;
     }
+    const stableLockActive =
+      mobileGuard &&
+      state.mobileStablePlaybackAt > 0 &&
+      Date.now() - state.mobileStablePlaybackAt < MOBILE_STABLE_LOCK_MS;
     const canAutoRecoverWhileAwaiting =
       awaitingUser &&
       step >= 2 &&
@@ -13170,6 +13196,9 @@ function schedulePlaybackHealthMonitor(token, step = 0) {
           setPlayerStatus("Erreur video detectee. Choisis une autre source.", true);
         });
       }
+      return;
+    }
+    if (stableLockActive) {
       return;
     }
     if (step < 6) {
@@ -13281,6 +13310,7 @@ async function trySwitchToNextSource() {
 
   state.lastAutoSwitchAt = Date.now();
   state.lastAutoSwitchReason = "auto";
+  state.mobileStablePlaybackAt = 0;
   const currentSource = state.sourcePool[state.sourceIndex] || null;
   const avoidPremiumAuto = !currentSource?.premiumHint;
   const allowPremiumAutoFallback = AUTO_PREMIUM_FALLBACK;

@@ -1107,6 +1107,11 @@ LATEST EXTERNAL MATCH HARDENING (2026-03-15, c268)
 - External items without TMDB id will no longer swap to internal candidates for playback.
 - Cache-bust bumped to `20260315-c268`.
 
+LATEST MOBILE AUTOSWITCH LOCK (2026-03-15, c269)
+- Mobile auto-switch is now locked out once playback is stable (prevents source hopping mid-play).
+- Only a true hard-freeze/error can trigger a switch during the stable lock window.
+- Cache-bust bumped to `20260315-c269`.
+
 IOS13 ZENIX READER BRUTE (LIVE, 2026-03-14)
 - Script: `__tmp_ios13_zenix_5s_battery.js` (5s per title, WebKit iPhone 13).
 - Selection:
