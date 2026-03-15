@@ -168,6 +168,7 @@ LATEST FIX LOG (2026-03-15)
   - recovery path now re-initializes popups, announcement, and event bindings if boot failed.
 - Scream 7 debug source:
   - added a fixed MP4 debug source from fastflux for Scream 7.
+  - routed via `/api/hls-proxy` with Noctaflix referer fallback for fastflux hosts.
 
 LAST BRUTE RESULT (LOCAL AFTER NAKIOS MIGRATION, 2026-03-08)
 - Source: `__tmp_brut_f1_mercredi_matrix_result_after_nakios_local_v2.json`

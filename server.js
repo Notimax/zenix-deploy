@@ -10873,6 +10873,13 @@ async function fetchHlsUpstreamWithFallback(target, range, signal, method = "GET
     "User-Agent": HLS_PROXY_USER_AGENT,
   };
   const targetHost = String(target?.hostname || "").toLowerCase();
+  const fastfluxHeaders =
+    targetHost.endsWith("fastflux.xyz") || targetHost.endsWith("cdn.fastflux.xyz")
+      ? {
+          Referer: "https://noctaflix.lol/",
+          Origin: "https://noctaflix.lol",
+        }
+      : null;
   const nakiosHeaders = targetHost.endsWith("nakios.site")
     ? {
         Referer: "https://nakios.site/",
@@ -10884,6 +10891,7 @@ async function fetchHlsUpstreamWithFallback(target, range, signal, method = "GET
       Referer: `${target.origin}/`,
       Origin: target.origin,
     },
+    ...(fastfluxHeaders ? [fastfluxHeaders] : []),
     ...(nakiosHeaders ? [nakiosHeaders] : []),
     {
       Referer: `${PURSTREAM_WEB_BASE}/`,
@@ -13183,12 +13191,14 @@ async function handleZenixSource(req, res, requestUrl) {
       }
     }
     if (isScream7 && NOCTA_SCREAM7_DEBUG_URL) {
-      const exists = noctaSources.some(
-        (entry) => String(entry?.stream_url || entry?.url || "") === NOCTA_SCREAM7_DEBUG_URL
-      );
+      const proxiedUrl = buildHlsProxyPath(NOCTA_SCREAM7_DEBUG_URL);
+      const exists = noctaSources.some((entry) => {
+        const value = String(entry?.stream_url || entry?.url || "");
+        return value === NOCTA_SCREAM7_DEBUG_URL || value === proxiedUrl;
+      });
       if (!exists) {
         noctaSources.unshift({
-          stream_url: NOCTA_SCREAM7_DEBUG_URL,
+          stream_url: proxiedUrl,
           source_name: "Scream 7 Debug",
           quality: "HD",
           language: "VF",
