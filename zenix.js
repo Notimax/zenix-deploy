@@ -157,6 +157,7 @@ const MOBILE_AUTO_SWITCH_COOLDOWN_MS = 12000;
 const MOBILE_STABLE_PLAYBACK_MIN_SEC = 4.5;
 const MOBILE_STABLE_PLAYBACK_GRACE_MS = 2300;
 const MOBILE_STABLE_LOCK_MS = 45000;
+const MOBILE_FALLBACK_LOCK_MS = 120000;
 const MOBILE_HARD_FREEZE_AFTER_STABLE_MS = 9500;
 const SOURCE_VALIDATION_ENABLED = true;
 const SOURCE_VALIDATION_TIMEOUT_MS = 2000;
@@ -493,6 +494,7 @@ themeFilters: {
   repairCache: new Map(),
   repairInFlight: new Map(),
   sourceWarningMessage: "",
+  mobileStableLockOverride: 0,
 };
 
 const refs = {
@@ -11527,11 +11529,11 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
       return;
     }
     clearManualSourceLock();
-    const mobileFirst = isLikelyMobileDevice()
-      ? debugSources.filter((entry) => entry?.mobileOnly).concat(debugSources.filter((entry) => !entry?.mobileOnly))
+    const mobileOrdered = isLikelyMobileDevice()
+      ? debugSources.filter((entry) => !entry?.mobileOnly).concat(debugSources.filter((entry) => entry?.mobileOnly))
       : debugSources.slice();
-    state.sourcePool = mobileFirst;
-    state.allEpisodeSources = mobileFirst.slice();
+    state.sourcePool = mobileOrdered;
+    state.allEpisodeSources = mobileOrdered.slice();
     state.sourceRetryAttempts.clear();
     state.sourceIndex = -1;
     renderPlayerSourceOptions();
@@ -13142,6 +13144,15 @@ function clearManualSourceLock() {
   state.sourceRetryAttempts.clear();
 }
 
+function applyMobileFallbackLock(source) {
+  if (!isLikelyMobileDevice() || !source?.mobileOnly) {
+    state.mobileStableLockOverride = 0;
+    return;
+  }
+  state.mobileStablePlaybackAt = Date.now();
+  state.mobileStableLockOverride = MOBILE_FALLBACK_LOCK_MS;
+}
+
 function markAwaitingUserPlay(ms = 45000) {
   state.awaitingUserPlayUntil = Date.now() + Math.max(3000, Number(ms || 0));
 }
@@ -13269,6 +13280,7 @@ function startPlaybackGuard() {
       lastObservedTime = Number(refs.playerVideo?.currentTime || 0);
       lastAdvanceAt = Date.now();
       state.mobileStablePlaybackAt = 0;
+      state.mobileStableLockOverride = 0;
       return;
     }
     const currentSource = state.sourcePool[state.sourceIndex] || null;
@@ -13338,10 +13350,9 @@ function startPlaybackGuard() {
       }
       return;
     }
+    const stableLockWindow = state.mobileStableLockOverride || MOBILE_STABLE_LOCK_MS;
     const stableLockActive =
-      mobileGuard &&
-      state.mobileStablePlaybackAt > 0 &&
-      Date.now() - state.mobileStablePlaybackAt < MOBILE_STABLE_LOCK_MS;
+      mobileGuard && state.mobileStablePlaybackAt > 0 && Date.now() - state.mobileStablePlaybackAt < stableLockWindow;
     const canAutoRecoverWhileAwaiting =
       awaitingUser &&
       stalledForMs > statusRecoveryMs + (mobileGuard ? 800 : 1200) &&
@@ -13502,10 +13513,9 @@ function schedulePlaybackHealthMonitor(token, step = 0) {
       clearPlaybackHealthMonitor();
       return;
     }
+    const stableLockWindow = state.mobileStableLockOverride || MOBILE_STABLE_LOCK_MS;
     const stableLockActive =
-      mobileGuard &&
-      state.mobileStablePlaybackAt > 0 &&
-      Date.now() - state.mobileStablePlaybackAt < MOBILE_STABLE_LOCK_MS;
+      mobileGuard && state.mobileStablePlaybackAt > 0 && Date.now() - state.mobileStablePlaybackAt < stableLockWindow;
     const canAutoRecoverWhileAwaiting =
       awaitingUser &&
       step >= 2 &&
@@ -13650,6 +13660,7 @@ async function trySwitchToNextSource() {
   state.lastAutoSwitchAt = Date.now();
   state.lastAutoSwitchReason = "auto";
   state.mobileStablePlaybackAt = 0;
+  state.mobileStableLockOverride = 0;
   const currentSource = state.sourcePool[state.sourceIndex] || null;
   const avoidPremiumAuto = !currentSource?.premiumHint;
   const allowPremiumAutoFallback = AUTO_PREMIUM_FALLBACK;
@@ -13878,6 +13889,7 @@ function normalizeSourceEntry(entry, index) {
       /debug/i.test(String(entry?.source_name || entry?.name || "")) ||
       /debug/i.test(String(entry?.label || ""))
   );
+  const proxyPath = getHlsProxyBasePath(url);
   const proxyOnly = Boolean(entry?.proxyOnly);
   const isZenix = Boolean(
     entry?.isZenix ||
@@ -13905,6 +13917,7 @@ function normalizeSourceEntry(entry, index) {
     host,
     debug,
     proxyOnly,
+    proxyPath,
     score,
     premiumHint,
     origin,
@@ -15045,19 +15058,21 @@ function normalizeExistingHlsProxyUrl(rawUrl) {
   return `${API_BASE}/${basePath}?url=${encodeURIComponent(target)}`;
 }
 
-function toHlsProxyUrl(rawUrl) {
+function toHlsProxyUrlWithPath(rawUrl, proxyBase = "") {
   const absolute = toAbsoluteUrl(rawUrl);
   if (!absolute) {
     return "";
   }
-  const normalizedExisting = normalizeExistingHlsProxyUrl(absolute);
-  if (normalizedExisting) {
-    return normalizedExisting;
-  }
-  if (!/^https?:\/\//i.test(absolute)) {
+  const target = extractProxyTargetUrl(absolute) || absolute;
+  if (!/^https?:\/\//i.test(target)) {
     return "";
   }
-  return `${API_BASE}/hls-proxy?url=${encodeURIComponent(absolute)}`;
+  const base = String(proxyBase || getHlsProxyBasePath(absolute) || "hls-proxy");
+  return `${API_BASE}/${base}?url=${encodeURIComponent(target)}`;
+}
+
+function toHlsProxyUrl(rawUrl) {
+  return toHlsProxyUrlWithPath(rawUrl);
 }
 
 function decodeNumericPlaylistText(rawBody) {
@@ -15160,8 +15175,9 @@ function pickFirstHlsVariantUrl(masterText, baseUrl) {
   return "";
 }
 
-async function fetchDecodedHlsPlaylistText(url) {
-  const requestUrl = toHlsProxyUrl(url) || toAbsoluteUrl(url);
+async function fetchDecodedHlsPlaylistText(url, options = {}) {
+  const proxyPath = String(options?.proxyPath || getHlsProxyBasePath(url) || "");
+  const requestUrl = toHlsProxyUrlWithPath(url, proxyPath) || toAbsoluteUrl(url);
   if (!requestUrl) {
     throw new Error("Missing HLS url");
   }
@@ -15173,8 +15189,9 @@ async function fetchDecodedHlsPlaylistText(url) {
   return decodeNumericPlaylistText(body);
 }
 
-async function fetchDecodedHlsPlaylistTextWithTimeout(url, timeoutMs = HLS_LANG_PROBE_TIMEOUT_MS) {
-  const requestUrl = toHlsProxyUrl(url) || toAbsoluteUrl(url);
+async function fetchDecodedHlsPlaylistTextWithTimeout(url, timeoutMs = HLS_LANG_PROBE_TIMEOUT_MS, options = {}) {
+  const proxyPath = String(options?.proxyPath || getHlsProxyBasePath(url) || "");
+  const requestUrl = toHlsProxyUrlWithPath(url, proxyPath) || toAbsoluteUrl(url);
   if (!requestUrl) {
     throw new Error("Missing HLS url");
   }
@@ -15289,8 +15306,9 @@ async function probeHlsSourceLanguage(source) {
   return inferred;
 }
 
-async function buildDecodedHlsBlobUrl(streamUrl) {
-  const masterText = await fetchDecodedHlsPlaylistText(streamUrl);
+async function buildDecodedHlsBlobUrl(streamUrl, options = {}) {
+  const proxyPath = String(options?.proxyPath || getHlsProxyBasePath(streamUrl) || "");
+  const masterText = await fetchDecodedHlsPlaylistText(streamUrl, { proxyPath });
   if (!masterText.includes("#EXTM3U")) {
     return "";
   }
@@ -15301,7 +15319,7 @@ async function buildDecodedHlsBlobUrl(streamUrl) {
   if (/#EXT-X-STREAM-INF/i.test(masterText)) {
     const variantUrl = pickFirstHlsVariantUrl(masterText, finalBaseUrl);
     if (variantUrl) {
-      const variantText = await fetchDecodedHlsPlaylistText(variantUrl);
+      const variantText = await fetchDecodedHlsPlaylistText(variantUrl, { proxyPath });
       if (variantText.includes("#EXTM3U")) {
         finalPlaylistText = variantText;
         finalBaseUrl = variantUrl;
@@ -15319,8 +15337,9 @@ async function buildDecodedHlsBlobUrl(streamUrl) {
   return blobUrl;
 }
 
-async function resolveHlsMediaPlaylist(streamUrl) {
-  const masterText = await fetchDecodedHlsPlaylistText(streamUrl);
+async function resolveHlsMediaPlaylist(streamUrl, options = {}) {
+  const proxyPath = String(options?.proxyPath || getHlsProxyBasePath(streamUrl) || "");
+  const masterText = await fetchDecodedHlsPlaylistText(streamUrl, { proxyPath });
   if (!masterText.includes("#EXTM3U")) {
     throw new Error("Invalid HLS manifest");
   }
@@ -15331,7 +15350,7 @@ async function resolveHlsMediaPlaylist(streamUrl) {
   if (/#EXT-X-STREAM-INF/i.test(masterText)) {
     const variantUrl = pickFirstHlsVariantUrl(masterText, mediaBase);
     if (variantUrl) {
-      const variantText = await fetchDecodedHlsPlaylistText(variantUrl);
+      const variantText = await fetchDecodedHlsPlaylistText(variantUrl, { proxyPath });
       if (variantText.includes("#EXTM3U")) {
         mediaText = variantText;
         mediaBase = variantUrl;
@@ -15345,7 +15364,9 @@ async function resolveHlsMediaPlaylist(streamUrl) {
   };
 }
 
-function extractTsSegmentUrlsFromPlaylist(playlistText, baseUrl) {
+function extractTsSegmentUrlsFromPlaylist(playlistText, baseUrl, options = {}) {
+  const proxyPath = String(options?.proxyPath || getHlsProxyBasePath(baseUrl) || "");
+  const keepProxy = Boolean(options?.keepProxy || proxyPath);
   const originBase = extractProxyTargetUrl(baseUrl) || baseUrl;
   const lines = String(playlistText || "").split(/\r?\n/);
   const urls = [];
@@ -15365,7 +15386,13 @@ function extractTsSegmentUrlsFromPlaylist(playlistText, baseUrl) {
     if (!/\.(ts|m4s|mp4)(?:$|\?)/i.test(direct)) {
       continue;
     }
-    urls.push(direct);
+    let finalUrl = direct;
+    if (keepProxy && proxyPath) {
+      finalUrl = `${API_BASE}/${proxyPath}?url=${encodeURIComponent(direct)}`;
+    } else if (keepProxy && isHlsProxyUrl(absolute)) {
+      finalUrl = normalizeExistingHlsProxyUrl(absolute) || absolute;
+    }
+    urls.push(finalUrl);
     if (urls.length >= SEGMENT_FALLBACK_MAX_SEGMENTS) {
       break;
     }
@@ -15401,11 +15428,14 @@ function buildPlayableSourceCandidates(source, options = {}) {
   const isProxied = isHlsProxyUrl(absolute);
   const isRemoteHttp = /^https?:\/\//i.test(absolute);
   const looksLikeHls = source?.format === "hls" || /m3u8/i.test(absolute);
-  const normalizedProxyAbsolute = toAbsoluteUrl(toHlsProxyUrl(absolute) || absolute);
-  const proxyUrl = !isProxied && isRemoteHttp ? `${API_BASE}/hls-proxy?url=${encodeURIComponent(absolute)}` : "";
+  const proxyBase = String(source?.proxyPath || "");
+  const normalizedProxyAbsolute = toAbsoluteUrl(toHlsProxyUrlWithPath(absolute, proxyBase) || absolute);
+  const proxyUrl = !isProxied && isRemoteHttp ? toHlsProxyUrlWithPath(absolute, proxyBase) : "";
   const proxiedTarget = isProxied ? extractProxyTargetUrl(absolute) : "";
   const forceProxyHls = Boolean(options.forceProxyHls);
-  const requireProxy = Boolean(source?.proxyOnly || (source?.debug && isLikelyMobileDevice()));
+  const requireProxy = Boolean(
+    source?.proxyOnly || source?.mobileOnly || (source?.debug && isLikelyMobileDevice())
+  );
 
   if (looksLikeHls && forceProxyHls) {
     if (isProxied) {
@@ -15587,7 +15617,7 @@ async function startPlayerSource(source, resumeTime, token, options = {}) {
           video.hidden = false;
           video.controls = true;
           video.preload = "auto";
-          await startHlsPlayback(video, streamUrl, token, { probeTimeoutMs, probeOnly });
+          await startHlsPlayback(video, streamUrl, token, { probeTimeoutMs, probeOnly, source });
         } else {
           resetPlayerEmbedFrame();
           video.hidden = false;
@@ -15648,6 +15678,9 @@ async function startPlayerSource(source, resumeTime, token, options = {}) {
             }
           }
           await waitForPlaybackBootstrap(video, token, bootstrapTimeout);
+          if (!probeOnly && !state.sourceValidationActive) {
+            applyMobileFallbackLock(source);
+          }
           preferFrenchAudioTrack(video);
           updateActiveSourceLanguageFromPlayback(video);
           setPlayerLoading(false);
@@ -15881,8 +15914,13 @@ function canAttemptHlsPlayback(video) {
   return false;
 }
 
-async function tryDecodedHlsBlobPlayback(video, streamUrl, timeoutMs = HLS_READY_TIMEOUT_MS + 2600) {
-  const blobUrl = await buildDecodedHlsBlobUrl(streamUrl);
+async function tryDecodedHlsBlobPlayback(
+  video,
+  streamUrl,
+  timeoutMs = HLS_READY_TIMEOUT_MS + 2600,
+  options = {}
+) {
+  const blobUrl = await buildDecodedHlsBlobUrl(streamUrl, options);
   if (!blobUrl) {
     throw new Error("Decoded HLS playlist unavailable");
   }
@@ -15906,13 +15944,17 @@ async function loadSegmentFallbackIndex(video, session, index) {
   await video.play();
 }
 
-async function startTsSegmentFallbackPlayback(video, streamUrl, token) {
+async function startTsSegmentFallbackPlayback(video, streamUrl, token, options = {}) {
   if (!shouldUseNativeHls(video) || !isLikelyMobileDevice()) {
     return false;
   }
 
-  const { mediaText, mediaBase } = await resolveHlsMediaPlaylist(streamUrl);
-  const segments = extractTsSegmentUrlsFromPlaylist(mediaText, mediaBase);
+  const proxyPath = String(options?.proxyPath || getHlsProxyBasePath(streamUrl) || "");
+  const { mediaText, mediaBase } = await resolveHlsMediaPlaylist(streamUrl, { proxyPath });
+  const segments = extractTsSegmentUrlsFromPlaylist(mediaText, mediaBase, {
+    proxyPath,
+    keepProxy: Boolean(proxyPath || options?.keepProxy),
+  });
   if (segments.length < 2) {
     return false;
   }
@@ -16014,6 +16056,10 @@ async function startHlsPlayback(video, streamUrl, token, options = {}) {
   const probeOnly = Boolean(options?.probeOnly);
   const hlsReadyTimeout = probeTimeoutMs > 0 ? Math.max(1200, probeTimeoutMs) : HLS_READY_TIMEOUT_MS;
   const hlsManifestTimeout = probeTimeoutMs > 0 ? Math.max(1200, probeTimeoutMs) : HLS_MANIFEST_TIMEOUT_MS;
+  const proxyPath = String(
+    options?.proxyPath || options?.source?.proxyPath || getHlsProxyBasePath(streamUrl) || ""
+  );
+  const keepProxySegments = Boolean(proxyPath || options?.keepProxySegments);
   if (shouldUseNativeHls(video)) {
     const isIOSMobile = isLikelyMobileDevice();
     video.src = streamUrl;
@@ -16033,7 +16079,10 @@ async function startHlsPlayback(video, streamUrl, token, options = {}) {
 
       if (isIOSMobile) {
         try {
-          const segmentFallbackStarted = await startTsSegmentFallbackPlayback(video, streamUrl, token);
+          const segmentFallbackStarted = await startTsSegmentFallbackPlayback(video, streamUrl, token, {
+            proxyPath,
+            keepProxy: keepProxySegments,
+          });
           if (segmentFallbackStarted) {
             return;
           }
@@ -16042,7 +16091,8 @@ async function startHlsPlayback(video, streamUrl, token, options = {}) {
             await tryDecodedHlsBlobPlayback(
               video,
               streamUrl,
-              Math.min(hlsReadyTimeout + 2600, IOS_DECODED_HLS_BOOT_TIMEOUT_MS)
+              Math.min(hlsReadyTimeout + 2600, IOS_DECODED_HLS_BOOT_TIMEOUT_MS),
+              { proxyPath }
             );
             return;
           } catch (decodedError) {
@@ -16054,11 +16104,14 @@ async function startHlsPlayback(video, streamUrl, token, options = {}) {
       // Retry once with a decoded blob playlist for encoded/quirky upstream manifests.
       // This is especially useful on Safari when native HLS rejects rewritten proxy URLs.
       try {
-        await tryDecodedHlsBlobPlayback(video, streamUrl, Math.min(hlsReadyTimeout + 2600, 7600));
+        await tryDecodedHlsBlobPlayback(video, streamUrl, Math.min(hlsReadyTimeout + 2600, 7600), { proxyPath });
         return;
       } catch (decodedError) {
         try {
-          const segmentFallbackStarted = await startTsSegmentFallbackPlayback(video, streamUrl, token);
+          const segmentFallbackStarted = await startTsSegmentFallbackPlayback(video, streamUrl, token, {
+            proxyPath,
+            keepProxy: keepProxySegments,
+          });
           if (segmentFallbackStarted) {
             return;
           }
@@ -16079,7 +16132,7 @@ async function startHlsPlayback(video, streamUrl, token, options = {}) {
         await waitVideoReady(video, HLS_READY_TIMEOUT_MS);
         return;
       } catch {
-        await tryDecodedHlsBlobPlayback(video, streamUrl);
+        await tryDecodedHlsBlobPlayback(video, streamUrl, HLS_READY_TIMEOUT_MS + 2600, { proxyPath });
         return;
       }
     }
