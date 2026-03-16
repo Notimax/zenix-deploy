@@ -7467,8 +7467,19 @@ function buildFastfluxSourceEntry(sourceRow, index = 0) {
   const quality = normalizeFastfluxQuality(sourceRow?.quality || sourceRow?.qlt || "");
   const formatHint = String(sourceRow?.type || sourceRow?.format || "").trim();
   const format = inferOwnedSourceFormat(streamUrl, formatHint || "mp4");
-  const needsProxy = format === "m3u8" || /\.m3u8($|[?#])/i.test(streamUrl) || /hls/i.test(formatHint);
-  const finalUrl = needsProxy ? buildHlsProxyPath(streamUrl) : streamUrl;
+  const isAlreadyProxied = /\/api\/hls-proxy(?:-mobile)?\?url=/i.test(streamUrl);
+  let needsProxy = format === "m3u8" || /\.m3u8($|[?#])/i.test(streamUrl) || /hls/i.test(formatHint);
+  if (!needsProxy) {
+    try {
+      const host = new URL(streamUrl).hostname.toLowerCase();
+      if (host.endsWith("fastflux.xyz") || host.endsWith("cdn.fastflux.xyz")) {
+        needsProxy = true;
+      }
+    } catch {
+      // ignore URL parse errors, keep default proxy decision
+    }
+  }
+  const finalUrl = isAlreadyProxied ? streamUrl : needsProxy ? buildHlsProxyPath(streamUrl) : streamUrl;
   return {
     stream_url: finalUrl,
     source_name: "FastFlux",
