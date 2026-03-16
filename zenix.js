@@ -1,5 +1,5 @@
 ﻿const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260316-c313";
+const ZENIX_BUILD_VERSION = "20260316-c314";
 const STORAGE_KEY = "zenix-progress-v4";
 if (typeof window !== "undefined") {
   window.__zenixBooted = false;
@@ -14224,22 +14224,25 @@ function normalizeSourceEntry(entry, index) {
   const quality = String(entry?.quality || entry?.resolution || entry?.label || "").trim();
   const language = normalizeSourceLanguage(entry);
   const host = getSourceHost(url);
+  const streamHost = getStreamHost(url) || host;
   const debug = Boolean(
     entry?.debug ||
       /debug/i.test(String(entry?.source_name || entry?.name || "")) ||
       /debug/i.test(String(entry?.label || ""))
   );
   const proxyPath = getHlsProxyBasePath(url);
-  const avoidProxyHost = shouldAvoidProxyForHost(host);
+  const avoidProxyHost = shouldAvoidProxyForHost(streamHost);
   const forceProxyHost =
     !avoidProxyHost &&
-    (shouldForceProxyForHost(host) || /(?:^|\\.)fastflux\\.xyz$/.test(host) || /xalaflix|fsvid/i.test(host));
+    (shouldForceProxyForHost(streamHost) ||
+      /(?:^|\\.)fastflux\\.xyz$/.test(streamHost) ||
+      /xalaflix|fsvid/i.test(streamHost));
   const proxyOnly = Boolean(entry?.proxyOnly || forceProxyHost);
   const origin = String(entry?.origin || entry?.provider || entry?.source || "").trim();
   const isFastflux =
     /fastflux/i.test(origin) ||
     /fastflux/i.test(String(entry?.source_name || entry?.name || "")) ||
-    /(?:^|\\.)fastflux\\.xyz$/i.test(host);
+    /(?:^|\\.)fastflux\\.xyz$/i.test(streamHost);
   const isZenix = Boolean(
     entry?.isZenix ||
       entry?.zenix ||
@@ -14261,7 +14264,7 @@ function normalizeSourceEntry(entry, index) {
     format,
     quality,
     language,
-    host,
+    host: streamHost,
     debug,
     proxyOnly,
     proxyPath,

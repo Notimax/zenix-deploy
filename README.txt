@@ -1331,3 +1331,8 @@ BOOT WATCHDOG + PROXY GUARD (2026-03-16, c313)
   aligning with the FSVID routing rules.
 - Cache-bust bumped to `20260316-c313`.
 
+PROXY ENFORCEMENT (2026-03-16, c314)
+- Proxy-only enforcement now uses the proxy target host (not just the proxied URL host),
+  so xalaflix/fastflux sources stay proxy-only even when already wrapped.
+- Cache-bust bumped to `20260316-c314`.
+

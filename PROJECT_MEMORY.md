@@ -61,6 +61,9 @@ Last update: 2026-03-16
   - Added `window.__zenixKick` so inline watchdogs can request UI recovery without reloading scripts.
   - Frontend now forces proxy-only playback for fastflux/xalaflix/fsvid hosts (except r1 direct),
     keeping proxy routing consistent with FSVID rules.
+- c314 follow-up:
+  - Proxy-only enforcement now inspects the proxy target host, so xalaflix/fastflux URLs remain
+    proxy-only even when the source URL is already wrapped by /api/hls-proxy.
 
 ## Visual system policy (c137)
 - Keep unified visual tokens across the UI:
