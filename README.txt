@@ -1282,3 +1282,7 @@ FASTFLUX REPAIR STRATEGY (2026-03-16, c304)
 - Repair counts now reflect the real FastFlux source availability across movie/tv matches.
 - Cache-bust bumped to `20260316-c304`.
 
+REPAIR BUTTON LABEL (2026-03-16, c305)
+- Player repair button label updated to "CLIQUE ICI POR REPARER".
+- Cache-bust bumped to `20260316-c305`.
+

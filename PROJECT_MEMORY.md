@@ -37,6 +37,8 @@ Last update: 2026-03-11
   - Cars : Quatre roues now prefers FastFlux sources (tv fallback) before debug sources.
 - c304 follow-up:
   - Admin repair now retries FastFlux with movie/tv fallback and year-less lookup when needed.
+- c305 follow-up:
+  - Player repair button label updated to "CLIQUE ICI POR REPARER".
 
 ## Visual system policy (c137)
 - Keep unified visual tokens across the UI:
