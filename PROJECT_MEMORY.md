@@ -62,8 +62,14 @@ Last update: 2026-03-16
   - Frontend now forces proxy-only playback for fastflux/xalaflix/fsvid hosts (except r1 direct),
     keeping proxy routing consistent with FSVID rules.
 - c314 follow-up:
-  - Proxy-only enforcement now inspects the proxy target host, so xalaflix/fastflux URLs remain
-    proxy-only even when the source URL is already wrapped by /api/hls-proxy.
+- Proxy-only enforcement now inspects the proxy target host, so xalaflix/fastflux URLs remain
+  proxy-only even when the source URL is already wrapped by /api/hls-proxy.
+
+## c315 follow-up (2026-03-16)
+- Adblock now runs in soft mode: UI stays visible and interactive even when a blocker is detected.
+- Support strip shows a "lecture bloquee" message while adblock is active.
+- Gate now protects playback endpoints only; catalog/calendar/search/media/seasons are exempt so UI always loads.
+- Cache-bust updated to `20260316-c315`.
 
 ## Visual system policy (c137)
 - Keep unified visual tokens across the UI:

@@ -1336,3 +1336,9 @@ PROXY ENFORCEMENT (2026-03-16, c314)
   so xalaflix/fastflux sources stay proxy-only even when already wrapped.
 - Cache-bust bumped to `20260316-c314`.
 
+SAFE ADBLOCK UI (2026-03-16, c315)
+- Adblock now runs in soft mode: UI stays visible and interactive even when a blocker is detected.
+- Support strip shows a "lecture bloquee" message while adblock is active.
+- Gate now protects playback endpoints only; catalog/calendar/search/media/seasons are exempt so UI always loads.
+- Cache-bust bumped to `20260316-c315`.
+

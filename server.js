@@ -11864,6 +11864,24 @@ function isGateProtectedPath(pathname) {
   if (/^\/api\/admin\//i.test(pathname)) {
     return false;
   }
+  if (/^\/api\/catalog\//i.test(pathname)) {
+    return false;
+  }
+  if (/^\/api\/calendar\//i.test(pathname)) {
+    return false;
+  }
+  if (/^\/api\/search-bar\//i.test(pathname)) {
+    return false;
+  }
+  if (/^\/api\/media\//i.test(pathname)) {
+    return false;
+  }
+  if (pathname === "/api/zenix-seasons") {
+    return false;
+  }
+  if (pathname === "/api/zenix-anime-seasons") {
+    return false;
+  }
   if (pathname === "/api/announcement") {
     return false;
   }

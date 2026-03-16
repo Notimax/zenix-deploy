@@ -1,5 +1,5 @@
-ï»¿const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260316-c314";
+const API_BASE = "/api";
+const ZENIX_BUILD_VERSION = "20260316-c315";
 const STORAGE_KEY = "zenix-progress-v4";
 if (typeof window !== "undefined") {
   window.__zenixBooted = false;
@@ -178,6 +178,10 @@ const PREVIEW_HOVER_DELAY_MS = 220;
 const PREVIEW_DURATION_MS = 10000;
 const PREVIEW_COOLDOWN_MS = 22000;
 const PREVIEW_ALLOW_HLS = true;
+const ADBLOCK_SOFT_MODE = true;
+const SUPPORT_INFO_DEFAULT = "Films, series et anime gratuits, lecture directe sans compte.";
+const ADBLOCK_SOFT_MESSAGE =
+  "Bloqueur de pub detecte : l'interface reste visible mais la lecture est bloquee. Desactive-le pour lancer les lecteurs.";
 const QUALITY_BADGE_DEFAULT = "Full HD";
 const QUALITY_BADGE_4K_RECENT_YEARS = 2;
 const SKIP_INTRO_SECONDS = 85;
@@ -1942,7 +1946,7 @@ async function init() {
     refs.syncInfo.textContent = "Synchronisation initiale en cours...";
   }
   if (refs.supportInfo) {
-    refs.supportInfo.textContent = "Films, series et anime gratuits, lecture directe sans compte.";
+    setSupportInfoMessage();
   }
   applyBrowseStateFromRoute();
   applySavedBrowseState();
@@ -4492,6 +4496,14 @@ function setAdblockGateStatus(message, isError = false) {
   refs.adblockGateStatus.classList.toggle("is-error", Boolean(isError));
 }
 
+function setSupportInfoMessage(message = "") {
+  if (!refs.supportInfo) {
+    return;
+  }
+  const text = String(message || "").trim();
+  refs.supportInfo.textContent = text || SUPPORT_INFO_DEFAULT;
+}
+
 function ensureAdblockFallbackOverlay(visible) {
   if (!visible) {
     if (adblockFallbackOverlay && adblockFallbackOverlay.parentNode) {
@@ -4539,6 +4551,15 @@ function setAdblockGateVisible(visible) {
     return;
   }
   const nextVisible = Boolean(visible);
+  if (ADBLOCK_SOFT_MODE) {
+    refs.adblockGate.hidden = true;
+    document.body.classList.remove("access-locked");
+    ensureAdblockFallbackOverlay(false);
+    if (nextVisible) {
+      setDiscordGateVisible(false);
+    }
+    return;
+  }
   refs.adblockGate.hidden = !nextVisible;
   document.body.classList.toggle("access-locked", nextVisible);
   ensureAdblockFallbackOverlay(nextVisible);
@@ -4582,12 +4603,16 @@ function applyAdblockDetectionState(blocked, options = {}) {
     state.gateReady = false;
     state.gateToken = "";
     saveGateToken("");
-setAdblockGateStatus(
-      "Desactive ton bloqueur de pub pour continuer, puis clique sur 'Verifier de nouveau'.",
+    setSupportInfoMessage(ADBLOCK_SOFT_MESSAGE);
+    setAdblockGateStatus(
+      ADBLOCK_SOFT_MODE
+        ? "Bloqueur detecte. Lecture bloquee tant que le bloqueur est actif."
+        : "Desactive ton bloqueur de pub pour continuer, puis clique sur 'Verifier de nouveau'.",
       false
     );
     return;
   }
+  setSupportInfoMessage();
   setAdblockGateStatus("", false);
   if (wasBlocked && options.manual === true) {
     showToast("Merci. Acces restaure.");
@@ -4806,7 +4831,7 @@ function getBackupBookmarkHint() {
     if (isIOSDevice()) {
       return "Sur iPhone: Partager > Ajouter a l'ecran d'accueil ou Ajouter aux favoris.";
     }
-    return "Sur Android: menu â‹® > Ajouter aux favoris ou Ajouter a l'ecran d'accueil.";
+    return "Sur Android: menu ? > Ajouter aux favoris ou Ajouter a l'ecran d'accueil.";
   }
   return "Sur PC: Ctrl+D / Cmd+D pour ajouter aux favoris.";
 }
@@ -15039,7 +15064,7 @@ function collectLanguageSignals(value) {
       /\bVF\b/.test(probe) ||
       /\bFRENCH\b/.test(probe) ||
       /\bFRANCAIS\b/.test(probe) ||
-      /\bFRANÃ‡AIS\b/.test(probe),
+      /\bFRANÇAIS\b/.test(probe),
     hasVost:
       /\bVOST(?:FR)?\b/.test(probe) ||
       /\bSUB(?:BED|TITLES?|FR|FRENCH)?\b/.test(probe) ||
@@ -16206,7 +16231,7 @@ function preferFrenchAudioTrack(video) {
     const sample = [track.language, track.label, track.name]
       .map((entry) => String(entry || "").toLowerCase())
       .join(" ");
-    if (/\bfr\b|french|fran[cÃ§]ais/.test(sample)) {
+    if (/\bfr\b|french|fran[cç]ais/.test(sample)) {
       frenchTrackIndex = index;
       break;
     }
@@ -16249,7 +16274,7 @@ function inferLanguageFromAudioTracks(video) {
     const sample = [track.language, track.label, track.name]
       .map((entry) => String(entry || "").toLowerCase())
       .join(" ");
-    if (/\bfr\b|french|fran[cÃ§]ais/.test(sample)) {
+    if (/\bfr\b|french|fran[cç]ais/.test(sample)) {
       hasFrench = true;
     } else if (sample.trim().length > 0) {
       hasNonFrench = true;
@@ -19504,4 +19529,5 @@ async function cleanupLegacyServiceWorker() {
     await Promise.all(keys.map((key) => caches.delete(key)));
   }
 }
+
 
