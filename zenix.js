@@ -1,5 +1,5 @@
 ﻿const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260316-c311";
+const ZENIX_BUILD_VERSION = "20260316-c312";
 const STORAGE_KEY = "zenix-progress-v4";
 if (typeof window !== "undefined") {
   window.__zenixBooted = false;
@@ -14262,6 +14262,10 @@ function normalizeSourceEntry(entry, index) {
 
 function guessSourceFormat(entry, url) {
   const raw = String(entry?.format || entry?.type || "").toLowerCase();
+  const cleanUrl = String(url || "").split("#")[0].split("?")[0].toLowerCase();
+  if (cleanUrl.endsWith(".m3u8")) {
+    return "hls";
+  }
   if (raw.includes("embed") || raw.includes("iframe")) {
     return "embed";
   }
@@ -14278,12 +14282,8 @@ function guessSourceFormat(entry, url) {
     return "dash";
   }
 
-  const cleanUrl = String(url || "").split("#")[0].split("?")[0].toLowerCase();
   if (/video\.sibnet\.ru\/shell\.php/i.test(cleanUrl)) {
     return "embed";
-  }
-  if (cleanUrl.endsWith(".m3u8")) {
-    return "hls";
   }
   if (cleanUrl.endsWith(".mp4")) {
     return "mp4";
@@ -15156,16 +15156,16 @@ function normalizeSourceLanguage(entry) {
 }
 
 function isEmbedSource(source, url = "") {
-  const format = String(source?.format || "").trim().toLowerCase();
-  if (format === "embed" || format === "iframe") {
-    return true;
-  }
   const raw = String(url || source?.url || "").trim().toLowerCase();
   if (!raw) {
     return false;
   }
   if (/\.m3u8($|[?#])/i.test(raw)) {
     return false;
+  }
+  const format = String(source?.format || "").trim().toLowerCase();
+  if (format === "embed" || format === "iframe") {
+    return true;
   }
   return /video\.sibnet\.ru\/shell\.php/i.test(raw) || /\/embed[-_/]/i.test(raw);
 }

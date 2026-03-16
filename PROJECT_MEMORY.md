@@ -53,6 +53,8 @@ Last update: 2026-03-16
   - Booting flag prevents fallback/watchdog JS injection while main script is executing (avoids duplicate const errors).
 - c311 follow-up:
   - `.m3u8` URLs containing `/embed/` are now treated as HLS (not iframe) in server + frontend, so FastFlux sources proxy correctly on iOS.
+- c312 follow-up:
+  - Frontend embed detection now ignores `.m3u8` even when format says embed (forces proxy HLS on iOS).
 
 ## Visual system policy (c137)
 - Keep unified visual tokens across the UI:

@@ -1318,3 +1318,8 @@ FASTFLUX EMBED HLS FIX (2026-03-16, c311)
 - This forces FastFlux HLS sources through the proxy and fixes iOS X-Frame-Options blocks.
 - Cache-bust bumped to `20260316-c311`.
 
+EMBED DETECTION OVERRIDE (2026-03-16, c312)
+- Frontend now treats `.m3u8` as HLS even if the source format says embed,
+  ensuring proxy playback and avoiding iframe blocks on iOS.
+- Cache-bust bumped to `20260316-c312`.
+
