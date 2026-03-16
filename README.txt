@@ -1277,3 +1277,8 @@ FASTFLUX CARS OVERRIDE (2026-03-16, c303)
   and only falls back to the debug sources if FastFlux has none.
 - Cache-bust bumped to `20260316-c303`.
 
+FASTFLUX REPAIR STRATEGY (2026-03-16, c304)
+- Admin repair now retries FastFlux with opposite media type and year-less fallback.
+- Repair counts now reflect the real FastFlux source availability across movie/tv matches.
+- Cache-bust bumped to `20260316-c304`.
+

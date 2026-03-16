@@ -35,6 +35,8 @@ Last update: 2026-03-11
   - External playback uses FastFlux sources only.
 - c303 follow-up:
   - Cars : Quatre roues now prefers FastFlux sources (tv fallback) before debug sources.
+- c304 follow-up:
+  - Admin repair now retries FastFlux with movie/tv fallback and year-less lookup when needed.
 
 ## Visual system policy (c137)
 - Keep unified visual tokens across the UI:

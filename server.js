@@ -13159,10 +13159,25 @@ async function handleAdminRepair(req, res, requestUrl) {
 
     if (!tmdbId && title.length >= 2) {
       tmdbId = await resolveFastfluxTmdbIdBySearch(title, mediaType, year);
+      if (tmdbId <= 0) {
+        const altType = mediaType === "movie" ? "tv" : "movie";
+        tmdbId = await resolveFastfluxTmdbIdBySearch(title, altType, year);
+      }
+      if (tmdbId <= 0 && year > 0) {
+        tmdbId = await resolveFastfluxTmdbIdBySearch(title, mediaType, 0);
+      }
+      if (tmdbId <= 0 && year > 0) {
+        const altType = mediaType === "movie" ? "tv" : "movie";
+        tmdbId = await resolveFastfluxTmdbIdBySearch(title, altType, 0);
+      }
     }
 
     if (tmdbId > 0) {
-      const detail = await fetchFastfluxEntryByTmdbId(mediaType, tmdbId);
+      let detail = await fetchFastfluxEntryByTmdbId(mediaType, tmdbId);
+      if (!detail) {
+        const altType = mediaType === "movie" ? "tv" : "movie";
+        detail = await fetchFastfluxEntryByTmdbId(altType, tmdbId);
+      }
       const normalized = detail ? buildAdminCustomEntryFromFastflux(detail, mediaType) : null;
       if (normalized) {
         if (!entry.external_tmdb_id && normalized.external_tmdb_id) {
@@ -13200,7 +13215,11 @@ async function handleAdminRepair(req, res, requestUrl) {
     let fastfluxCount = 0;
     if (tmdbId > 0) {
       try {
-        const sources = await resolveFastfluxSourcesByTmdbId(mediaType, tmdbId, 1, 1, { title, year });
+        let sources = await resolveFastfluxSourcesByTmdbId(mediaType, tmdbId, 1, 1, { title, year });
+        if (sources.length === 0) {
+          const altType = mediaType === "movie" ? "tv" : "movie";
+          sources = await resolveFastfluxSourcesByTmdbId(altType, tmdbId, 1, 1, { title, year });
+        }
         fastfluxCount = Array.isArray(sources) ? sources.length : 0;
       } catch {
         fastfluxCount = 0;
@@ -13260,10 +13279,17 @@ async function handleAdminRepair(req, res, requestUrl) {
     let fastfluxCount = 0;
     if (tmdbId > 0) {
       try {
-        const sources = await resolveFastfluxSourcesByTmdbId(mediaType, tmdbId, 1, 1, {
+        let sources = await resolveFastfluxSourcesByTmdbId(mediaType, tmdbId, 1, 1, {
           title: sheet?.data?.media?.title || sheet?.data?.media?.name || "",
           year: toInt(sheet?.data?.media?.year, 0, 0, 2099),
         });
+        if (sources.length === 0) {
+          const altType = mediaType === "movie" ? "tv" : "movie";
+          sources = await resolveFastfluxSourcesByTmdbId(altType, tmdbId, 1, 1, {
+            title: sheet?.data?.media?.title || sheet?.data?.media?.name || "",
+            year: toInt(sheet?.data?.media?.year, 0, 0, 2099),
+          });
+        }
         fastfluxCount = Array.isArray(sources) ? sources.length : 0;
       } catch {
         fastfluxCount = 0;
