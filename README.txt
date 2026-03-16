@@ -37,6 +37,8 @@ LATEST FIX LOG (2026-03-16)
 - Announcement banner stickiness now uses topbar height (no mid-scroll drift on phone).
 - Admin analytics counters added (live/24h/48h/total), total persists across restarts.
 - Discord popup icon centering refined.
+- Mobile nav now uses drawer only (no scrolling pills on phone).
+- FastFlux matching tightened + embed player allowed when needed.
 
 STREAMING/PLAYBACK NOTES
 - Auto-switch source is active when playback is blocked.

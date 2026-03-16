@@ -6040,14 +6040,13 @@ img[data-image-ready="1"] {
   }
 }
 
-/* ===== Mobile top navbar restore + no back-to-top on phone (c142) ===== */
+/* ===== Mobile navbar: drawer only (no pills) ===== */
 @media (max-width: 1000px) {
-  .main-nav-shell {
-    display: block !important;
-  }
-
-  .main-nav {
-    display: flex !important;
+  .main-nav-shell,
+  .main-nav,
+  .nav-overflow,
+  .nav-active-indicator {
+    display: none !important;
   }
 
   .mobile-tabbar {

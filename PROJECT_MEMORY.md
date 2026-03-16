@@ -82,6 +82,11 @@ Last update: 2026-03-16
 - Admin analytics counters added (live/24h/48h/total) and total persists across restarts.
 - Discord join popup icon centering refined.
 
+## c318 follow-up (2026-03-16)
+- Mobile navbar now uses drawer only (no horizontal category pills on phone).
+- FastFlux strict title matching tightened to prevent wrong-film playback.
+- FastFlux embed player links are allowed when needed; format detection prefers real media extensions.
+
 ## Visual system policy (c137)
 - Keep unified visual tokens across the UI:
   - coherent radii/shadows/spacing

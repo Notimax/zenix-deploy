@@ -1,5 +1,5 @@
 const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260316-c317";
+const ZENIX_BUILD_VERSION = "20260316-c318";
 const STORAGE_KEY = "zenix-progress-v4";
 if (typeof window !== "undefined") {
   window.__zenixBooted = false;
@@ -14369,7 +14369,9 @@ function isBlockedPlaybackSourceUrl(rawUrl, formatHint = "") {
 
   const looksDirectMedia = /\.(m3u8|mp4|webm|m4s|mpd)(?:$|\?)/i.test(withQuery);
   if (format === "embed" && !looksDirectMedia && /(?:^|\.)fastflux\.xyz$/.test(host)) {
-    return true;
+    if (!/player/i.test(withQuery)) {
+      return true;
+    }
   }
 
   return false;

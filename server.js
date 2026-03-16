@@ -7550,6 +7550,9 @@ function buildFastfluxSourceEntry(sourceRow, index = 0) {
       // ignore URL parse errors, keep default proxy decision
     }
   }
+  if (format === "embed") {
+    needsProxy = false;
+  }
   const finalUrl = isAlreadyProxied ? streamUrl : needsProxy ? buildHlsProxyPath(streamUrl) : streamUrl;
   return {
     stream_url: finalUrl,
@@ -7839,6 +7842,34 @@ function scoreFastfluxSearchEntry(entry, queryKey, mediaType, safeYear) {
   return score;
 }
 
+function isFastfluxTitleMatch(entry, title, year = 0) {
+  const queryKey = normalizeTitleKey(String(title || ""));
+  if (!queryKey) {
+    return false;
+  }
+  const rowTitle = String(entry?.title || entry?.series_name || entry?.name || "").trim();
+  const rowKey = normalizeTitleKey(rowTitle);
+  if (!rowKey) {
+    return false;
+  }
+  if (rowKey !== queryKey) {
+    if (year > 0) {
+      const rowYear = toInt(entry?.year, 0, 0, 2099);
+      if (rowYear > 0 && Math.abs(rowYear - year) <= 1 && rowKey.startsWith(queryKey)) {
+        return true;
+      }
+    }
+    return false;
+  }
+  if (year > 0) {
+    const rowYear = toInt(entry?.year, 0, 0, 2099);
+    if (rowYear > 0 && Math.abs(rowYear - year) > 1) {
+      return false;
+    }
+  }
+  return true;
+}
+
 async function searchFastfluxCatalog(query, mediaType) {
   if (!USE_FASTFLUX) {
     return [];
@@ -7881,8 +7912,11 @@ async function resolveFastfluxTmdbIdBySearch(title, mediaType, year = 0) {
       score: scoreFastfluxSearchEntry(entry, queryKey, normalizedType, safeYear),
     }))
     .sort((left, right) => right.score - left.score);
-  const best = scored[0]?.entry;
-  return toInt(best?.tmdb_id || best?.tmdbId, 0, 0, 999999999);
+  const bestEntry = scored[0]?.entry;
+  if (!bestEntry || !isFastfluxTitleMatch(bestEntry, safeTitle, safeYear)) {
+    return 0;
+  }
+  return toInt(bestEntry?.tmdb_id || bestEntry?.tmdbId, 0, 0, 999999999);
 }
 
 function buildFastfluxSeasonsFromEpisodes(episodes) {
@@ -7940,6 +7974,9 @@ async function resolveFastfluxSourcesByTmdbId(mediaType, tmdbId, season = 1, epi
   const normalizedType = mediaType === "tv" ? "tv" : "movie";
   const safeSeason = toInt(season, 1, 1, 500);
   const safeEpisode = toInt(episode, 1, 1, 50000);
+  const strictTitle = String(options?.title || "").trim();
+  const strictYear = toInt(options?.year, 0, 0, 2099);
+  const allowTitleFallback = safeTmdbId <= 0 && strictTitle.length >= 2;
   let entry = null;
   if (normalizedType === "movie") {
     if (safeTmdbId > 0) {
@@ -7949,13 +7986,16 @@ async function resolveFastfluxSourcesByTmdbId(mediaType, tmdbId, season = 1, epi
         entry = fastfluxMovieCache.map.get(safeTmdbId);
       }
     }
-    if (!entry && options?.title) {
-      const candidateId = await resolveFastfluxTmdbIdBySearch(options.title, "movie", options.year || 0);
+    if (!entry && allowTitleFallback) {
+      const candidateId = await resolveFastfluxTmdbIdBySearch(strictTitle, "movie", strictYear || 0);
       if (candidateId) {
         entry = fastfluxMovieCache.map.get(candidateId);
       }
     }
     if (!entry || !entry.source) {
+      return [];
+    }
+    if (strictTitle && !isFastfluxTitleMatch(entry, strictTitle, strictYear)) {
       return [];
     }
     const source = buildFastfluxSourceEntry(entry.source, 0);
@@ -7969,13 +8009,16 @@ async function resolveFastfluxSourcesByTmdbId(mediaType, tmdbId, season = 1, epi
       entry = fastfluxSeriesCache.map.get(safeTmdbId);
     }
   }
-  if (!entry && options?.title) {
-    const candidateId = await resolveFastfluxTmdbIdBySearch(options.title, "tv", options.year || 0);
+  if (!entry && allowTitleFallback) {
+    const candidateId = await resolveFastfluxTmdbIdBySearch(strictTitle, "tv", strictYear || 0);
     if (candidateId) {
       entry = fastfluxSeriesCache.map.get(candidateId);
     }
   }
   if (!entry || !Array.isArray(entry.episodes)) {
+    return [];
+  }
+  if (strictTitle && !isFastfluxTitleMatch(entry, strictTitle, strictYear)) {
     return [];
   }
   const match = entry.episodes.find((episodeRow) => {
@@ -10310,6 +10353,28 @@ function normalizeOwnedSourceLanguage(value) {
 }
 
 function inferOwnedSourceFormat(url, hint = "") {
+  const cleanUrl = String(url || "").split("#")[0].split("?")[0].toLowerCase();
+  if (cleanUrl.endsWith(".m3u8")) {
+    return "hls";
+  }
+  if (cleanUrl.endsWith(".mp4")) {
+    return "mp4";
+  }
+  if (cleanUrl.endsWith(".webm")) {
+    return "webm";
+  }
+  if (cleanUrl.endsWith(".mpd")) {
+    return "dash";
+  }
+  if (
+    /video\.sibnet\.ru\/shell\.php/i.test(cleanUrl) ||
+    /\/embed[-_/]/i.test(cleanUrl) ||
+    /\/player\b/i.test(cleanUrl) ||
+    /route=.*\/player/i.test(cleanUrl)
+  ) {
+    return "embed";
+  }
+
   const rawHint = String(hint || "").trim().toLowerCase();
   if (rawHint.includes("embed") || rawHint.includes("iframe")) {
     return "embed";
@@ -10324,23 +10389,6 @@ function inferOwnedSourceFormat(url, hint = "") {
     return "webm";
   }
   if (rawHint.includes("mpd") || rawHint.includes("dash")) {
-    return "dash";
-  }
-
-  const cleanUrl = String(url || "").split("#")[0].split("?")[0].toLowerCase();
-  if (cleanUrl.endsWith(".m3u8")) {
-    return "hls";
-  }
-  if (/video\.sibnet\.ru\/shell\.php/i.test(cleanUrl) || /\/embed[-_/]/i.test(cleanUrl)) {
-    return "embed";
-  }
-  if (cleanUrl.endsWith(".mp4")) {
-    return "mp4";
-  }
-  if (cleanUrl.endsWith(".webm")) {
-    return "webm";
-  }
-  if (cleanUrl.endsWith(".mpd")) {
     return "dash";
   }
   return "unknown";
@@ -14331,7 +14379,7 @@ async function handleZenixSource(req, res, requestUrl) {
           year,
         });
       }
-      if (sources.length === 0 && title.length >= 2) {
+      if (sources.length === 0 && tmdbId <= 0 && title.length >= 2) {
         const altType = mediaType === "movie" ? "tv" : "movie";
         let altTmdbId = 0;
         try {
