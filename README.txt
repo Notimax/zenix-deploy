@@ -1257,3 +1257,8 @@ LATEST FASTFLUX CLEANUP (2026-03-16, c299)
 - Admin UI removed Filmer2-specific custom matching.
 - Cache-bust bumped to `20260316-c299`.
 
+FASTFLUX BADGE DISPLAY (2026-03-16, c300)
+- FastFlux sources now keep `source_name = FastFlux` and carry `origin = fastflux`.
+- Player chips show a FastFlux badge on those sources (no longer forced to Zenix label).
+- Cache-bust bumped to `20260316-c300`.
+

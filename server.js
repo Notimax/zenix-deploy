@@ -7471,7 +7471,8 @@ function buildFastfluxSourceEntry(sourceRow, index = 0) {
   const finalUrl = needsProxy ? buildHlsProxyPath(streamUrl) : streamUrl;
   return {
     stream_url: finalUrl,
-    source_name: ZENIX_BRAND_LABEL,
+    source_name: "FastFlux",
+    origin: "fastflux",
     quality,
     language,
     format,

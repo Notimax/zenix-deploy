@@ -26,6 +26,8 @@ Last update: 2026-03-11
   - Frontend accepts only external provider `zenix` (FastFlux) and blocks external anime rows.
   - Filmer2 merge path removed; external rescue uses Zenix/FastFlux only.
   - Admin data auto-prunes disallowed external custom entries.
+- c300 follow-up:
+  - FastFlux sources now keep their label (`FastFlux`) and show a FastFlux badge in player chips.
 
 ## Visual system policy (c137)
 - Keep unified visual tokens across the UI:

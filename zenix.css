@@ -5974,6 +5974,13 @@ img[data-image-ready="1"] {
   box-shadow: 0 8px 18px rgba(68, 214, 255, 0.22);
 }
 
+.player-source-chip-fastflux {
+  border-color: rgba(248, 113, 113, 0.55);
+  color: rgba(15, 15, 15, 0.95);
+  background: linear-gradient(135deg, rgba(248, 113, 113, 0.95), rgba(251, 191, 36, 0.9));
+  box-shadow: 0 8px 18px rgba(251, 191, 36, 0.2);
+}
+
 .player-source-chip-debug {
   border-color: rgba(251, 191, 36, 0.5);
   color: #0f0f0f;

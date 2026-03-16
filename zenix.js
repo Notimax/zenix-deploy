@@ -14084,11 +14084,16 @@ function normalizeSourceEntry(entry, index) {
   );
   const proxyPath = getHlsProxyBasePath(url);
   const proxyOnly = Boolean(entry?.proxyOnly);
+  const origin = String(entry?.origin || entry?.provider || entry?.source || "").trim();
+  const isFastflux =
+    /fastflux/i.test(origin) ||
+    /fastflux/i.test(String(entry?.source_name || entry?.name || "")) ||
+    /(?:^|\\.)fastflux\\.xyz$/i.test(host);
   const isZenix = Boolean(
     entry?.isZenix ||
       entry?.zenix ||
       /zenix/i.test(String(entry?.source_name || "")) ||
-      /\/api\/hls-proxy(?:-mobile)?\?url=/i.test(url)
+      (/\/api\/hls-proxy(?:-mobile)?\?url=/i.test(url) && !isFastflux)
   );
   let score = getSourceScore(format, quality, language, index, host);
   if (isZenix && isLikelyMobileDevice()) {
@@ -14100,8 +14105,6 @@ function normalizeSourceEntry(entry, index) {
     language,
     quality,
   });
-  const origin = String(entry?.origin || entry?.provider || entry?.source || "").trim();
-
   return {
     url,
     format,
@@ -14114,6 +14117,7 @@ function normalizeSourceEntry(entry, index) {
     score,
     premiumHint,
     origin,
+    isFastflux,
     isZenix,
     mobileOnly,
   };
@@ -14505,6 +14509,9 @@ function getSourceDisplayQuality(source) {
 
 function formatSourceLabel(source, index, total) {
   const chunks = [`Source ${index + 1}/${total}`];
+  if (source?.isFastflux) {
+    chunks.push("FastFlux");
+  }
   if (source?.isZenix) {
     chunks.push("Zenix");
   }
@@ -14665,6 +14672,9 @@ function renderPlayerSourceOptions() {
         : hasSourceSuccess(entry)
           ? '<span class="player-source-chip-meta-pill player-source-chip-ok">Lecture OK</span>'
           : "";
+      const fastfluxBadge = entry?.isFastflux
+        ? '<span class="player-source-chip-meta-pill player-source-chip-fastflux">FastFlux</span>'
+        : "";
       const zenixBadge = entry?.isZenix ? '<span class="player-source-chip-meta-pill player-source-chip-zenix">Zenix</span>' : "";
       const debugBadge = entry?.debug ? '<span class="player-source-chip-meta-pill player-source-chip-debug">Debug</span>' : "";
       const chip = document.createElement("button");
@@ -14687,6 +14697,7 @@ function renderPlayerSourceOptions() {
           <span class="player-source-chip-compat" data-score="${score}">${escapeHtml(compatibilityLabel)} ${score}%</span>
         </span>
         <span class="player-source-chip-meta">
+          ${fastfluxBadge}
           ${zenixBadge}
           ${debugBadge}
           <span class="player-source-chip-meta-pill">${escapeHtml(language)}</span>
