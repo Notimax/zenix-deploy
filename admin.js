@@ -74,6 +74,8 @@ const refs = {
   customStatus: document.getElementById("customStatus"),
 };
 
+const FASTFLUX_BASE = "https://fastflux.xyz";
+
 const state = {
   data: null,
   searchSeq: 0,
@@ -151,30 +153,27 @@ function normalizePurstreamRow(row) {
   return { id, title, type, year, poster };
 }
 
-function normalizeNakiosRow(row) {
-  const id = Number(row?.id || 0);
+function normalizeFastfluxRow(row) {
+  const id = Number(row?.tmdb_id || row?.tmdbId || row?.id || 0);
   if (!id) return null;
   const title =
-    String(row?.title || row?.name || row?.original_title || row?.original_name || "").trim();
+    String(row?.title || row?.series_name || row?.name || row?.original_title || row?.original_name || "").trim();
   const typeRaw = String(row?.media_type || row?.type || "").toLowerCase();
-  const type = typeRaw === "tv" ? "tv" : "movie";
-  const year = extractYear(row?.release_date || row?.first_air_date || "");
-  const poster = row?.poster_path || "";
+  const type = typeRaw === "tv" || typeRaw === "series" ? "tv" : "movie";
+  const year = extractYear(row?.release_date || row?.first_air_date || row?.year || "");
+  const poster = row?.poster || row?.poster_path || "";
   return { id, title, type, year, poster };
 }
 
-function buildNakiosImportUrl(row) {
+function buildFastfluxImportUrl(row) {
   const type = row.type === "tv" ? "series" : "movie";
-  return `https://nakios.site/${type}/${row.id}`;
+  return `${FASTFLUX_BASE}/${type}/${row.id}`;
 }
 
 function isAlreadyCustom(row) {
   const custom = state.data?.custom || [];
-  if (row.provider === "nakios") {
+  if (row.provider === "fastflux") {
     return custom.some((entry) => Number(entry?.external_tmdb_id || 0) === row.id);
-  }
-  if (row.provider === "filmer2") {
-    return custom.some((entry) => String(entry?.external_detail_url || "") === String(row.url || ""));
   }
   return false;
 }
@@ -215,7 +214,7 @@ function renderSearchResults(results) {
           return;
         }
         try {
-          const importUrl = row.provider === "nakios" ? buildNakiosImportUrl(row) : row.url;
+          const importUrl = row.provider === "fastflux" ? buildFastfluxImportUrl(row) : row.url;
           await apiFetch("/api/admin/import", {
             method: "POST",
             body: JSON.stringify({ url: importUrl }),
@@ -280,11 +279,8 @@ function buildSelectedFromCustom(entry) {
 
 function resolveCustomEntryForRow(row) {
   if (!row || !state.data || !Array.isArray(state.data.custom)) return null;
-  if (row.provider === "nakios") {
+  if (row.provider === "fastflux") {
     return state.data.custom.find((entry) => Number(entry?.external_tmdb_id || 0) === row.id) || null;
-  }
-  if (row.provider === "filmer2") {
-    return state.data.custom.find((entry) => String(entry?.external_detail_url || "") === String(row.url || "")) || null;
   }
   if (row.provider === "purstream") {
     return state.data.custom.find((entry) => Number(entry?.id || 0) === Number(row.id || 0)) || null;
@@ -308,7 +304,7 @@ function buildSelectedFromRow(row) {
     provider: row.provider || "purstream",
     year: row.year || "",
     url: String(row.url || "").trim(),
-    tmdbId: row.provider === "nakios" ? Number(row.id || 0) || 0 : 0,
+    tmdbId: row.provider === "fastflux" ? Number(row.id || 0) || 0 : 0,
     customEntry: customEntry || null,
   };
 }
@@ -419,7 +415,7 @@ async function handleSelectedImport() {
     if (refs.selectedStatus) refs.selectedStatus.textContent = "Deja ajoute.";
     return;
   }
-  const importUrl = item.provider === "nakios" ? buildNakiosImportUrl(item) : item.url;
+  const importUrl = item.provider === "fastflux" ? buildFastfluxImportUrl(item) : item.url;
   if (!importUrl) {
     if (refs.selectedStatus) refs.selectedStatus.textContent = "URL introuvable.";
     return;
@@ -489,7 +485,7 @@ async function handleAutoFix(row) {
     if (row.provider === "purstream") {
       targetId = Number(row.id || 0);
     } else {
-      const importUrl = row.provider === "nakios" ? buildNakiosImportUrl(row) : row.url;
+      const importUrl = row.provider === "fastflux" ? buildFastfluxImportUrl(row) : row.url;
       const payload = await apiFetch("/api/admin/import", {
         method: "POST",
         body: JSON.stringify({ url: importUrl }),
@@ -922,9 +918,8 @@ async function handleAdminSearch(options = {}) {
     if (seq !== state.searchSeq) {
       return;
     }
-    const purstreamRows = extractSearchRows(payload.purstream || {});
-    const nakiosRows = Array.isArray(payload.nakios?.results) ? payload.nakios.results : [];
-    const filmer2Rows = Array.isArray(payload.filmer2) ? payload.filmer2 : [];
+    const purstreamRows = extractSearchRows(payload.purstream || payload.primary || {});
+    const fastfluxRows = Array.isArray(payload.fastflux) ? payload.fastflux : [];
     const results = [];
     purstreamRows.forEach((row) => {
       const mapped = normalizePurstreamRow(row);
@@ -932,23 +927,11 @@ async function handleAdminSearch(options = {}) {
       if (type !== "all" && mapped.type !== type) return;
       results.push({ ...mapped, provider: "purstream" });
     });
-    nakiosRows.forEach((row) => {
-      const mapped = normalizeNakiosRow(row);
+    fastfluxRows.forEach((row) => {
+      const mapped = normalizeFastfluxRow(row);
       if (!mapped) return;
       if (type !== "all" && mapped.type !== type) return;
-      results.push({ ...mapped, provider: "nakios" });
-    });
-    filmer2Rows.forEach((row) => {
-      const mapped = {
-        id: Number(row?.id || 0) || 0,
-        title: String(row?.title || "").trim(),
-        type: String(row?.type || "movie").toLowerCase() === "tv" ? "tv" : "movie",
-        year: row?.year || "",
-        url: String(row?.url || "").trim(),
-      };
-      if (!mapped.title || !mapped.url) return;
-      if (type !== "all" && mapped.type !== type) return;
-      results.push({ ...mapped, provider: "filmer2", url: mapped.url });
+      results.push({ ...mapped, provider: "fastflux" });
     });
     refs.adminSearchStatus.textContent = `${results.length} resultat(s).`;
     renderSearchResults(results);
@@ -1005,7 +988,7 @@ async function handleRepair() {
     const data = payload.data || {};
     refs.repairStatus.textContent = payload.repaired ? "Repare." : "Analyse terminee.";
     refs.repairResult.textContent =
-      `Sources: Zenix=${data.purstreamCount ?? 0} | Owned=${data.ownedCount ?? 0} | Nakios=${data.nakiosCount ?? 0}`;
+      `Sources: Zenix=${data.purstreamCount ?? 0} | Owned=${data.ownedCount ?? 0} | FastFlux=${data.fastfluxCount ?? 0}`;
     await loadData();
   } catch (err) {
     refs.repairStatus.textContent = err.message || "Erreur analyse.";

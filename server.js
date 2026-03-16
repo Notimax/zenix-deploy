@@ -12,6 +12,11 @@ const CANONICAL_SCHEME =
 const REMOTE_API_BASE = "https://api.purstream.cc/api/v1";
 const PURSTREAM_API_BASE = "https://api.purstream.cc/api/v1";
 const PURSTREAM_WEB_BASE = "https://purstream.cc";
+const FASTFLUX_BASE = "https://fastflux.xyz";
+const FASTFLUX_API_BASE = `${FASTFLUX_BASE}/api/v1/index.php`;
+const FASTFLUX_API_KEY = String(process.env.FASTFLUX_API_KEY || "").trim();
+const FASTFLUX_ENABLED = Boolean(FASTFLUX_API_KEY);
+const USE_FASTFLUX = FASTFLUX_ENABLED;
 const NAKIOS_BASE = "https://nakios.site";
 const NAKIOS_HOST = "nakios.site";
 const NAKIOS_API_BASE = "https://api.nakios.site";
@@ -40,6 +45,11 @@ const NOCTA_SCREAM7_DEBUG_URL = "https://cdn.fastflux.xyz/movies/Scream-7-2026.m
 const NOCTA_BANLIEUSARDS3_DEBUG_URL = "https://cdn.fastflux.xyz/movies/Banlieusards-3-2026.mp4";
 const PURSTREAM_CARS_DEBUG_URL = "https://zebi.xalaflix.design/movie/920/free-ibr0mx/master.m3u8";
 const PURSTREAM_CARS_DEBUG_URL_ALT = "https://zebi.xalaflix.design/movie/920/premium-6g65wx/master.m3u8";
+const USE_NAKIOS = false;
+const USE_FILMER2 = false;
+const USE_MOVIX = false;
+const USE_NOCTA = false;
+const USE_YOUTUBE = false;
 const STRICT_NAKIOS_MATCH = true;
 const MOVIX_BASE62_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const DEFAULT_BROWSER_UA =
@@ -48,6 +58,26 @@ const DEFAULT_ACCEPT_LANGUAGE = "fr-FR,fr;q=0.9,en-US;q=0.8,en;q=0.7";
 const NAKIOS_CATALOG_PAGES_PER_FEED = Math.max(
   1,
   toInt(process.env.NAKIOS_CATALOG_PAGES_PER_FEED, 3, 1, 12)
+);
+const FASTFLUX_MOVIES_PAGES_PER_FEED = Math.max(
+  1,
+  toInt(process.env.FASTFLUX_MOVIES_PAGES_PER_FEED, 4, 1, 60)
+);
+const FASTFLUX_MOVIES_MAX_PAGES_PER_FEED = Math.max(
+  FASTFLUX_MOVIES_PAGES_PER_FEED,
+  toInt(process.env.FASTFLUX_MOVIES_MAX_PAGES_PER_FEED, 40, 4, 120)
+);
+const FASTFLUX_SERIES_PAGES_PER_FEED = Math.max(
+  1,
+  toInt(process.env.FASTFLUX_SERIES_PAGES_PER_FEED, 4, 1, 12)
+);
+const FASTFLUX_SERIES_MAX_PAGES_PER_FEED = Math.max(
+  FASTFLUX_SERIES_PAGES_PER_FEED,
+  toInt(process.env.FASTFLUX_SERIES_MAX_PAGES_PER_FEED, 12, 4, 24)
+);
+const FASTFLUX_FEED_PAGE_SIZE_ESTIMATE = Math.max(
+  10,
+  toInt(process.env.FASTFLUX_FEED_PAGE_SIZE_ESTIMATE, 50, 10, 120)
 );
 const NAKIOS_CATALOG_MAX_PAGES_PER_FEED = Math.max(
   NAKIOS_CATALOG_PAGES_PER_FEED,
@@ -60,6 +90,18 @@ const NAKIOS_FEED_PAGE_SIZE_ESTIMATE = Math.max(
 const NAKIOS_LOOKUP_CACHE_MS = Math.max(
   60 * 1000,
   Number(process.env.NAKIOS_LOOKUP_CACHE_MS || 30 * 60 * 1000)
+);
+const FASTFLUX_CATALOG_CACHE_MS = Math.max(
+  60 * 1000,
+  Number(process.env.FASTFLUX_CATALOG_CACHE_MS || 20 * 60 * 1000)
+);
+const FASTFLUX_SEARCH_CACHE_MS = Math.max(
+  30 * 1000,
+  Number(process.env.FASTFLUX_SEARCH_CACHE_MS || 6 * 60 * 1000)
+);
+const FASTFLUX_SOURCE_REMOTE_TIMEOUT_MS = Math.max(
+  10_000,
+  toInt(process.env.FASTFLUX_SOURCE_REMOTE_TIMEOUT_MS, 20_000, 8000, 60_000)
 );
 const NAKIOS_FETCH_HEADERS = {
   Referer: `${NAKIOS_BASE}/`,
@@ -74,6 +116,11 @@ const FILMER2_FETCH_HEADERS = {
 const MOVIX_FETCH_HEADERS = {
   ...(MOVIX_BASE_URL ? { Referer: `${MOVIX_BASE_URL}/`, Origin: MOVIX_BASE_URL } : {}),
   ...(MOVIX_ACCESS_KEY ? { "x-access-key": MOVIX_ACCESS_KEY } : {}),
+  "Accept-Language": DEFAULT_ACCEPT_LANGUAGE,
+};
+const FASTFLUX_FETCH_HEADERS = {
+  Referer: `${FASTFLUX_BASE}/`,
+  Origin: FASTFLUX_BASE,
   "Accept-Language": DEFAULT_ACCEPT_LANGUAGE,
 };
 const NOCTA_FETCH_HEADERS = {
@@ -471,6 +518,23 @@ const supplementalCatalogCache = {
   entries: [],
   inFlight: null,
 };
+const fastfluxMovieCache = {
+  loadedAt: 0,
+  entries: [],
+  inFlight: null,
+  pagesLoaded: 0,
+  totalPages: 0,
+  map: new Map(),
+};
+const fastfluxSeriesCache = {
+  loadedAt: 0,
+  entries: [],
+  inFlight: null,
+  pagesLoaded: 0,
+  totalPages: 0,
+  map: new Map(),
+};
+const fastfluxSearchCache = new Map();
 const filmer2CatalogCache = {
   loadedAt: 0,
   entries: [],
@@ -1411,6 +1475,9 @@ function buildSuggestionKey(entry) {
   if (provider === "nakios" && entry.tmdbId) {
     return `nakios:${entry.tmdbId}`;
   }
+  if (provider === "fastflux" && entry.tmdbId) {
+    return `fastflux:${entry.tmdbId}`;
+  }
   if (provider === "filmer2" && entry.url) {
     return `filmer2:${toBase64Url(String(entry.url || "").trim())}`;
   }
@@ -1746,6 +1813,9 @@ function isCustomAlreadyAdded(adminData, candidate) {
   if (provider === "nakios" && candidate.tmdbId) {
     return custom.some((entry) => Number(entry?.external_tmdb_id || 0) === Number(candidate.tmdbId || 0));
   }
+  if (provider === "fastflux" && candidate.tmdbId) {
+    return custom.some((entry) => Number(entry?.external_tmdb_id || 0) === Number(candidate.tmdbId || 0));
+  }
   if (provider === "filmer2" && candidate.url) {
     return custom.some((entry) => String(entry?.external_detail_url || "") === String(candidate.url || ""));
   }
@@ -1766,6 +1836,15 @@ function buildNakiosImportUrlFromCandidate(candidate) {
   }
   const type = String(candidate?.type || "").toLowerCase() === "tv" ? "series" : "movie";
   return `https://nakios.site/${type}/${tmdbId}`;
+}
+
+function buildFastfluxImportUrlFromCandidate(candidate) {
+  const tmdbId = toInt(candidate?.tmdbId, 0, 0, 999999999);
+  if (!tmdbId) {
+    return "";
+  }
+  const type = String(candidate?.type || "").toLowerCase() === "tv" ? "series" : "movie";
+  return `${FASTFLUX_BASE}/${type}/${tmdbId}`;
 }
 
 async function enrichNakiosSuggestion(candidate) {
@@ -1799,6 +1878,20 @@ async function enrichNakiosSuggestion(candidate) {
     poster,
     backdrop: backdrop || candidate.backdrop || poster,
     year: year || candidate.year || 0,
+  };
+}
+
+async function enrichFastfluxSuggestion(candidate) {
+  if (!candidate || typeof candidate !== "object") {
+    return candidate;
+  }
+  return {
+    ...candidate,
+    title: String(candidate.title || "").trim() || candidate.title,
+    overview: String(candidate.overview || "").trim(),
+    poster: String(candidate.poster || "").trim() || candidate.poster,
+    backdrop: String(candidate.backdrop || candidate.poster || "").trim() || candidate.backdrop,
+    importUrl: candidate.importUrl || buildFastfluxImportUrlFromCandidate(candidate),
   };
 }
 
@@ -1901,49 +1994,21 @@ async function buildAdminSuggestions(type = "movie", limit = 3) {
   } else {
     const desiredType = safeType === "tv" ? "tv" : "movie";
     try {
-      const nakiosRows = await loadNakiosCatalogEntries();
-      nakiosRows.forEach((row) => {
+      const fastfluxRows = await loadFastfluxCatalogEntries();
+      fastfluxRows.forEach((row) => {
         if (!row || String(row.type || "").toLowerCase() !== desiredType) {
           return;
         }
         const tmdbId = toInt(row?.external_tmdb_id, 0, 0, 999999999);
         candidates.push({
-          provider: "nakios",
+          provider: "fastflux",
           type: desiredType,
           title: row?.title || "",
           year: toInt(row?.external_year, 0, 0, 2099),
           poster: row?.large_poster_path || row?.small_poster_path || "",
           backdrop: row?.wallpaper_poster_path || "",
           tmdbId,
-          importUrl: tmdbId ? `https://nakios.site/${desiredType === "tv" ? "series" : "movie"}/${tmdbId}` : "",
-          availability: row?.availability_status || row?.external_status || "",
-          score: Number(row?.supplemental_rank || 0),
-        });
-      });
-    } catch {
-      // ignore
-    }
-
-    try {
-      const filmer2Rows = await loadFilmer2CatalogEntries();
-      filmer2Rows.forEach((row) => {
-        const rowType = String(row?.type || row?.mediaType || "").toLowerCase() === "tv" ? "tv" : "movie";
-        if (rowType !== desiredType) {
-          return;
-        }
-        const url = String(row?.external_detail_url || row?.detailUrl || "").trim();
-        if (!url) {
-          return;
-        }
-        candidates.push({
-          provider: "filmer2",
-          type: rowType,
-          title: row?.title || "",
-          year: toInt(row?.external_year || row?.year, 0, 0, 2099),
-          poster: row?.large_poster_path || row?.small_poster_path || "",
-          backdrop: row?.wallpaper_poster_path || "",
-          url,
-          importUrl: url,
+          importUrl: buildFastfluxImportUrlFromCandidate({ tmdbId, type: desiredType }),
           availability: row?.availability_status || row?.external_status || "",
           score: Number(row?.supplemental_rank || 0),
         });
@@ -1978,11 +2043,9 @@ async function buildAdminSuggestions(type = "movie", limit = 3) {
     }
 
     let enriched = candidate;
-    if (candidate.provider === "nakios") {
-      enriched = await enrichNakiosSuggestion(candidate);
-      enriched.importUrl = enriched.importUrl || buildNakiosImportUrlFromCandidate(enriched);
-    } else if (candidate.provider === "filmer2") {
-      enriched = await enrichFilmer2Suggestion(candidate);
+    if (candidate.provider === "fastflux") {
+      enriched = await enrichFastfluxSuggestion(candidate);
+      enriched.importUrl = enriched.importUrl || buildFastfluxImportUrlFromCandidate(enriched);
     } else if (candidate.provider === "anime") {
       enriched = await enrichAnimeSuggestion(candidate);
     }
@@ -2219,13 +2282,36 @@ function applyAdminOverride(entry, adminData) {
   return next;
 }
 
+function isDisallowedExternalEntry(entry) {
+  if (!entry || typeof entry !== "object") {
+    return false;
+  }
+  const provider = String(entry?.external_provider || entry?.provider || "").toLowerCase();
+  const detail = String(entry?.external_detail_url || entry?.detailUrl || "").toLowerCase();
+  const key = String(entry?.external_key || entry?.externalKey || "").toLowerCase();
+  const combined = `${provider} ${detail} ${key}`.trim();
+  if (!combined) {
+    return false;
+  }
+  if (entry.isAnime) {
+    return !/anime-sama|animesama/.test(combined);
+  }
+  if (/fastflux|purstream|anime-sama|animesama/.test(combined)) {
+    return false;
+  }
+  return true;
+}
+
 function mergeAdminCustomEntries(entries, adminData) {
   const base = Array.isArray(entries) ? entries.slice() : [];
   const custom = Array.isArray(adminData?.custom) ? adminData.custom.slice() : [];
   if (custom.length === 0) {
     return base;
   }
-  const customPrepared = custom.map((entry) => applyAdminOverride(entry, adminData)).filter(Boolean);
+  const customPrepared = custom
+    .map((entry) => applyAdminOverride(entry, adminData))
+    .filter(Boolean)
+    .filter((entry) => !isDisallowedExternalEntry(entry));
   const merged = [];
   const seen = new Set();
   const all = customPrepared.concat(base);
@@ -7280,6 +7366,548 @@ async function loadFilmer2CatalogEntries(force = false) {
   }
 }
 
+function buildFastfluxApiUrl(route, params = {}) {
+  if (!FASTFLUX_API_KEY) {
+    return "";
+  }
+  const safeRoute = String(route || "").trim();
+  if (!safeRoute) {
+    return "";
+  }
+  const search = new URLSearchParams({ route: safeRoute, api_key: FASTFLUX_API_KEY });
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value === undefined || value === null) {
+      return;
+    }
+    const text = String(value).trim();
+    if (!text) {
+      return;
+    }
+    search.set(key, text);
+  });
+  return `${FASTFLUX_API_BASE}?${search.toString()}`;
+}
+
+function extractFastfluxRows(payload) {
+  if (!payload || typeof payload !== "object") {
+    return [];
+  }
+  if (Array.isArray(payload?.data)) {
+    return payload.data;
+  }
+  if (Array.isArray(payload?.results)) {
+    return payload.results;
+  }
+  if (Array.isArray(payload?.items)) {
+    return payload.items;
+  }
+  return [];
+}
+
+async function fetchFastfluxPage(route, page = 1, options = {}) {
+  if (!USE_FASTFLUX) {
+    return { items: [], pagination: null };
+  }
+  const target = buildFastfluxApiUrl(route, { page: String(page || 1), ...(options || {}) });
+  if (!target) {
+    return { items: [], pagination: null };
+  }
+  const response = await fetchRemoteWithTimeout(target, FASTFLUX_FETCH_HEADERS, FASTFLUX_SOURCE_REMOTE_TIMEOUT_MS);
+  if (response.status < 200 || response.status >= 300) {
+    return { items: [], pagination: null };
+  }
+  const payload = parseJsonSafe(response.body);
+  return {
+    items: extractFastfluxRows(payload),
+    pagination: payload?.pagination || null,
+  };
+}
+
+function parseFastfluxSeasonNumber(value) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return 0;
+  }
+  const match = raw.match(/S?(\d+)/i);
+  if (!match) {
+    return toInt(raw, 0, 0, 500);
+  }
+  return toInt(match[1], 0, 0, 500);
+}
+
+function parseFastfluxEpisodeNumber(value) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return 0;
+  }
+  const match = raw.match(/E?(\d+)/i);
+  if (!match) {
+    return toInt(raw, 0, 0, 50000);
+  }
+  return toInt(match[1], 0, 0, 50000);
+}
+
+function normalizeFastfluxQuality(value) {
+  const raw = sanitizeToken(String(value || ""), 24);
+  if (!raw || /unknown/i.test(raw)) {
+    return "HD";
+  }
+  return raw;
+}
+
+function buildFastfluxSourceEntry(sourceRow, index = 0) {
+  if (!sourceRow || typeof sourceRow !== "object") {
+    return null;
+  }
+  const streamUrl = String(sourceRow?.url || sourceRow?.stream_url || "").trim();
+  if (!streamUrl) {
+    return null;
+  }
+  const language = normalizePidoovLanguage(sourceRow?.language || sourceRow?.lang || "") || "VF";
+  const quality = normalizeFastfluxQuality(sourceRow?.quality || sourceRow?.qlt || "");
+  const formatHint = String(sourceRow?.type || sourceRow?.format || "").trim();
+  const format = inferOwnedSourceFormat(streamUrl, formatHint || "mp4");
+  const needsProxy = format === "m3u8" || /\.m3u8($|[?#])/i.test(streamUrl) || /hls/i.test(formatHint);
+  const finalUrl = needsProxy ? buildHlsProxyPath(streamUrl) : streamUrl;
+  return {
+    stream_url: finalUrl,
+    source_name: ZENIX_BRAND_LABEL,
+    quality,
+    language,
+    format,
+    priority:
+      (language === "VF" ? 392 : language === "MULTI" ? 372 : language === "VOSTFR" ? 360 : 330) -
+      Math.min(40, index * 4),
+  };
+}
+
+function toFastfluxCatalogDetailUrl(mediaType, tmdbId) {
+  const safeId = toInt(tmdbId, 0, 0, 999999999);
+  if (!safeId) {
+    return "";
+  }
+  const type = mediaType === "tv" ? "series" : "movie";
+  return `${FASTFLUX_BASE}/${type}/${safeId}`;
+}
+
+function buildFastfluxCatalogRow(entry, mediaType, fallbackIdSet) {
+  if (!entry || typeof entry !== "object") {
+    return null;
+  }
+  const safeType = mediaType === "tv" ? "tv" : "movie";
+  const tmdbId = toInt(entry?.tmdb_id || entry?.tmdbId, 0, 0, 999999999);
+  const title = String(entry?.title || entry?.series_name || entry?.name || "").trim();
+  if (!title) {
+    return null;
+  }
+  const year = toInt(entry?.year, 0, 0, 2099);
+  const poster = String(entry?.poster || "").trim();
+  const addedAt = String(entry?.added_at || entry?.latest_added || entry?.created_at || "").trim();
+  const releaseDate = toIsoDate(addedAt) || (year ? `${year}-01-01` : "");
+  const rawKey = `fastflux:${safeType}:${tmdbId || normalizeTitleKey(title)}`;
+  const availability = (() => {
+    if (safeType === "movie") {
+      const src = entry?.source || entry?.sources;
+      return src && (src.url || src.stream_url) ? "available" : "unknown";
+    }
+    const episodes = Array.isArray(entry?.episodes) ? entry.episodes : [];
+    return episodes.length > 0 ? "available" : "unknown";
+  })();
+
+  const row = mapSupplementalCandidateToCatalogRow(
+    {
+      provider: "fastflux",
+      providerLabel: ZENIX_BRAND_LABEL,
+      rawKey,
+      title,
+      year,
+      mediaType: safeType,
+      release_date: releaseDate,
+      poster,
+      backdrop: poster,
+      detailUrl: toFastfluxCatalogDetailUrl(safeType, tmdbId),
+      language: normalizePidoovLanguage(entry?.source?.language || entry?.language || "") || "VF",
+    },
+    fallbackIdSet
+  );
+  if (!row) {
+    return null;
+  }
+  row.external_tmdb_id = tmdbId;
+  row.availability_status = availability;
+  row.external_status = availability;
+  row.is_pending_upload = availability !== "available";
+  row.supplemental_rank = scoreSupplementalCandidate(row);
+  row.supplemental_date = releaseDate || row.supplemental_date || "";
+  return row;
+}
+
+async function loadFastfluxMovies(force = false, options = {}) {
+  if (!USE_FASTFLUX) {
+    return [];
+  }
+  const now = Date.now();
+  const minPages = Math.max(1, toInt(options?.minPages, 0, 1, FASTFLUX_MOVIES_MAX_PAGES_PER_FEED));
+  const targetPages = Math.min(
+    FASTFLUX_MOVIES_MAX_PAGES_PER_FEED,
+    Math.max(FASTFLUX_MOVIES_PAGES_PER_FEED, minPages)
+  );
+  if (
+    !force &&
+    fastfluxMovieCache.loadedAt > 0 &&
+    now - fastfluxMovieCache.loadedAt < FASTFLUX_CATALOG_CACHE_MS &&
+    Array.isArray(fastfluxMovieCache.entries) &&
+    fastfluxMovieCache.entries.length > 0 &&
+    Number(fastfluxMovieCache.pagesLoaded || 0) >= targetPages
+  ) {
+    return fastfluxMovieCache.entries;
+  }
+  if (fastfluxMovieCache.inFlight) {
+    return fastfluxMovieCache.inFlight;
+  }
+
+  const task = (async () => {
+    const first = await fetchFastfluxPage("movies", 1);
+    const totalPages = Math.max(
+      1,
+      toInt(first.pagination?.total_pages, targetPages, 1, FASTFLUX_MOVIES_MAX_PAGES_PER_FEED)
+    );
+    const pages = Math.min(targetPages, totalPages);
+    const jobs = [];
+    for (let page = 2; page <= pages; page += 1) {
+      jobs.push(page);
+    }
+    const rest = jobs.length
+      ? await mapWithConcurrency(jobs, Math.min(4, jobs.length), async (page) => fetchFastfluxPage("movies", page))
+      : [];
+    const rows = [first, ...rest].flatMap((entry) => entry?.items || []);
+    const byTmdb = new Map();
+    rows.forEach((entry) => {
+      const tmdbId = toInt(entry?.tmdb_id || entry?.tmdbId, 0, 0, 999999999);
+      if (!tmdbId) {
+        return;
+      }
+      if (!byTmdb.has(tmdbId)) {
+        byTmdb.set(tmdbId, entry);
+        return;
+      }
+      const current = byTmdb.get(tmdbId);
+      const currentHasSource = Boolean(current?.source?.url || current?.source?.stream_url);
+      const nextHasSource = Boolean(entry?.source?.url || entry?.source?.stream_url);
+      if (!currentHasSource && nextHasSource) {
+        byTmdb.set(tmdbId, entry);
+      }
+    });
+    const entries = Array.from(byTmdb.values());
+    fastfluxMovieCache.entries = entries;
+    fastfluxMovieCache.loadedAt = Date.now();
+    fastfluxMovieCache.pagesLoaded = pages;
+    fastfluxMovieCache.totalPages = totalPages;
+    fastfluxMovieCache.map = byTmdb;
+    fastfluxMovieCache.inFlight = null;
+    return entries;
+  })();
+
+  fastfluxMovieCache.inFlight = task;
+  try {
+    return await task;
+  } finally {
+    fastfluxMovieCache.inFlight = null;
+  }
+}
+
+async function loadFastfluxSeries(force = false, options = {}) {
+  if (!USE_FASTFLUX) {
+    return [];
+  }
+  const now = Date.now();
+  const minPages = Math.max(1, toInt(options?.minPages, 0, 1, FASTFLUX_SERIES_MAX_PAGES_PER_FEED));
+  const targetPages = Math.min(
+    FASTFLUX_SERIES_MAX_PAGES_PER_FEED,
+    Math.max(FASTFLUX_SERIES_PAGES_PER_FEED, minPages)
+  );
+  if (
+    !force &&
+    fastfluxSeriesCache.loadedAt > 0 &&
+    now - fastfluxSeriesCache.loadedAt < FASTFLUX_CATALOG_CACHE_MS &&
+    Array.isArray(fastfluxSeriesCache.entries) &&
+    fastfluxSeriesCache.entries.length > 0 &&
+    Number(fastfluxSeriesCache.pagesLoaded || 0) >= targetPages
+  ) {
+    return fastfluxSeriesCache.entries;
+  }
+  if (fastfluxSeriesCache.inFlight) {
+    return fastfluxSeriesCache.inFlight;
+  }
+
+  const task = (async () => {
+    const first = await fetchFastfluxPage("series", 1);
+    const totalPages = Math.max(
+      1,
+      toInt(first.pagination?.total_pages, targetPages, 1, FASTFLUX_SERIES_MAX_PAGES_PER_FEED)
+    );
+    const pages = Math.min(targetPages, totalPages);
+    const jobs = [];
+    for (let page = 2; page <= pages; page += 1) {
+      jobs.push(page);
+    }
+    const rest = jobs.length
+      ? await mapWithConcurrency(jobs, Math.min(3, jobs.length), async (page) => fetchFastfluxPage("series", page))
+      : [];
+    const rows = [first, ...rest].flatMap((entry) => entry?.items || []);
+    const byTmdb = new Map();
+    rows.forEach((entry) => {
+      const tmdbId = toInt(entry?.tmdb_id || entry?.tmdbId, 0, 0, 999999999);
+      if (!tmdbId) {
+        return;
+      }
+      if (!byTmdb.has(tmdbId)) {
+        byTmdb.set(tmdbId, entry);
+        return;
+      }
+      const current = byTmdb.get(tmdbId);
+      const currentEpisodes = Array.isArray(current?.episodes) ? current.episodes.length : 0;
+      const nextEpisodes = Array.isArray(entry?.episodes) ? entry.episodes.length : 0;
+      if (nextEpisodes > currentEpisodes) {
+        byTmdb.set(tmdbId, entry);
+      }
+    });
+    const entries = Array.from(byTmdb.values());
+    fastfluxSeriesCache.entries = entries;
+    fastfluxSeriesCache.loadedAt = Date.now();
+    fastfluxSeriesCache.pagesLoaded = pages;
+    fastfluxSeriesCache.totalPages = totalPages;
+    fastfluxSeriesCache.map = byTmdb;
+    fastfluxSeriesCache.inFlight = null;
+    return entries;
+  })();
+
+  fastfluxSeriesCache.inFlight = task;
+  try {
+    return await task;
+  } finally {
+    fastfluxSeriesCache.inFlight = null;
+  }
+}
+
+async function loadFastfluxCatalogEntries(force = false, options = {}) {
+  if (!USE_FASTFLUX) {
+    return [];
+  }
+  const [movies, series] = await Promise.all([
+    loadFastfluxMovies(force, { minPages: options?.minPages || 0 }),
+    loadFastfluxSeries(force, { minPages: options?.minPages || 0 }),
+  ]);
+  const reservedIds = new Set();
+  const rows = [];
+  movies.forEach((entry) => {
+    const row = buildFastfluxCatalogRow(entry, "movie", reservedIds);
+    if (row) {
+      rows.push(row);
+    }
+  });
+  series.forEach((entry) => {
+    const row = buildFastfluxCatalogRow(entry, "tv", reservedIds);
+    if (row) {
+      rows.push(row);
+    }
+  });
+  return rows;
+}
+
+function scoreFastfluxSearchEntry(entry, queryKey, mediaType, safeYear) {
+  if (!entry) {
+    return -Infinity;
+  }
+  const rowTitle = String(entry?.title || entry?.series_name || entry?.name || "").trim();
+  const rowKey = normalizeTitleKey(rowTitle);
+  const rowYear = toInt(entry?.year, 0, 0, 2099);
+  let score = 0;
+  if (rowKey === queryKey) {
+    score += 140;
+  } else if (rowKey.includes(queryKey) || queryKey.includes(rowKey)) {
+    score += 85;
+  } else if (rowKey && queryKey && rowKey[0] === queryKey[0]) {
+    score += 30;
+  }
+  if (mediaType) {
+    const type = String(entry?.type || entry?.media_type || "").toLowerCase();
+    const normalized = type === "series" || type === "tv" ? "tv" : "movie";
+    if (normalized === mediaType) {
+      score += 20;
+    }
+  }
+  if (safeYear > 0 && rowYear > 0) {
+    const diff = Math.abs(rowYear - safeYear);
+    if (diff === 0) {
+      score += 55;
+    } else if (diff === 1) {
+      score += 30;
+    } else if (diff <= 2) {
+      score += 10;
+    } else {
+      score -= diff * 3;
+    }
+  }
+  if (entry?.poster) {
+    score += 10;
+  }
+  return score;
+}
+
+async function searchFastfluxCatalog(query, mediaType) {
+  if (!USE_FASTFLUX) {
+    return [];
+  }
+  const safeQuery = String(query || "").trim();
+  if (safeQuery.length < 2) {
+    return [];
+  }
+  const normalizedType = mediaType === "tv" ? "tv" : "movie";
+  const cacheKey = `fastflux:${normalizedType}:${normalizeTitleKey(safeQuery)}`;
+  const cached = fastfluxSearchCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.items || [];
+  }
+  const route = normalizedType === "tv" ? "series/search" : "movies/search";
+  const payload = await fetchFastfluxPage(route, 1, { q: safeQuery });
+  const items = Array.isArray(payload?.items) ? payload.items : [];
+  fastfluxSearchCache.set(cacheKey, {
+    items,
+    expiresAt: Date.now() + FASTFLUX_SEARCH_CACHE_MS,
+  });
+  return items;
+}
+
+async function resolveFastfluxTmdbIdBySearch(title, mediaType, year = 0) {
+  const safeTitle = String(title || "").trim();
+  if (safeTitle.length < 2) {
+    return 0;
+  }
+  const normalizedType = mediaType === "tv" ? "tv" : "movie";
+  const queryKey = normalizeTitleKey(safeTitle);
+  const safeYear = toInt(year, 0, 0, 2099);
+  const results = await searchFastfluxCatalog(safeTitle, normalizedType);
+  if (!Array.isArray(results) || results.length === 0) {
+    return 0;
+  }
+  const scored = results
+    .map((entry) => ({
+      entry,
+      score: scoreFastfluxSearchEntry(entry, queryKey, normalizedType, safeYear),
+    }))
+    .sort((left, right) => right.score - left.score);
+  const best = scored[0]?.entry;
+  return toInt(best?.tmdb_id || best?.tmdbId, 0, 0, 999999999);
+}
+
+function buildFastfluxSeasonsFromEpisodes(episodes) {
+  const rows = Array.isArray(episodes) ? episodes : [];
+  const bySeason = new Map();
+  rows.forEach((episode) => {
+    const seasonNumber = parseFastfluxSeasonNumber(episode?.season);
+    const episodeNumber = parseFastfluxEpisodeNumber(episode?.episode_number || episode?.episode || episode?.number);
+    if (seasonNumber <= 0 || episodeNumber <= 0) {
+      return;
+    }
+    if (!bySeason.has(seasonNumber)) {
+      bySeason.set(seasonNumber, []);
+    }
+    bySeason.get(seasonNumber).push({
+      episode: episodeNumber,
+      name: `Episode ${episodeNumber}`,
+      runtime: 0,
+      airDate: "",
+      isSoon: false,
+    });
+  });
+  return Array.from(bySeason.entries())
+    .map(([season, episodesList]) => ({
+      season,
+      episodes: episodesList.sort((a, b) => Number(a.episode || 0) - Number(b.episode || 0)),
+    }))
+    .sort((a, b) => Number(a.season || 0) - Number(b.season || 0));
+}
+
+async function resolveFastfluxSeasonsByTmdbId(tmdbId) {
+  if (!USE_FASTFLUX) {
+    return [];
+  }
+  const safeId = toInt(tmdbId, 0, 0, 999999999);
+  if (!safeId) {
+    return [];
+  }
+  let entry = fastfluxSeriesCache.map.get(safeId);
+  if (!entry) {
+    await loadFastfluxSeries(true, { minPages: FASTFLUX_SERIES_MAX_PAGES_PER_FEED });
+    entry = fastfluxSeriesCache.map.get(safeId);
+  }
+  if (!entry) {
+    return [];
+  }
+  return buildFastfluxSeasonsFromEpisodes(entry.episodes || []);
+}
+
+async function resolveFastfluxSourcesByTmdbId(mediaType, tmdbId, season = 1, episode = 1, options = {}) {
+  if (!USE_FASTFLUX) {
+    return [];
+  }
+  const safeTmdbId = toInt(tmdbId, 0, 0, 999999999);
+  const normalizedType = mediaType === "tv" ? "tv" : "movie";
+  const safeSeason = toInt(season, 1, 1, 500);
+  const safeEpisode = toInt(episode, 1, 1, 50000);
+  let entry = null;
+  if (normalizedType === "movie") {
+    if (safeTmdbId > 0) {
+      entry = fastfluxMovieCache.map.get(safeTmdbId);
+      if (!entry) {
+        await loadFastfluxMovies(true, { minPages: FASTFLUX_MOVIES_MAX_PAGES_PER_FEED });
+        entry = fastfluxMovieCache.map.get(safeTmdbId);
+      }
+    }
+    if (!entry && options?.title) {
+      const candidateId = await resolveFastfluxTmdbIdBySearch(options.title, "movie", options.year || 0);
+      if (candidateId) {
+        entry = fastfluxMovieCache.map.get(candidateId);
+      }
+    }
+    if (!entry || !entry.source) {
+      return [];
+    }
+    const source = buildFastfluxSourceEntry(entry.source, 0);
+    return source ? [source] : [];
+  }
+
+  if (safeTmdbId > 0) {
+    entry = fastfluxSeriesCache.map.get(safeTmdbId);
+    if (!entry) {
+      await loadFastfluxSeries(true, { minPages: FASTFLUX_SERIES_MAX_PAGES_PER_FEED });
+      entry = fastfluxSeriesCache.map.get(safeTmdbId);
+    }
+  }
+  if (!entry && options?.title) {
+    const candidateId = await resolveFastfluxTmdbIdBySearch(options.title, "tv", options.year || 0);
+    if (candidateId) {
+      entry = fastfluxSeriesCache.map.get(candidateId);
+    }
+  }
+  if (!entry || !Array.isArray(entry.episodes)) {
+    return [];
+  }
+  const match = entry.episodes.find((episodeRow) => {
+    const seasonNumber = parseFastfluxSeasonNumber(episodeRow?.season);
+    const episodeNumber = parseFastfluxEpisodeNumber(episodeRow?.episode_number || episodeRow?.episode);
+    return seasonNumber === safeSeason && episodeNumber === safeEpisode;
+  });
+  const fallback = match || entry.episodes[0];
+  if (!fallback) {
+    return [];
+  }
+  const source = buildFastfluxSourceEntry(fallback, 0);
+  return source ? [source] : [];
+}
+
+
 async function fetchNakiosFeedPage(feed, page) {
   const mediaType = String(feed?.mediaType || "").toLowerCase() === "tv" ? "tv" : "movie";
   const path = String(feed?.path || "").trim();
@@ -8082,6 +8710,60 @@ function buildAdminCustomEntryFromFilmer2(detail, mediaType) {
     wallpaper_poster_path: String(detail?.backdrop || detail?.poster || "").trim(),
     external_key: externalKey,
     external_detail_url: String(detail?.url || "").trim(),
+    providerLabel: ZENIX_BRAND_LABEL,
+  });
+}
+
+async function fetchFastfluxEntryByTmdbId(mediaType, tmdbId) {
+  if (!USE_FASTFLUX) {
+    return null;
+  }
+  const safeId = toInt(tmdbId, 0, 0, 999999999);
+  if (!safeId) {
+    return null;
+  }
+  const normalizedType = mediaType === "tv" ? "tv" : "movie";
+  let entry = normalizedType === "tv"
+    ? fastfluxSeriesCache.map.get(safeId)
+    : fastfluxMovieCache.map.get(safeId);
+  if (entry) {
+    return entry;
+  }
+  if (normalizedType === "tv") {
+    await loadFastfluxSeries(true, { minPages: FASTFLUX_SERIES_MAX_PAGES_PER_FEED });
+    entry = fastfluxSeriesCache.map.get(safeId);
+  } else {
+    await loadFastfluxMovies(true, { minPages: FASTFLUX_MOVIES_MAX_PAGES_PER_FEED });
+    entry = fastfluxMovieCache.map.get(safeId);
+  }
+  return entry || null;
+}
+
+function buildAdminCustomEntryFromFastflux(entry, mediaType) {
+  if (!entry || typeof entry !== "object") {
+    return null;
+  }
+  const normalizedType = mediaType === "tv" ? "tv" : "movie";
+  const title = String(entry?.title || entry?.series_name || entry?.name || "").trim();
+  if (!title) {
+    return null;
+  }
+  const year = toInt(entry?.year, 0, 0, 2099);
+  const poster = String(entry?.poster || "").trim();
+  const tmdbId = toInt(entry?.tmdb_id || entry?.tmdbId, 0, 0, 999999999);
+  const externalKey = `fastflux:${normalizedType}:${tmdbId || normalizeTitleKey(title)}`;
+  return normalizeAdminCustomEntry({
+    type: normalizedType,
+    title,
+    year,
+    release_date: year ? `${year}-01-01` : "",
+    overview: "",
+    small_poster_path: poster,
+    large_poster_path: poster,
+    wallpaper_poster_path: poster,
+    external_key: externalKey,
+    external_tmdb_id: tmdbId,
+    external_detail_url: toFastfluxCatalogDetailUrl(normalizedType, tmdbId),
     providerLabel: ZENIX_BRAND_LABEL,
   });
 }
@@ -9036,40 +9718,17 @@ async function fetchNakiosSeasonsByTmdbId(tmdbId) {
 }
 
 async function loadSupplementalCatalogEntries(force = false, options = {}) {
-  const [nakiosRows, filmer2Rows] = await Promise.all([
-    loadNakiosCatalogEntries(force, options),
-    loadFilmer2CatalogEntries(force),
-  ]);
+  const fastfluxRows = await loadFastfluxCatalogEntries(force, options);
   const adminData = loadAdminData();
-  const baseRows = Array.isArray(nakiosRows) ? nakiosRows : [];
-  const filmer2List = Array.isArray(filmer2Rows) ? filmer2Rows : [];
+  const baseRows = Array.isArray(fastfluxRows) ? fastfluxRows : [];
   const bySemantic = new Map();
   baseRows.forEach((row) => {
     const key = buildNakiosSemanticKey(row);
     if (!key || key.startsWith("::")) {
       return;
     }
-    bySemantic.set(key, row);
-  });
-  filmer2List.forEach((row) => {
-    const key = buildNakiosSemanticKey(row);
-    if (!key || key.startsWith("::")) {
-      return;
-    }
     const current = bySemantic.get(key);
-    if (!current) {
-      bySemantic.set(key, row);
-      return;
-    }
-    const currentPriority = getSupplementalAvailabilityPriority(
-      current?.availability_status || current?.external_status
-    );
-    const nextPriority = getSupplementalAvailabilityPriority(
-      row?.availability_status || row?.external_status
-    );
-    if (nextPriority > currentPriority) {
-      bySemantic.set(key, row);
-    }
+    bySemantic.set(key, pickBestNakiosCatalogRow(current, row));
   });
   const mergedRows = Array.from(bySemantic.values());
   const overridden = mergedRows.map((entry) => applyAdminOverride(entry, adminData)).filter(Boolean);
@@ -11116,8 +11775,8 @@ async function fetchHlsUpstreamWithFallback(target, range, signal, method = "GET
   const fastfluxHeaders =
     targetHost.endsWith("fastflux.xyz") || targetHost.endsWith("cdn.fastflux.xyz")
       ? {
-          Referer: "https://noctaflix.lol/",
-          Origin: "https://noctaflix.lol",
+          Referer: `${FASTFLUX_BASE}/`,
+          Origin: FASTFLUX_BASE,
         }
       : null;
   const nakiosHeaders = targetHost.endsWith("nakios.site")
@@ -11935,6 +12594,13 @@ async function handleAdminData(req, res, requestUrl) {
     return true;
   }
   const data = loadAdminData(true);
+  if (Array.isArray(data.custom) && data.custom.length > 0) {
+    const filtered = data.custom.filter((entry) => !isDisallowedExternalEntry(entry));
+    if (filtered.length !== data.custom.length) {
+      data.custom = filtered;
+      saveAdminData(data);
+    }
+  }
   sendJson(res, 200, { data });
   return true;
 }
@@ -11988,6 +12654,9 @@ function parseAdminImportUrl(input) {
   const host = String(parsed.hostname || "").toLowerCase();
   const pathName = String(parsed.pathname || "").toLowerCase();
   if (host.endsWith("nakios.site")) {
+    if (!USE_NAKIOS) {
+      return null;
+    }
     const match = pathName.match(/\/(movie|movies|film|serie|series|tv)\/(?<id>\d+)/i);
     if (!match) {
       return null;
@@ -12000,6 +12669,19 @@ function parseAdminImportUrl(input) {
     const mediaType = typeToken === "serie" || typeToken === "series" || typeToken === "tv" ? "tv" : "movie";
     return { provider: "nakios", mediaType, tmdbId: id };
   }
+  if (host.endsWith("fastflux.xyz")) {
+    const match = pathName.match(/\/(movie|movies|film|serie|series|tv)\/(?<id>\d+)/i);
+    if (!match) {
+      return null;
+    }
+    const id = toInt(match.groups?.id, 0, 0, 999999999);
+    if (id <= 0) {
+      return null;
+    }
+    const typeToken = String(match[1] || "").toLowerCase();
+    const mediaType = typeToken === "serie" || typeToken === "series" || typeToken === "tv" ? "tv" : "movie";
+    return { provider: "fastflux", mediaType, tmdbId: id };
+  }
   if (/anime-sama\.(tv|to)$/i.test(host)) {
     const safe = sanitizeAnimeSamaCatalogUrl(parsed.href);
     if (!safe) {
@@ -12008,6 +12690,9 @@ function parseAdminImportUrl(input) {
     return { provider: "anime-sama", catalogUrl: safe };
   }
   if (host.endsWith(FILMER2_HOST)) {
+    if (!USE_FILMER2) {
+      return null;
+    }
     const match = pathName.match(/\/(movie|tv)\/[^/]+\.html/i);
     if (!match) {
       return null;
@@ -12015,15 +12700,19 @@ function parseAdminImportUrl(input) {
     const mediaType = match[1].toLowerCase() === "tv" ? "tv" : "movie";
     return { provider: "filmer2", mediaType, detailUrl: parsed.href };
   }
-  const movixParsed = parseMovixUrl(parsed.href);
-  if (movixParsed) {
-    return movixParsed;
+  if (USE_MOVIX) {
+    const movixParsed = parseMovixUrl(parsed.href);
+    if (movixParsed) {
+      return movixParsed;
+    }
   }
-  const noctaParsed = parseNoctaUrl(parsed.href);
-  if (noctaParsed) {
-    return noctaParsed;
+  if (USE_NOCTA) {
+    const noctaParsed = parseNoctaUrl(parsed.href);
+    if (noctaParsed) {
+      return noctaParsed;
+    }
   }
-  if (/youtube\.com|youtu\.be/i.test(host)) {
+  if (USE_YOUTUBE && /youtube\.com|youtu\.be/i.test(host)) {
     const playlistId = parseYoutubePlaylistId(parsed.href);
     if (!playlistId) {
       return null;
@@ -12048,6 +12737,11 @@ async function importAdminEntryByUrl(url) {
     if (response.status >= 200 && response.status < 300) {
       const detail = parseJsonSafe(response.body);
       entry = buildAdminCustomEntryFromNakios(detail, parsed.mediaType);
+    }
+  } else if (parsed.provider === "fastflux") {
+    const detail = await fetchFastfluxEntryByTmdbId(parsed.mediaType, parsed.tmdbId);
+    if (detail) {
+      entry = buildAdminCustomEntryFromFastflux(detail, parsed.mediaType);
     }
   } else if (parsed.provider === "anime-sama") {
     const response = await fetchRemoteText(parsed.catalogUrl, "text/html", {
@@ -12151,48 +12845,23 @@ async function handleAdminSearch(req, res, requestUrl) {
   const purstreamPayload = purstreamResponse.status >= 200 && purstreamResponse.status < 300
     ? parseJsonSafe(purstreamResponse.body)
     : null;
-
-  const nakiosTarget = `${NAKIOS_API_BASE}/api/search/multi?query=${encodeURIComponent(query)}`;
-  const nakiosResponse = await fetchRemoteWithTimeout(
-    nakiosTarget,
-    NAKIOS_FETCH_HEADERS,
-    NAKIOS_SOURCE_REMOTE_TIMEOUT_MS
-  );
-  const nakiosPayload = nakiosResponse.status >= 200 && nakiosResponse.status < 300
-    ? parseJsonSafe(nakiosResponse.body)
-    : null;
-
-  let filmer2Results = [];
+  let fastfluxResults = [];
   try {
-    const queryKey = normalizeTitleKey(query);
-    const filmer2Rows = await loadFilmer2CatalogEntries();
-    filmer2Results = Array.isArray(filmer2Rows)
-      ? filmer2Rows
-          .filter((row) => {
-            if (!row || !queryKey) {
-              return false;
-            }
-            const titleKey = normalizeTitleKey(row?.title || "");
-            return titleKey.includes(queryKey);
-          })
-          .slice(0, 40)
-          .map((row) => ({
-            title: row?.title || "",
-            type: row?.type || "movie",
-            year: row?.external_year || row?.year || 0,
-            url: row?.external_detail_url || "",
-          }))
-      : [];
+    const [movieRows, seriesRows] = await Promise.all([
+      searchFastfluxCatalog(query, "movie"),
+      searchFastfluxCatalog(query, "tv"),
+    ]);
+    fastfluxResults = [...(movieRows || []), ...(seriesRows || [])];
   } catch {
-    filmer2Results = [];
+    fastfluxResults = [];
   }
 
   sendJson(res, 200, {
     ok: true,
     query,
+    purstream: purstreamPayload || null,
     primary: purstreamPayload || null,
-    external: nakiosPayload || null,
-    supplemental: filmer2Results,
+    fastflux: fastfluxResults,
   });
   return true;
 }
@@ -12288,7 +12957,9 @@ async function handleAdminSuggestionAccept(req, res, requestUrl) {
 }
 
 async function handleFilmer2Search(req, res, requestUrl) {
-  if (requestUrl.pathname !== "/api/filmer2-search") {
+  const isLegacy = requestUrl.pathname === "/api/filmer2-search";
+  const isZenix = requestUrl.pathname === "/api/zenix-search";
+  if (!isLegacy && !isZenix) {
     return false;
   }
   if (req.method !== "GET") {
@@ -12304,40 +12975,45 @@ async function handleFilmer2Search(req, res, requestUrl) {
   const normalizedType = typeParam === "tv" || typeParam === "movie" ? typeParam : "";
   const safeYear = toInt(requestUrl.searchParams.get("year"), 0, 0, 2099);
   const queryKey = normalizeTitleKey(query);
-  let rows = [];
+  let matches = [];
   try {
-    rows = await loadFilmer2CatalogEntries();
+    if (normalizedType) {
+      const rows = await searchFastfluxCatalog(query, normalizedType);
+      matches = Array.isArray(rows) ? rows : [];
+    } else {
+      const [movies, series] = await Promise.all([
+        searchFastfluxCatalog(query, "movie"),
+        searchFastfluxCatalog(query, "tv"),
+      ]);
+      matches = [...(movies || []), ...(series || [])];
+    }
   } catch {
-    rows = [];
+    matches = [];
   }
-  const matches = Array.isArray(rows)
-    ? rows
-        .filter((row) => {
-          if (!row) {
-            return false;
-          }
-          if (normalizedType) {
-            const rowType = normalizeSupplementalMediaType(row?.type || row?.mediaType || "");
-            if (rowType !== normalizedType) {
-              return false;
-            }
-          }
-          const titleKey = normalizeTitleKey(row?.title || "");
-          return titleKey.includes(queryKey);
-        })
-        .map((row) => ({
-          title: row?.title || "",
-          type: row?.type || "movie",
-          year: row?.external_year || row?.year || 0,
-          url: row?.external_detail_url || "",
-          poster: row?.large_poster_path || row?.small_poster_path || "",
-        }))
-        .filter((row) => row.title && row.url)
-    : [];
-  const scored = matches
+  const normalizedMatches = matches
+    .map((row) => {
+      const tmdbId = toInt(row?.tmdb_id || row?.tmdbId, 0, 0, 999999999);
+      const title = String(row?.title || row?.series_name || row?.name || "").trim();
+      if (!title || !tmdbId) {
+        return null;
+      }
+      const typeRaw = String(row?.type || row?.media_type || "").toLowerCase();
+      const rowType = typeRaw === "series" || typeRaw === "tv" ? "tv" : "movie";
+      return {
+        title,
+        type: rowType,
+        year: toInt(row?.year, 0, 0, 2099),
+        url: buildFastfluxImportUrlFromCandidate({ tmdbId, type: rowType }),
+        poster: row?.poster || "",
+        tmdbId,
+      };
+    })
+    .filter(Boolean)
+    .filter((row) => (normalizedType ? row.type === normalizedType : true));
+  const scored = normalizedMatches
     .map((row) => ({
       row,
-      score: scoreFilmer2SearchEntry(row, queryKey, normalizedType, safeYear),
+      score: scoreFastfluxSearchEntry(row, queryKey, normalizedType, safeYear),
     }))
     .sort((left, right) => right.score - left.score);
   const best = scored[0]?.row || null;
@@ -12469,46 +13145,38 @@ async function handleAdminRepair(req, res, requestUrl) {
     let tmdbId = toInt(entry?.external_tmdb_id || entry?.externalTmdbId, 0, 0, 999999999);
     let repaired = false;
 
-    const match = await resolveNakiosSearchEntry(title, mediaType, year);
-    if (!tmdbId && match?.id) {
-      tmdbId = Number(match.id);
+    if (!tmdbId && title.length >= 2) {
+      tmdbId = await resolveFastfluxTmdbIdBySearch(title, mediaType, year);
     }
 
     if (tmdbId > 0) {
-      const target =
-        mediaType === "tv"
-          ? `${NAKIOS_API_BASE}/api/series/${tmdbId}`
-          : `${NAKIOS_API_BASE}/api/movies/${tmdbId}`;
-      const response = await fetchRemote(target, NAKIOS_FETCH_HEADERS);
-      if (response.status >= 200 && response.status < 300) {
-        const detail = parseJsonSafe(response.body);
-        const normalized = buildAdminCustomEntryFromNakios(detail, mediaType);
-        if (normalized) {
-          if (!entry.external_tmdb_id && normalized.external_tmdb_id) {
-            entry.external_tmdb_id = normalized.external_tmdb_id;
-            repaired = true;
-          }
-          if (!entry.overview && normalized.overview) {
-            entry.overview = normalized.overview;
-            repaired = true;
-          }
-          if ((!entry.small_poster_path || !entry.large_poster_path) && normalized.small_poster_path) {
-            entry.small_poster_path = normalized.small_poster_path;
-            entry.large_poster_path = normalized.large_poster_path || normalized.small_poster_path;
-            repaired = true;
-          }
-          if (!entry.wallpaper_poster_path && normalized.wallpaper_poster_path) {
-            entry.wallpaper_poster_path = normalized.wallpaper_poster_path;
-            repaired = true;
-          }
-          if (!entry.release_date && normalized.release_date) {
-            entry.release_date = normalized.release_date;
-            repaired = true;
-          }
-          if (!entry.year && normalized.year) {
-            entry.year = normalized.year;
-            repaired = true;
-          }
+      const detail = await fetchFastfluxEntryByTmdbId(mediaType, tmdbId);
+      const normalized = detail ? buildAdminCustomEntryFromFastflux(detail, mediaType) : null;
+      if (normalized) {
+        if (!entry.external_tmdb_id && normalized.external_tmdb_id) {
+          entry.external_tmdb_id = normalized.external_tmdb_id;
+          repaired = true;
+        }
+        if (!entry.overview && normalized.overview) {
+          entry.overview = normalized.overview;
+          repaired = true;
+        }
+        if ((!entry.small_poster_path || !entry.large_poster_path) && normalized.small_poster_path) {
+          entry.small_poster_path = normalized.small_poster_path;
+          entry.large_poster_path = normalized.large_poster_path || normalized.small_poster_path;
+          repaired = true;
+        }
+        if (!entry.wallpaper_poster_path && normalized.wallpaper_poster_path) {
+          entry.wallpaper_poster_path = normalized.wallpaper_poster_path;
+          repaired = true;
+        }
+        if (!entry.release_date && normalized.release_date) {
+          entry.release_date = normalized.release_date;
+          repaired = true;
+        }
+        if (!entry.year && normalized.year) {
+          entry.year = normalized.year;
+          repaired = true;
         }
       }
     }
@@ -12517,13 +13185,13 @@ async function handleAdminRepair(req, res, requestUrl) {
     data.custom = custom;
     saveAdminData(data);
 
-    let nakiosCount = 0;
+    let fastfluxCount = 0;
     if (tmdbId > 0) {
       try {
-        const sources = await resolveNakiosSourcesByTmdbId(mediaType, tmdbId, 1, 1);
-        nakiosCount = Array.isArray(sources) ? sources.length : 0;
+        const sources = await resolveFastfluxSourcesByTmdbId(mediaType, tmdbId, 1, 1, { title, year });
+        fastfluxCount = Array.isArray(sources) ? sources.length : 0;
       } catch {
-        nakiosCount = 0;
+        fastfluxCount = 0;
       }
     }
     const ownedCount = readOwnedSourcesForSelection(loadZenixOwnedSourcesData(), mediaType, entry.id, 1, 1).length;
@@ -12537,7 +13205,7 @@ async function handleAdminRepair(req, res, requestUrl) {
         type: mediaType,
         tmdbId: tmdbId || 0,
         ownedCount,
-        nakiosCount,
+        fastfluxCount,
       },
     });
     return true;
@@ -12577,13 +13245,16 @@ async function handleAdminRepair(req, res, requestUrl) {
     }
 
     const tmdbId = toInt(sheet?.data?.media?.tmdbId || sheet?.data?.media?.tmdb_id, 0, 0, 999999999);
-    let nakiosCount = 0;
+    let fastfluxCount = 0;
     if (tmdbId > 0) {
       try {
-        const sources = await resolveNakiosSourcesByTmdbId(mediaType, tmdbId, 1, 1);
-        nakiosCount = Array.isArray(sources) ? sources.length : 0;
+        const sources = await resolveFastfluxSourcesByTmdbId(mediaType, tmdbId, 1, 1, {
+          title: sheet?.data?.media?.title || sheet?.data?.media?.name || "",
+          year: toInt(sheet?.data?.media?.year, 0, 0, 2099),
+        });
+        fastfluxCount = Array.isArray(sources) ? sources.length : 0;
       } catch {
-        nakiosCount = 0;
+        fastfluxCount = 0;
       }
     }
     const ownedCount = readOwnedSourcesForSelection(loadZenixOwnedSourcesData(), mediaType, id, 1, 1).length;
@@ -12598,7 +13269,7 @@ async function handleAdminRepair(req, res, requestUrl) {
         tmdbId: tmdbId || 0,
         ownedCount,
         purstreamCount,
-        nakiosCount,
+        fastfluxCount,
       },
     });
     return true;
@@ -12819,7 +13490,8 @@ function sanitizePublicEntry(entry) {
       provider.includes("anime-sama") ||
       provider.includes("animesama") ||
       provider.includes("filmer2") ||
-      provider.includes("noctaflix")
+      provider.includes("noctaflix") ||
+      provider.includes("fastflux")
     ) {
       next.provider = ZENIX_EXTERNAL_PROVIDER;
     }
@@ -12832,18 +13504,19 @@ function sanitizePublicEntry(entry) {
       source.includes("anime-sama") ||
       source.includes("animesama") ||
       source.includes("filmer2") ||
-      source.includes("noctaflix")
+      source.includes("noctaflix") ||
+      source.includes("fastflux")
     ) {
       next.source = "zenix";
     }
   }
   if (typeof next.supplemental === "string") {
-    if (/purstream|nakios|anime-sama|animesama|filmer2|noctaflix/i.test(next.supplemental)) {
+    if (/purstream|nakios|anime-sama|animesama|filmer2|noctaflix|fastflux/i.test(next.supplemental)) {
       next.supplemental = ZENIX_BRAND_LABEL;
     }
   }
   if (typeof next.url === "string") {
-    if (/purstream|nakios|anime-sama|animesama|filmer2|noctaflix/i.test(next.url)) {
+    if (/purstream|nakios|anime-sama|animesama|filmer2|noctaflix|fastflux/i.test(next.url)) {
       next.url = "";
     }
   }
@@ -12929,18 +13602,6 @@ async function handleCalendarOverview(req, res, requestUrl) {
           const dateIso = toIsoDate(String(entry?.supplemental_date || entry?.release_date || "").trim());
           return Boolean(dateIso) && dateIso.startsWith(monthToken);
         });
-        if (monthlyRows.length > 0) {
-          await hydrateSupplementalRowCovers(monthlyRows, SUPPLEMENTAL_COVER_MAX_PER_RESPONSE);
-          await annotateNakiosAvailability(monthlyRows, {
-            maxProbes: Math.max(
-              24,
-              Math.min(
-                NAKIOS_AVAILABILITY_MAX_PROBES_PER_RESPONSE * 2,
-                monthlyRows.length
-              )
-            ),
-          });
-        }
         supplemental = {
           items: buildSupplementalCalendarItems(monthlyRows, month, year),
         };
@@ -13044,34 +13705,22 @@ async function handleCatalogSupplemental(req, res, requestUrl) {
     let entries = await loadSupplementalCatalogEntries(false);
     if (
       entries.length < desiredCount &&
-      NAKIOS_CATALOG_MAX_PAGES_PER_FEED > NAKIOS_CATALOG_PAGES_PER_FEED &&
-      NAKIOS_CATALOG_FEEDS.length > 0
+      FASTFLUX_MOVIES_MAX_PAGES_PER_FEED > FASTFLUX_MOVIES_PAGES_PER_FEED &&
+      USE_FASTFLUX
     ) {
-      const approxPerPage = Math.max(1, NAKIOS_CATALOG_FEEDS.length * NAKIOS_FEED_PAGE_SIZE_ESTIMATE);
+      const approxPerPage = Math.max(1, FASTFLUX_FEED_PAGE_SIZE_ESTIMATE);
       const pagesNeeded = Math.min(
-        NAKIOS_CATALOG_MAX_PAGES_PER_FEED,
+        FASTFLUX_MOVIES_MAX_PAGES_PER_FEED,
         Math.max(
-          NAKIOS_CATALOG_PAGES_PER_FEED,
-          Math.ceil((desiredCount * 1.35) / approxPerPage)
+          FASTFLUX_MOVIES_PAGES_PER_FEED,
+          Math.ceil((desiredCount * 1.25) / approxPerPage)
         )
       );
-      if (pagesNeeded > Number(nakiosCatalogCache.pagesPerFeed || 0)) {
+      if (pagesNeeded > Number(fastfluxMovieCache.pagesLoaded || 0)) {
         entries = await loadSupplementalCatalogEntries(false, { minPages: pagesNeeded });
       }
     }
     const pageData = buildSupplementalCatalogPage(entries, page, perPage);
-    if (Array.isArray(pageData.data) && pageData.data.length > 0) {
-      await hydrateSupplementalRowCovers(
-        pageData.data,
-        Math.max(12, Math.min(SUPPLEMENTAL_COVER_MAX_PER_RESPONSE, pageData.data.length))
-      );
-      await annotateNakiosAvailability(pageData.data, {
-        maxProbes: Math.max(
-          18,
-          Math.min(NAKIOS_AVAILABILITY_MAX_PROBES_PER_RESPONSE, pageData.data.length)
-        ),
-      });
-    }
     if (Array.isArray(pageData.data)) {
       pageData.data = pageData.data.map(sanitizePublicEntry);
     }
@@ -13213,42 +13862,16 @@ async function handleZenixSeasons(req, res, requestUrl) {
   const year = toInt(requestUrl.searchParams.get("year"), 0, 0, 2099);
   const typeParam = String(requestUrl.searchParams.get("type") || "tv").toLowerCase();
   const mediaType = typeParam === "movie" ? "movie" : "tv";
-  const externalKeyParam = String(requestUrl.searchParams.get("externalKey") || "").trim();
-  const mediaId = toInt(requestUrl.searchParams.get("mediaId"), 0, 0, 999999999);
-
-  const youtubeEntry = resolveYoutubeAdminEntry({
-    title,
-    mediaType,
-    externalKey: externalKeyParam,
-    mediaId,
-  });
-  if (youtubeEntry) {
-    const playlistId = extractYoutubePlaylistIdFromKey(youtubeEntry.external_key);
-    const info = await fetchYoutubePlaylistInfo(playlistId);
-    const items = buildYoutubePlaylistSeasons(info);
-    sendJson(res, 200, {
-      apiVersion: "zenix-seasons-v1",
-      type: "success",
-      data: {
-        tmdbId: 0,
-        items,
-      },
-    });
-    return true;
-  }
-
   if (tmdbId <= 0 && title.length >= 2) {
-    if (!STRICT_NAKIOS_MATCH) {
-      try {
-        tmdbId = await resolveNakiosTmdbIdBySearch(title, mediaType, year);
-      } catch {
-        tmdbId = 0;
-      }
+    try {
+      tmdbId = await resolveFastfluxTmdbIdBySearch(title, mediaType, year);
+    } catch {
+      tmdbId = 0;
     }
   }
 
-  if (tmdbId > 0) {
-    const seasons = await fetchNakiosSeasonsByTmdbId(tmdbId);
+  if (tmdbId > 0 && mediaType === "tv") {
+    const seasons = await resolveFastfluxSeasonsByTmdbId(tmdbId);
     sendJson(res, 200, {
       apiVersion: "zenix-seasons-v1",
       type: "success",
@@ -13260,31 +13883,12 @@ async function handleZenixSeasons(req, res, requestUrl) {
     return true;
   }
 
-  if (title.length < 2) {
-    sendJson(res, 200, {
-      apiVersion: "zenix-seasons-v1",
-      type: "success",
-      data: {
-        tmdbId: 0,
-        items: [],
-      },
-    });
-    return true;
-  }
-
-  let detail = null;
-  try {
-    detail = await resolveFilmer2DetailByTitle(title, mediaType, year);
-  } catch {
-    detail = null;
-  }
-  const seasons = Array.isArray(detail?.seasons) ? detail.seasons : [];
   sendJson(res, 200, {
     apiVersion: "zenix-seasons-v1",
     type: "success",
     data: {
       tmdbId: 0,
-      items: seasons,
+      items: [],
     },
   });
   return true;
@@ -13296,6 +13900,14 @@ async function handleFilmer2Seasons(req, res, requestUrl) {
   }
   if (req.method !== "GET") {
     sendJson(res, 405, { error: "Method Not Allowed" });
+    return true;
+  }
+  if (!USE_FILMER2) {
+    sendJson(res, 200, {
+      apiVersion: "zenix-seasons-v1",
+      type: "success",
+      data: { title: "", items: [] },
+    });
     return true;
   }
   const url = String(requestUrl.searchParams.get("url") || "").trim();
@@ -13326,6 +13938,14 @@ async function handleNakiosSeasons(req, res, requestUrl) {
   }
   if (req.method !== "GET") {
     sendJson(res, 405, { error: "Method Not Allowed" });
+    return true;
+  }
+  if (!USE_NAKIOS) {
+    sendJson(res, 200, {
+      apiVersion: "zenix-seasons-v1",
+      type: "success",
+      data: { tmdbId: 0, items: [] },
+    });
     return true;
   }
   let tmdbId = toInt(requestUrl.searchParams.get("tmdbId"), 0, 0, 999999999);
@@ -13384,51 +14004,6 @@ async function handleZenixSource(req, res, requestUrl) {
   const externalKeyParam = String(requestUrl.searchParams.get("externalKey") || "").trim();
   const mediaId = toInt(requestUrl.searchParams.get("mediaId"), 0, 0, 999999999);
   let tmdbId = toInt(requestUrl.searchParams.get("tmdbId"), 0, 0, 999999999);
-  const movixKeyParsed = parseMovixExternalKey(externalKeyParam);
-  if (movixKeyParsed && movixKeyParsed.mediaType === mediaType && tmdbId <= 0) {
-    tmdbId = movixKeyParsed.tmdbId;
-  }
-
-  const youtubeEntry = resolveYoutubeAdminEntry({
-    title,
-    mediaType,
-    externalKey: externalKeyParam,
-    mediaId,
-  });
-  if (youtubeEntry) {
-    const playlistId = extractYoutubePlaylistIdFromKey(youtubeEntry.external_key);
-    const info = await fetchYoutubePlaylistInfo(playlistId);
-    const match = pickYoutubePlaylistItem(info, episode);
-    const embedUrl = match ? buildYoutubeEmbedUrl(match.videoId) : "";
-    const sources = embedUrl
-      ? [
-          {
-            stream_url: embedUrl,
-            source_name: ZENIX_BRAND_LABEL,
-            quality: "HD",
-            language: String(youtubeEntry?.language || youtubeEntry?.lang || "VO").trim() || "VO",
-            format: "embed",
-            priority: 260,
-          },
-        ]
-      : [];
-    sendJson(res, 200, {
-      apiVersion: "zenix-source-v1",
-      type: "success",
-      data: {
-        title: String(youtubeEntry?.title || title || "").trim(),
-        mediaType,
-        year,
-        season: mediaType === "tv" ? season : 1,
-        episode: mediaType === "tv" ? episode : 1,
-        tmdbId: 0,
-        count: sources.length,
-        sources,
-      },
-    });
-    return true;
-  }
-
   const isCarsQuatreRoues = isCarsQuatreRouesTarget(title, tmdbId);
   if (mediaType === "movie" && isCarsQuatreRoues && PURSTREAM_CARS_DEBUG_URL) {
     const proxiedUrl = buildHlsProxyPath(PURSTREAM_CARS_DEBUG_URL);
@@ -13484,255 +14059,39 @@ async function handleZenixSource(req, res, requestUrl) {
     });
     return true;
   }
-
-  const noctaEntry = resolveNoctaAdminEntry({
-    title,
-    mediaType,
-    externalKey: externalKeyParam,
-    mediaId,
-  });
-  const forcedNoctaUrl = !noctaEntry ? resolveNoctaForcedUrl(title, tmdbId, mediaId) : "";
-  const isScream7 = isScream7Target(title, tmdbId, mediaId);
-  const isBanlieusards3 = isBanlieusards3Target(title);
-  if (noctaEntry || forcedNoctaUrl) {
-    const detailUrl =
-      String(noctaEntry?.external_detail_url || noctaEntry?.detailUrl || noctaEntry?.pageUrl || forcedNoctaUrl || "")
-        .trim() || "";
-    let noctaSources = [];
-    if (detailUrl) {
-      try {
-        noctaSources = await resolveNoctaSourcesByDetailUrl(detailUrl);
-      } catch {
-        noctaSources = [];
-      }
-    }
-    if ((isScream7 && NOCTA_SCREAM7_DEBUG_URL) || (isBanlieusards3 && NOCTA_BANLIEUSARDS3_DEBUG_URL)) {
-      const debugUrl = isScream7 ? NOCTA_SCREAM7_DEBUG_URL : NOCTA_BANLIEUSARDS3_DEBUG_URL;
-      const proxiedUrl = buildHlsProxyPath(debugUrl);
-      noctaSources = [
-        {
-          stream_url: proxiedUrl,
-          source_name: isScream7 ? "Scream 7 Debug" : "Banlieusards 3 Debug",
-          debug: true,
-          quality: "HD",
-          language: "VF",
-          format: "mp4",
-          priority: 402,
-        },
-      ];
-    }
-    if (noctaSources.length > 0) {
-      sendJson(res, 200, {
-        apiVersion: "zenix-source-v1",
-        type: "success",
-        data: {
-          title: String(noctaEntry?.title || title || "").trim(),
-          mediaType,
-          year: year > 0 ? year : toInt(noctaEntry?.year, 0, 0, 2099),
-          season: mediaType === "tv" ? season : 1,
-          episode: mediaType === "tv" ? episode : 1,
-          tmdbId: 0,
-          count: noctaSources.length,
-          sources: noctaSources,
-        },
-      });
-      return true;
-    }
-  }
-
-  let movixEntry = resolveMovixAdminEntry({
-    title,
-    mediaType,
-    externalKey: externalKeyParam,
-    tmdbId,
-  });
-  if (movixEntry && tmdbId <= 0) {
-    tmdbId = toInt(movixEntry?.external_tmdb_id || movixEntry?.externalTmdbId, 0, 0, 999999999);
-  }
-
-  if (tmdbId > 0 && title) {
+  if (tmdbId <= 0 && title.length >= 2) {
     try {
-      const detail = await fetchNakiosDetailByTmdbId(mediaType, tmdbId);
-      const detailTitle = String(detail?.title || detail?.name || "").trim();
-      const detailYear = toInt(parseYearFromText(detail?.release_date || detail?.first_air_date || ""), 0, 0, 2099);
-      if (detailTitle && !isStrongTitleMatch(title, detailTitle)) {
-        tmdbId = 0;
-      } else if (year > 0 && detailYear > 0 && Math.abs(detailYear - year) > 1) {
-        tmdbId = 0;
-      }
-    } catch {
-      // keep tmdbId if detail check fails
-    }
-  }
-
-  if (tmdbId <= 0) {
-    if (STRICT_NAKIOS_MATCH) {
-      // Attempt a strict title-based lookup before returning empty.
-      if (title.length >= 2) {
-        try {
-          tmdbId = await resolveNakiosTmdbIdBySearch(title, mediaType, year, { requireStrongMatch: true });
-          if (tmdbId <= 0 && cleanedTitle && cleanedTitle !== title) {
-            tmdbId = await resolveNakiosTmdbIdBySearch(cleanedTitle, mediaType, year, { requireStrongMatch: true });
-          }
-          if (tmdbId <= 0 && year > 0) {
-            tmdbId = await resolveNakiosTmdbIdBySearch(cleanedTitle || title, mediaType, 0, {
-              requireStrongMatch: true,
-            });
-          }
-        } catch {
-          tmdbId = 0;
-        }
-      }
-      if (tmdbId <= 0) {
-        sendJson(res, 200, {
-          apiVersion: "zenix-source-v1",
-          type: "success",
-          data: {
-            title,
-            mediaType,
-            year,
-            season: mediaType === "tv" ? season : 1,
-            episode: mediaType === "tv" ? episode : 1,
-            tmdbId: 0,
-            count: 0,
-            sources: [],
-          },
-        });
-        return true;
-      }
-    }
-    if (title.length < 2) {
-      sendJson(res, 200, {
-        apiVersion: "zenix-source-v1",
-        type: "success",
-        data: {
-          title,
-          mediaType,
-          year,
-          season: mediaType === "tv" ? season : 1,
-          episode: mediaType === "tv" ? episode : 1,
-          tmdbId: 0,
-          count: 0,
-          sources: [],
-        },
-      });
-      return true;
-    }
-    try {
-      tmdbId = await resolveNakiosTmdbIdBySearch(title, mediaType, year);
+      tmdbId = await resolveFastfluxTmdbIdBySearch(title, mediaType, year);
       if (tmdbId <= 0 && cleanedTitle && cleanedTitle !== title) {
-        tmdbId = await resolveNakiosTmdbIdBySearch(cleanedTitle, mediaType, year);
+        tmdbId = await resolveFastfluxTmdbIdBySearch(cleanedTitle, mediaType, year);
       }
       if (tmdbId <= 0 && year > 0) {
-        tmdbId = await resolveNakiosTmdbIdBySearch(cleanedTitle || title, mediaType, 0);
+        tmdbId = await resolveFastfluxTmdbIdBySearch(cleanedTitle || title, mediaType, 0);
       }
     } catch {
       tmdbId = 0;
     }
   }
 
-  if (!movixEntry && tmdbId > 0) {
-    movixEntry = resolveMovixAdminEntry({
-      mediaType,
-      tmdbId,
-    });
-  }
-
   let sources = [];
-  let incompatibleCount = 0;
-  if (tmdbId > 0) {
+  if (tmdbId > 0 || title.length >= 2) {
     try {
-      sources = await resolveNakiosSourcesByTmdbId(mediaType, tmdbId, season, episode);
+      sources = await resolveFastfluxSourcesByTmdbId(mediaType, tmdbId, season, episode, {
+        title,
+        year,
+      });
+      if (sources.length === 0 && cleanedTitle && cleanedTitle !== title) {
+        sources = await resolveFastfluxSourcesByTmdbId(mediaType, tmdbId, season, episode, {
+          title: cleanedTitle,
+          year,
+        });
+      }
     } catch {
       sources = [];
     }
   }
-  if (sources.length > 0) {
-    const filtered = filterNakiosSourcesByTitle(sources, { title, year, tmdbId });
-    sources = filtered.sources;
-    incompatibleCount = filtered.incompatible;
-  }
 
-  if (!movixEntry && sources.length === 0 && title.length >= 2) {
-    if (STRICT_NAKIOS_MATCH) {
-      // strict mode: no fuzzy fallback when tmdbId missing/mismatched
-    } else if (year > 0) {
-      try {
-        const altTmdbId = await resolveNakiosTmdbIdBySearch(cleanedTitle || title, mediaType, 0);
-        if (altTmdbId > 0 && altTmdbId !== tmdbId) {
-          const altSources = await resolveNakiosSourcesByTmdbId(mediaType, altTmdbId, season, episode);
-          if (Array.isArray(altSources) && altSources.length > 0) {
-            sources = altSources;
-            tmdbId = altTmdbId;
-          }
-        }
-      } catch {
-        // fallback below
-      }
-    }
-  }
-
-  if (sources.length === 0 && title.length >= 2) {
-    let detail = null;
-    try {
-      detail = await resolveFilmer2DetailByTitle(cleanedTitle || title, mediaType, year);
-    } catch {
-      detail = null;
-    }
-    const dedupe = new Set();
-    const filmerSources = Array.isArray(detail?.sources)
-      ? detail.sources
-          .map((src, index) => {
-            const streamUrl = String(src || "").trim();
-            if (!streamUrl || dedupe.has(streamUrl)) {
-              return null;
-            }
-            dedupe.add(streamUrl);
-            return {
-              stream_url: streamUrl,
-              source_name: ZENIX_BRAND_LABEL,
-              quality: "HD",
-              language: "VF",
-              format: inferOwnedSourceFormat(streamUrl, "mp4"),
-              priority: 320 - Math.min(40, index * 4),
-            };
-          })
-          .filter(Boolean)
-      : [];
-    sources = filmerSources;
-  }
-
-  if (movixEntry && tmdbId > 0) {
-    let movixSources = [];
-    try {
-      movixSources = await resolveMovixSourcesByTmdbId(mediaType, tmdbId, season, episode);
-    } catch {
-      movixSources = [];
-    }
-    if (movixSources.length > 0) {
-      const combined = [];
-      const dedupe = new Set();
-      const pushUnique = (entry) => {
-        if (!entry) {
-          return;
-        }
-        const key = String(entry?.stream_url || entry?.url || "").trim();
-        if (!key || dedupe.has(key)) {
-          return;
-        }
-        dedupe.add(key);
-        combined.push(entry);
-      };
-      movixSources.forEach(pushUnique);
-      sources.forEach(pushUnique);
-      sources = combined;
-    }
-  }
-
-  const warning =
-    incompatibleCount > 0
-      ? "Sources incompatibles detectees et retirees automatiquement."
-      : "";
+  const warning = !USE_FASTFLUX ? "FastFlux indisponible." : "";
   sendJson(res, 200, {
     apiVersion: "zenix-source-v1",
     type: "success",
@@ -13757,6 +14116,10 @@ async function handleFilmer2Source(req, res, requestUrl) {
   }
   if (req.method !== "GET") {
     sendJson(res, 405, { error: "Method Not Allowed" });
+    return true;
+  }
+  if (!USE_FILMER2) {
+    sendJson(res, 200, { apiVersion: "zenix-source-v1", type: "success", data: { title: "", count: 0, sources: [] } });
     return true;
   }
   const url = String(requestUrl.searchParams.get("url") || "").trim();
@@ -13807,6 +14170,14 @@ async function handleNakiosSource(req, res, requestUrl) {
   }
   if (req.method !== "GET") {
     sendJson(res, 405, { error: "Method Not Allowed" });
+    return true;
+  }
+  if (!USE_NAKIOS) {
+    sendJson(res, 200, {
+      apiVersion: "zenix-source-v1",
+      type: "success",
+      data: { title: "", mediaType: "movie", year: 0, season: 1, episode: 1, tmdbId: 0, count: 0, sources: [] },
+    });
     return true;
   }
 

@@ -73,7 +73,7 @@ const STREAM_DIRECT_TIMEOUT_MS = 5200;
 const STREAM_DIRECT_PREFETCH_TIMEOUT_MS = 3600;
 const ANIME_SIBNET_TIMEOUT_MS = 11000;
 const ZENIX_OWNED_SOURCE_TIMEOUT_MS = 7000;
-const NAKIOS_SOURCE_TIMEOUT_MS = 20000;
+const EXTERNAL_SOURCE_TIMEOUT_MS = 20000;
 const SUPPLEMENTAL_CATALOG_TIMEOUT_MS = 14000;
 const EPISODE_SOON_VERIFY_TTL_MS = 3 * 60 * 1000;
 const EPISODE_SOON_VERIFY_LIMIT = 40;
@@ -7217,11 +7217,11 @@ function normalizeCatalogItem(raw) {
   const externalProvider = String(raw?.external_provider || raw?.externalProvider || "")
     .trim()
     .toLowerCase();
-  if (externalProvider && externalProvider !== "nakios" && externalProvider !== "zenix") {
+  if (externalProvider && externalProvider !== "zenix") {
     return null;
   }
-  if ((externalProvider === "nakios" || externalProvider === "zenix") && isAnime) {
-    // Nakios anime rows are intentionally excluded.
+  if (externalProvider === "zenix" && isAnime) {
+    // External anime rows are intentionally excluded.
     return null;
   }
   const externalSeason = Math.max(0, Number(raw?.external_season ?? raw?.externalSeason ?? 0));
@@ -12841,7 +12841,7 @@ async function fetchDebugOnlySources(item) {
 
   try {
     const payload = await fetchJson(`${API_BASE}/zenix-source?${params.toString()}`, {
-      timeoutMs: NAKIOS_SOURCE_TIMEOUT_MS,
+      timeoutMs: EXTERNAL_SOURCE_TIMEOUT_MS,
       retryDelays: [350, 900],
     });
     const raw = Array.isArray(payload?.data?.sources) ? payload.data.sources : [];
@@ -12888,7 +12888,7 @@ async function appendNakiosSources(item, season, episode, sources) {
 
   const runFetch = async () =>
     fetchJson(`${API_BASE}/zenix-source?${params.toString()}`, {
-      timeoutMs: NAKIOS_SOURCE_TIMEOUT_MS,
+      timeoutMs: EXTERNAL_SOURCE_TIMEOUT_MS,
       retryDelays: [400, 1000],
     });
 
@@ -12985,68 +12985,7 @@ function isFilmer2DetailUrl(url) {
 
 async function appendFilmer2Sources(item, season, episode, sources) {
   const base = Array.isArray(sources) ? sources.slice() : [];
-  if (!item) {
-    return base;
-  }
-  const title = String(item?.title || "").trim();
-  const externalKey = String(item?.externalKey || item?.external_key || "").trim();
-  if (!title) {
-    return base;
-  }
-  const mediaType = item?.type === "tv" ? "tv" : "movie";
-  const year = getItemReleaseYear(item) || getCatalogReleaseYear(item);
-  const params = new URLSearchParams({
-    title,
-    type: mediaType,
-    season: String(Math.max(1, Number(season || 1))),
-    episode: String(Math.max(1, Number(episode || 1))),
-  });
-  if (externalKey) {
-    params.set("externalKey", externalKey);
-  }
-  const tmdbId = await resolveNakiosTmdbId(item);
-  if (tmdbId > 0) {
-    params.set("tmdbId", String(tmdbId));
-  }
-  if (year > 0) {
-    params.set("year", String(year));
-  }
-  try {
-    const payload = await fetchJson(`${API_BASE}/zenix-source?${params.toString()}`, {
-      timeoutMs: NAKIOS_SOURCE_TIMEOUT_MS,
-      retryDelays: [400, 900],
-    });
-    const raw = Array.isArray(payload?.data?.sources) ? payload.data.sources : [];
-    if (raw.length === 0) {
-      return base;
-    }
-    const existing = new Set(base.map((entry) => getSourceDedupKey(entry)).filter(Boolean));
-    const filmer2Sources = raw
-      .map((entry, index) =>
-        normalizeSourceEntry(
-          {
-            ...entry,
-            source_name: String(entry?.source_name || entry?.name || "Zenix").trim() || "Zenix",
-          },
-          index
-        )
-      )
-      .filter(Boolean)
-      .filter((entry) => {
-        const key = getSourceDedupKey(entry);
-        if (!key || existing.has(key)) {
-          return false;
-        }
-        existing.add(key);
-        return true;
-      });
-    if (filmer2Sources.length === 0) {
-      return base;
-    }
-    return base.concat(filmer2Sources);
-  } catch {
-    return base;
-  }
+  return base;
 }
 
 
@@ -13133,7 +13072,7 @@ async function fetchFilmer2SourcesForItem(item, season = 1, episode = 1) {
   }
   try {
     const payload = await fetchJson(`${API_BASE}/zenix-source?${params.toString()}`, {
-      timeoutMs: NAKIOS_SOURCE_TIMEOUT_MS,
+      timeoutMs: EXTERNAL_SOURCE_TIMEOUT_MS,
       retryDelays: [400, 900],
     });
     const raw = Array.isArray(payload?.data?.sources) ? payload.data.sources : [];
@@ -13175,13 +13114,13 @@ async function attemptExternalRescue(item, season = 1, episode = 1, options = {}
       return { item: internalCandidate, sources: [], detailUrl: "", mode: "purstream" };
     }
   }
-  const filmer2Result = await fetchFilmer2SourcesForItem(item, safeSeason, safeEpisode);
-  if (Array.isArray(filmer2Result.sources) && filmer2Result.sources.length > 0) {
+  const externalSources = await appendNakiosSources(item, safeSeason, safeEpisode, []);
+  if (Array.isArray(externalSources) && externalSources.length > 0) {
     return {
       item,
-      sources: filmer2Result.sources,
-      detailUrl: filmer2Result.detailUrl,
-      mode: "filmer2",
+      sources: externalSources,
+      detailUrl: "",
+      mode: "zenix",
     };
   }
   return null;
@@ -14108,7 +14047,7 @@ function isBlockedPlaybackSourceUrl(rawUrl, formatHint = "") {
   }
 
   const looksDirectMedia = /\.(m3u8|mp4|webm|m4s|mpd)(?:$|\?)/i.test(withQuery);
-  if (format === "embed" && !looksDirectMedia && /(?:^|\.)nakios\.site$/.test(host)) {
+  if (format === "embed" && !looksDirectMedia && /(?:^|\.)fastflux\.xyz$/.test(host)) {
     return true;
   }
 

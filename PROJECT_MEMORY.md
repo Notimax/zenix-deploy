@@ -16,6 +16,17 @@ Last update: 2026-03-11
   - "Pour toi" excludes watched and liked titles
   - Focus on unseen content based on searches, likes, and watch history
 
+## Current external provider (2026-03-16)
+- FastFlux is now the only external provider for movies/series.
+- Nakios / Filmer2 / Movix / Noctaflix / YouTube integrations are disabled.
+- Supplemental catalog + calendar + /api/zenix-source + admin search/import/suggestions use FastFlux.
+- VPS env required: `FASTFLUX_API_KEY` (optional tuning envs: `FASTFLUX_MOVIES_PAGES_PER_FEED`, `FASTFLUX_MOVIES_MAX_PAGES_PER_FEED`,
+  `FASTFLUX_SERIES_PAGES_PER_FEED`, `FASTFLUX_SERIES_MAX_PAGES_PER_FEED`, `FASTFLUX_FEED_PAGE_SIZE_ESTIMATE`, `FASTFLUX_CATALOG_CACHE_MS`).
+- c299 follow-up:
+  - Frontend accepts only external provider `zenix` (FastFlux) and blocks external anime rows.
+  - Filmer2 merge path removed; external rescue uses Zenix/FastFlux only.
+  - Admin data auto-prunes disallowed external custom entries.
+
 ## Visual system policy (c137)
 - Keep unified visual tokens across the UI:
   - coherent radii/shadows/spacing

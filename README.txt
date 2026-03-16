@@ -1,5 +1,5 @@
 ZENIX STREAM - OPERATIONS MEMORY
-Last updated: 2026-03-11
+Last updated: 2026-03-16
 
 LIVE DOMAIN
 - https://zenix.best
@@ -1228,4 +1228,32 @@ LATEST SOURCE MATCH + ADBLOCK FALLBACK (2026-03-15, c297)
 - If tmdbId appears mismatched with title/year, we invalidate it and perform a strict title search before returning sources.
 - Added adblock fallback overlay (inline styles) to ensure gate is visible even when blockers hide standard UI.
 - Added global error/rejection hooks to trigger UI recovery if runtime errors occur.
+
+LATEST FASTFLUX MIGRATION (2026-03-16, c298)
+- External provider switched to FastFlux (noctaflix partner):
+  - Supplemental catalog + calendar now pull from FastFlux only.
+  - /api/zenix-source resolves FastFlux sources (movies + series).
+  - /api/zenix-seasons builds seasons from FastFlux series episodes.
+- Disabled runtime integrations for Nakios / Filmer2 / Movix / Noctaflix / YouTube (kept only Purstream + Anime-Sama).
+- Admin:
+  - Search now queries FastFlux.
+  - Import accepts https://fastflux.xyz/movie/{tmdbId} or /series/{tmdbId}.
+  - Repair reports FastFlux source counts.
+  - Suggestions pull from FastFlux catalog.
+- Provider masking now also strips FastFlux in public payloads.
+- HLS proxy referer for fastflux hosts uses fastflux.xyz.
+- New env required on VPS:
+  - FASTFLUX_API_KEY=<key>
+  - optional tuning: FASTFLUX_MOVIES_PAGES_PER_FEED, FASTFLUX_MOVIES_MAX_PAGES_PER_FEED,
+    FASTFLUX_SERIES_PAGES_PER_FEED, FASTFLUX_SERIES_MAX_PAGES_PER_FEED,
+    FASTFLUX_FEED_PAGE_SIZE_ESTIMATE, FASTFLUX_CATALOG_CACHE_MS.
+
+LATEST FASTFLUX CLEANUP (2026-03-16, c299)
+- Frontend now only accepts external provider "zenix" (FastFlux) and excludes external anime rows.
+- Removed Filmer2 merge calls to avoid duplicate /api/zenix-source fetches.
+- External rescue now relies on Zenix/FastFlux sources only.
+- Embed blocklist updated for fastflux host.
+- Admin data auto-prunes disallowed external custom entries on load.
+- Admin UI removed Filmer2-specific custom matching.
+- Cache-bust bumped to `20260316-c299`.
 
