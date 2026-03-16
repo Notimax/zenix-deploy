@@ -1313,3 +1313,8 @@ BOOT DOUBLE-LOAD GUARD (2026-03-16, c310)
   preventing duplicate `const` declarations.
 - Cache-bust bumped to `20260316-c310`.
 
+FASTFLUX EMBED HLS FIX (2026-03-16, c311)
+- `.m3u8` URLs (even if they contain `/embed/`) are now treated as HLS, not iframe embeds.
+- This forces FastFlux HLS sources through the proxy and fixes iOS X-Frame-Options blocks.
+- Cache-bust bumped to `20260316-c311`.
+

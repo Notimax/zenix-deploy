@@ -1,5 +1,5 @@
 ﻿const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260316-c310";
+const ZENIX_BUILD_VERSION = "20260316-c311";
 const STORAGE_KEY = "zenix-progress-v4";
 if (typeof window !== "undefined") {
   window.__zenixBooted = false;
@@ -15162,6 +15162,9 @@ function isEmbedSource(source, url = "") {
   }
   const raw = String(url || source?.url || "").trim().toLowerCase();
   if (!raw) {
+    return false;
+  }
+  if (/\.m3u8($|[?#])/i.test(raw)) {
     return false;
   }
   return /video\.sibnet\.ru\/shell\.php/i.test(raw) || /\/embed[-_/]/i.test(raw);

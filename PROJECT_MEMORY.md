@@ -51,6 +51,8 @@ Last update: 2026-03-16
   - Inline JS fallback now triggers only on core script error to avoid double-load `Identifier has already been declared` crashes.
 - c310 follow-up:
   - Booting flag prevents fallback/watchdog JS injection while main script is executing (avoids duplicate const errors).
+- c311 follow-up:
+  - `.m3u8` URLs containing `/embed/` are now treated as HLS (not iframe) in server + frontend, so FastFlux sources proxy correctly on iOS.
 
 ## Visual system policy (c137)
 - Keep unified visual tokens across the UI:

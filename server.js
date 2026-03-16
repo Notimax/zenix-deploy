@@ -10256,11 +10256,11 @@ function inferOwnedSourceFormat(url, hint = "") {
   }
 
   const cleanUrl = String(url || "").split("#")[0].split("?")[0].toLowerCase();
-  if (/video\.sibnet\.ru\/shell\.php/i.test(cleanUrl) || /\/embed[-_/]/i.test(cleanUrl)) {
-    return "embed";
-  }
   if (cleanUrl.endsWith(".m3u8")) {
     return "hls";
+  }
+  if (/video\.sibnet\.ru\/shell\.php/i.test(cleanUrl) || /\/embed[-_/]/i.test(cleanUrl)) {
+    return "embed";
   }
   if (cleanUrl.endsWith(".mp4")) {
     return "mp4";
