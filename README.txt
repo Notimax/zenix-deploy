@@ -1267,3 +1267,8 @@ FASTFLUX TYPE FALLBACK (2026-03-16, c301)
   using title search to recover sources (helps cases like War Machine).
 - Cache-bust bumped to `20260316-c301`.
 
+FASTFLUX PRIORITY + SOURCES ONLY (2026-03-16, c302)
+- Duplicate catalog entries now prefer FastFlux (`externalProvider=zenix`) over Purstream.
+- External titles use only FastFlux sources (no owned/repair/relay merges).
+- Cache-bust bumped to `20260316-c302`.
+

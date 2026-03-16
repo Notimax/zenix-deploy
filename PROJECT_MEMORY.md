@@ -30,6 +30,9 @@ Last update: 2026-03-11
   - FastFlux sources now keep their label (`FastFlux`) and show a FastFlux badge in player chips.
 - c301 follow-up:
   - FastFlux source lookup retries the opposite media type (movie/tv) when the first pass is empty.
+- c302 follow-up:
+  - FastFlux external entries now override Purstream duplicates.
+  - External playback uses FastFlux sources only.
 
 ## Visual system policy (c137)
 - Keep unified visual tokens across the UI:

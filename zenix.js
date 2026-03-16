@@ -7034,13 +7034,17 @@ function mergeCatalogSemanticItem(existing, incoming) {
     .toLowerCase();
   const existingIsExternal = Boolean(existingProvider || existing?.isExternal);
   const incomingIsExternal = Boolean(incomingProvider || incoming?.isExternal);
+  const existingIsFastflux = existingProvider === "zenix";
+  const incomingIsFastflux = incomingProvider === "zenix";
   let winnerProvider = String(
     winner?.externalProvider || winner?.external_provider || ""
   )
     .trim()
     .toLowerCase();
-  if (existingIsExternal !== incomingIsExternal) {
-    // If one side is internal and the other external, keep internal ownership after semantic merge.
+  if (existingIsFastflux !== incomingIsFastflux) {
+    winnerProvider = incomingIsFastflux ? incomingProvider : existingProvider;
+  } else if (existingIsExternal !== incomingIsExternal) {
+    // Default: keep internal ownership unless the external is FastFlux (handled above).
     winnerProvider = "";
   }
   if (winnerProvider) {
@@ -11735,12 +11739,8 @@ async function resolveEpisodePayloadWithStrategy(item, season = 1, episode = 1) 
 
 async function resolveExternalItemSources(item) {
   const { season, episode } = getExternalPlaybackContext(item);
-  const ownedMerged = await appendZenixOwnedSources(item, season, episode, []);
-  const nakiosMerged = await appendNakiosSources(item, season, episode, ownedMerged);
-  const filmer2Merged = await appendFilmer2Sources(item, season, episode, nakiosMerged);
-  const filtered = filterMovieSourcesForFrench(filmer2Merged);
-  const repaired = await appendRepairSources(item, season, episode, filtered);
-  const relayed = appendAutoZenixRelaySources(repaired);
+  const fastfluxOnly = await appendNakiosSources(item, season, episode, []);
+  const relayed = filterMovieSourcesForFrench(fastfluxOnly);
   return {
     sources: relayed,
     season,
