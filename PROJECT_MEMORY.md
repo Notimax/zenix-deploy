@@ -39,6 +39,8 @@ Last update: 2026-03-11
   - Admin repair now retries FastFlux with movie/tv fallback and year-less lookup when needed.
 - c305 follow-up:
   - Player repair button label updated to "CLIQUE ICI POR REPARER".
+- c306 follow-up:
+  - Added asset version guard and JS/CSS preloads + inline fallback to reduce blank UI risk.
 
 ## Visual system policy (c137)
 - Keep unified visual tokens across the UI:

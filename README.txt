@@ -1286,3 +1286,8 @@ REPAIR BUTTON LABEL (2026-03-16, c305)
 - Player repair button label updated to "CLIQUE ICI POR REPARER".
 - Cache-bust bumped to `20260316-c305`.
 
+BOOT HARDENING (2026-03-16, c306)
+- Added asset version guard to force a one-time hard reload if HTML/JS versions mismatch.
+- Added JS/CSS preloads plus a fetch+inline JS fallback if the main script fails.
+- Cache-bust bumped to `20260316-c306`.
+

@@ -1,8 +1,13 @@
 ﻿const API_BASE = "/api";
+const ZENIX_BUILD_VERSION = "20260316-c306";
 const STORAGE_KEY = "zenix-progress-v4";
 if (typeof window !== "undefined") {
   window.__zenixBooted = false;
   window.__zenixBootError = false;
+  window.__ZENIX_ACTUAL_JS = ZENIX_BUILD_VERSION;
+  try {
+    ensureAssetVersionMatch();
+  } catch (e) {}
 }
 const FAVORITES_KEY = "zenix-favorites-v1";
 const FAVORITES_BACKUP_KEY = "zenix-favorites-backup-v1";
@@ -1505,6 +1510,17 @@ function forceUiReloadOnce() {
       window.location.reload();
     }
   }, 250);
+}
+
+function ensureAssetVersionMatch() {
+  try {
+    const expected = typeof window !== "undefined" ? window.__ZENIX_ASSET_VERSION : "";
+    if (expected && expected != ZENIX_BUILD_VERSION) {
+      forceUiReloadOnce();
+    }
+  } catch {
+    // ignore
+  }
 }
 
 function getUiHealthSnapshot() {
