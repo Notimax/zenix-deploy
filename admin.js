@@ -72,6 +72,12 @@ const refs = {
   selectedDeleteBtn: document.getElementById("adminSelectedDeleteBtn"),
   selectedStatus: document.getElementById("adminSelectedStatus"),
   customStatus: document.getElementById("customStatus"),
+  analyticsLive: document.getElementById("adminAnalyticsLive"),
+  analytics24h: document.getElementById("adminAnalytics24h"),
+  analytics48h: document.getElementById("adminAnalytics48h"),
+  analyticsTotal: document.getElementById("adminAnalyticsTotal"),
+  analyticsUpdated: document.getElementById("adminAnalyticsUpdated"),
+  analyticsStatus: document.getElementById("adminAnalyticsStatus"),
 };
 
 const FASTFLUX_BASE = "https://fastflux.xyz";
@@ -80,6 +86,7 @@ const state = {
   data: null,
   searchSeq: 0,
   searchTimer: 0,
+  analyticsTimer: 0,
   lastQuery: "",
   selectedItem: null,
   customById: new Map(),
@@ -639,6 +646,45 @@ function renderAnnouncement(data) {
   }
 }
 
+function renderAnalyticsCounters(payload) {
+  if (!payload) return;
+  if (refs.analyticsLive) refs.analyticsLive.textContent = String(payload.activeNow ?? 0);
+  if (refs.analytics24h) refs.analytics24h.textContent = String(payload.unique24h ?? 0);
+  if (refs.analytics48h) refs.analytics48h.textContent = String(payload.unique48h ?? 0);
+  if (refs.analyticsTotal) refs.analyticsTotal.textContent = String(payload.totalSeen ?? 0);
+  if (refs.analyticsUpdated) {
+    const stamp = payload.generatedAt ? new Date(payload.generatedAt).toLocaleString("fr-FR") : "";
+    refs.analyticsUpdated.textContent = stamp ? `Maj: ${stamp}` : "";
+  }
+  if (refs.analyticsStatus) refs.analyticsStatus.textContent = "";
+}
+
+async function refreshAnalytics() {
+  if (!refs.analyticsLive) return;
+  try {
+    const payload = await apiFetch("/api/admin/analytics");
+    renderAnalyticsCounters(payload.data || {});
+  } catch (err) {
+    if (refs.analyticsStatus) {
+      refs.analyticsStatus.textContent = err.message || "Erreur compteurs.";
+    }
+  }
+}
+
+function startAnalyticsPolling() {
+  if (!refs.analyticsLive) return;
+  stopAnalyticsPolling();
+  refreshAnalytics();
+  state.analyticsTimer = setInterval(refreshAnalytics, 30000);
+}
+
+function stopAnalyticsPolling() {
+  if (state.analyticsTimer) {
+    clearInterval(state.analyticsTimer);
+    state.analyticsTimer = 0;
+  }
+}
+
 function setSuggestStatus(message = "", isError = false) {
   if (!refs.suggestStatus) return;
   refs.suggestStatus.textContent = message;
@@ -780,6 +826,7 @@ async function checkSession() {
       setVisible(refs.logoutBtn, true);
       await loadData();
       await loadSuggestions(true);
+      startAnalyticsPolling();
       return;
     }
   } catch {
@@ -788,6 +835,7 @@ async function checkSession() {
   setVisible(refs.loginCard, true);
   setVisible(refs.app, false);
   setVisible(refs.logoutBtn, false);
+  stopAnalyticsPolling();
 }
 
 async function handleLogin() {

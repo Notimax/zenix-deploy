@@ -5,11 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="robots" content="noindex, nofollow" />
   <title>Zenix Admin</title>
-  <link rel="stylesheet" href="/admin.css?v=20260316-c299" />
+  <link rel="stylesheet" href="/admin.css?v=20260316-c317" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet" />
-  <script defer src="/admin.js?v=20260316-c299"></script>
+  <script defer src="/admin.js?v=20260316-c317"></script>
 </head>
 <body class="admin-body">
   <div class="admin-shell">
@@ -33,6 +33,30 @@
 
     <section id="adminApp" hidden>
       <div class="admin-grid">
+        <section class="admin-card" id="adminAnalyticsCard">
+          <h2>Compteurs</h2>
+          <div class="admin-stats-grid">
+            <div class="admin-stat">
+              <div class="admin-stat-label">En ligne (live)</div>
+              <div class="admin-stat-value" id="adminAnalyticsLive">-</div>
+            </div>
+            <div class="admin-stat">
+              <div class="admin-stat-label">Total 24h</div>
+              <div class="admin-stat-value" id="adminAnalytics24h">-</div>
+            </div>
+            <div class="admin-stat">
+              <div class="admin-stat-label">Total 48h</div>
+              <div class="admin-stat-value" id="adminAnalytics48h">-</div>
+            </div>
+            <div class="admin-stat">
+              <div class="admin-stat-label">Total depuis le debut</div>
+              <div class="admin-stat-value" id="adminAnalyticsTotal">-</div>
+            </div>
+          </div>
+          <div class="admin-muted" id="adminAnalyticsUpdated"></div>
+          <p class="admin-muted" id="adminAnalyticsStatus"></p>
+        </section>
+
         <section class="admin-card">
           <h2>Annonce globale</h2>
           <div class="admin-field">

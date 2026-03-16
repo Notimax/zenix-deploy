@@ -78,6 +78,10 @@ Last update: 2026-03-16
 - Mobile nav redesigned with left drawer (hamburger), topbar on mobile shows Zenix + search + online badge.
 - Announcement banner stickiness now follows topbar height to avoid half-scroll on phone.
 
+## c317 follow-up (2026-03-16)
+- Admin analytics counters added (live/24h/48h/total) and total persists across restarts.
+- Discord join popup icon centering refined.
+
 ## Visual system policy (c137)
 - Keep unified visual tokens across the UI:
   - coherent radii/shadows/spacing

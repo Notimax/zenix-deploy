@@ -376,7 +376,9 @@ const NAKIOS_PINNED_CACHE_MS = Math.max(
 const nakiosPinnedCache = { entries: [], loadedAt: 0, inFlight: null };
 const FORWARD_CLIENT_IP_TO_UPSTREAM =
   String(process.env.FORWARD_CLIENT_IP_TO_UPSTREAM || "").trim() === "1";
-const ANALYTICS_RETENTION_MS = 24 * 60 * 60 * 1000;
+const ANALYTICS_RETENTION_MS = 48 * 60 * 60 * 1000;
+const ANALYTICS_WINDOW_24H_MS = 24 * 60 * 60 * 1000;
+const ANALYTICS_WINDOW_48H_MS = 48 * 60 * 60 * 1000;
 const ANALYTICS_ACTIVE_WINDOW_MS = 2 * 60 * 1000;
 const ANALYTICS_MIN_EVENT_MS = 10 * 1000;
 const ANALYTICS_GEO_CACHE_MS = Math.max(
@@ -561,6 +563,8 @@ const analyticsGeoInFlight = new Map();
 const suggestionRateLimitMap = new Map();
 const suggestionFingerprintMap = new Map();
 let analyticsTotalSeen = 0;
+let analyticsTotalsHydrated = false;
+let analyticsPersistTimer = null;
 let analyticsLastPushAt = 0;
 let discordStatsMessageId = "";
 let discordNextAllowedAt = 0;
@@ -1609,6 +1613,10 @@ function buildDefaultAdminData() {
     suggestions: {
       skips: {},
     },
+    analytics: {
+      totalSeen: 0,
+      updatedAt: "",
+    },
   };
 }
 
@@ -1634,6 +1642,11 @@ function normalizeAdminData(raw) {
   const suggestions = raw.suggestions || {};
   base.suggestions = {
     skips: suggestions.skips && typeof suggestions.skips === "object" ? suggestions.skips : {},
+  };
+  const analytics = raw.analytics || {};
+  base.analytics = {
+    totalSeen: Number(analytics.totalSeen || 0) || 0,
+    updatedAt: String(analytics.updatedAt || ""),
   };
   return base;
 }
@@ -1670,6 +1683,41 @@ function saveAdminData(data) {
   adminDataCache.value = normalized;
   adminDataCache.loadedAt = Date.now();
   return normalized;
+}
+
+function hydrateAnalyticsTotals() {
+  if (analyticsTotalsHydrated) {
+    return;
+  }
+  analyticsTotalsHydrated = true;
+  const data = loadAdminData(true);
+  const stored = Number(data?.analytics?.totalSeen || 0) || 0;
+  if (stored > analyticsTotalSeen) {
+    analyticsTotalSeen = stored;
+  }
+}
+
+function persistAnalyticsTotals(force = false) {
+  const data = loadAdminData(true);
+  const current = Number(data?.analytics?.totalSeen || 0) || 0;
+  if (!force && current >= analyticsTotalSeen) {
+    return;
+  }
+  data.analytics = {
+    totalSeen: analyticsTotalSeen,
+    updatedAt: new Date().toISOString(),
+  };
+  saveAdminData(data);
+}
+
+function scheduleAnalyticsTotalsPersist() {
+  if (analyticsPersistTimer) {
+    return;
+  }
+  analyticsPersistTimer = setTimeout(() => {
+    analyticsPersistTimer = null;
+    persistAnalyticsTotals();
+  }, 1500);
 }
 
 function extractPurstreamSearchRows(payload) {
@@ -2452,6 +2500,7 @@ function pruneAnalytics(now = Date.now()) {
 
 function markAnalyticsHeartbeat(req, payload) {
   const now = Date.now();
+  hydrateAnalyticsTotals();
   pruneAnalytics(now);
 
   const clientId = sanitizeToken(payload?.clientId, 64) || "guest";
@@ -2479,6 +2528,7 @@ function markAnalyticsHeartbeat(req, payload) {
       countryName: "Inconnu",
     };
     analyticsTotalSeen += 1;
+    scheduleAnalyticsTotalsPersist();
   }
 
   row.clientId = clientId;
@@ -2559,10 +2609,15 @@ function formatDuration(ms) {
 
 function buildAnalyticsSnapshot() {
   const now = Date.now();
+  hydrateAnalyticsTotals();
   pruneAnalytics(now);
   const activeThreshold = now - ANALYTICS_ACTIVE_WINDOW_MS;
-  const rows24h = Array.from(analyticsClients.values());
-  const activeRows = rows24h.filter((row) => Number(row?.lastSeen || 0) >= activeThreshold);
+  const threshold24h = now - ANALYTICS_WINDOW_24H_MS;
+  const threshold48h = now - ANALYTICS_WINDOW_48H_MS;
+  const rowsAll = Array.from(analyticsClients.values());
+  const rows24h = rowsAll.filter((row) => Number(row?.lastSeen || 0) >= threshold24h);
+  const rows48h = rowsAll.filter((row) => Number(row?.lastSeen || 0) >= threshold48h);
+  const activeRows = rowsAll.filter((row) => Number(row?.lastSeen || 0) >= activeThreshold);
 
   const devicesActive = new Map();
   const platformsActive = new Map();
@@ -2571,6 +2626,7 @@ function buildAnalyticsSnapshot() {
 
   const ipActiveMap = new Map();
   const ip24hMap = new Map();
+  const ip48hMap = new Map();
 
   const mergeIpRow = (targetMap, row) => {
     const ip = sanitizeToken(row?.ip || "", 60);
@@ -2616,6 +2672,9 @@ function buildAnalyticsSnapshot() {
 
   rows24h.forEach((row) => {
     mergeIpRow(ip24hMap, row);
+  });
+  rows48h.forEach((row) => {
+    mergeIpRow(ip48hMap, row);
   });
 
   activeRows.forEach((row) => {
@@ -2684,14 +2743,26 @@ function buildAnalyticsSnapshot() {
     };
   });
 
+  const heartbeats24h = analyticsEvents.reduce(
+    (acc, ts) => (Number(ts || 0) >= threshold24h ? acc + 1 : acc),
+    0
+  );
+  const heartbeats48h = analyticsEvents.reduce(
+    (acc, ts) => (Number(ts || 0) >= threshold48h ? acc + 1 : acc),
+    0
+  );
+
   return {
     generatedAt: new Date(now).toISOString(),
     activeNow: activeRows.length,
-    unique24h: analyticsClients.size,
-    heartbeats24h: analyticsEvents.length,
+    unique24h: rows24h.length,
+    unique48h: rows48h.length,
+    heartbeats24h,
+    heartbeats48h,
     totalSeen: analyticsTotalSeen,
     activeIps: ipActiveMap.size,
     uniqueIps24h: ip24hMap.size,
+    uniqueIps48h: ip48hMap.size,
     countriesActive: countryRowsActive.length,
     countries24h: countryRows24h.length,
     devicesActive: {
@@ -12690,6 +12761,32 @@ async function handleAdminData(req, res, requestUrl) {
   return true;
 }
 
+async function handleAdminAnalytics(req, res, requestUrl) {
+  if (requestUrl.pathname !== "/api/admin/analytics") {
+    return false;
+  }
+  if (req.method !== "GET") {
+    sendJson(res, 405, { error: "Method Not Allowed" });
+    return true;
+  }
+  if (!isAdminAuthenticated(req)) {
+    sendJson(res, 401, { error: "Unauthorized" });
+    return true;
+  }
+  const stats = buildAnalyticsSnapshot();
+  sendJson(res, 200, {
+    type: "success",
+    data: {
+      generatedAt: stats.generatedAt,
+      activeNow: Number(stats.activeNow || 0),
+      unique24h: Number(stats.unique24h || 0),
+      unique48h: Number(stats.unique48h || 0),
+      totalSeen: Number(stats.totalSeen || 0),
+    },
+  });
+  return true;
+}
+
 async function handleAdminAnnouncement(req, res, requestUrl) {
   if (requestUrl.pathname !== "/api/admin/announcement") {
     return false;
@@ -14875,6 +14972,12 @@ const server = http.createServer((req, res) => {
     })
     .then((handledAdminData) => {
       if (handledAdminData) {
+        return true;
+      }
+      return handleAdminAnalytics(req, res, requestUrl);
+    })
+    .then((handledAdminAnalytics) => {
+      if (handledAdminAnalytics) {
         return true;
       }
       return handleAdminAnnouncement(req, res, requestUrl);
