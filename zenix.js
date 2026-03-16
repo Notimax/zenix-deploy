@@ -1,5 +1,5 @@
 const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260316-c315";
+const ZENIX_BUILD_VERSION = "20260316-c316";
 const STORAGE_KEY = "zenix-progress-v4";
 if (typeof window !== "undefined") {
   window.__zenixBooted = false;
@@ -592,6 +592,11 @@ const refs = {
   navSubmenuTitle: document.getElementById("navSubmenuTitle"),
   navSubmenuCloseBtn: document.getElementById("navSubmenuCloseBtn"),
   topbar: document.querySelector(".topbar"),
+  mobileNavToggle: document.getElementById("mobileNavToggle"),
+  mobileNavDrawer: document.getElementById("mobileNavDrawer"),
+  mobileNavBackdrop: document.getElementById("mobileNavBackdrop"),
+  mobileNavCloseBtn: document.getElementById("mobileNavCloseBtn"),
+  mobileNavList: document.getElementById("mobileNavList"),
   mobileTabs: Array.from(document.querySelectorAll(".mobile-tab[data-mobile-view]")),
   quickLinks: Array.from(document.querySelectorAll(".quick-link[data-view-jump]")),
   filterChips: document.getElementById("filterChips"),
@@ -744,6 +749,12 @@ function rehydrateCoreRefs() {
 
   refs.mainNavShell = refs.mainNavShell || document.querySelector(".main-nav-shell");
   refs.mainNav = refs.mainNav || document.querySelector(".main-nav");
+  refs.topbar = refs.topbar || document.querySelector(".topbar");
+  refs.mobileNavToggle = refs.mobileNavToggle || document.getElementById("mobileNavToggle");
+  refs.mobileNavDrawer = refs.mobileNavDrawer || document.getElementById("mobileNavDrawer");
+  refs.mobileNavBackdrop = refs.mobileNavBackdrop || document.getElementById("mobileNavBackdrop");
+  refs.mobileNavCloseBtn = refs.mobileNavCloseBtn || document.getElementById("mobileNavCloseBtn");
+  refs.mobileNavList = refs.mobileNavList || document.getElementById("mobileNavList");
   refs.navOverflow = refs.navOverflow || document.getElementById("navOverflow");
   refs.navOverflowBtn = refs.navOverflowBtn || document.getElementById("navOverflowBtn");
   refs.navOverflowMenu = refs.navOverflowMenu || document.getElementById("navOverflowMenu");
@@ -1048,6 +1059,7 @@ function openNavGroup(group) {
     if (refs.navSubmenuBackdrop) {
       refs.navSubmenuBackdrop.hidden = false;
     }
+    syncTopbarHeightVar();
     if (refs.topbar) {
       const rect = refs.topbar.getBoundingClientRect();
       const top = Math.max(56, Math.round(rect.bottom + 8));
@@ -1292,6 +1304,115 @@ function applyDesktopMainNavFit() {
   }
   syncNavOverflowMenu();
   updateNavActiveIndicator();
+  syncTopbarHeightVar();
+}
+
+function syncTopbarHeightVar() {
+  if (!(refs.topbar instanceof HTMLElement)) {
+    return;
+  }
+  const rect = refs.topbar.getBoundingClientRect();
+  const height = Math.max(48, Math.round(rect.height || 0));
+  document.documentElement.style.setProperty("--topbar-height", `${height}px`);
+}
+
+function buildMobileNavList() {
+  if (!(refs.mobileNavList instanceof HTMLElement)) {
+    return;
+  }
+  refs.mobileNavList.innerHTML = "";
+  const fragment = document.createDocumentFragment();
+  refs.navPills.forEach((pill) => {
+    const view = String(pill.dataset.view || "").trim();
+    if (!view) {
+      return;
+    }
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "mobile-nav-item";
+    button.dataset.view = view;
+    button.textContent = String(pill.textContent || view);
+    fragment.appendChild(button);
+  });
+
+  const discoverGroup = refs.navGroups.find((group) => String(group.dataset.navGroup || "") === "discover");
+  if (discoverGroup) {
+    const header = document.createElement("p");
+    header.className = "mobile-nav-group-title";
+    header.textContent = "Decouvrir";
+    fragment.appendChild(header);
+    const items = Array.from(discoverGroup.querySelectorAll(".nav-subitem[data-view]"));
+    const fallback = getNavGroupFallbackItems(discoverGroup);
+    const rows =
+      items.length > 0
+        ? items.map((item) => ({ view: String(item.dataset.view || "").trim(), label: item.textContent || "" }))
+        : fallback;
+    rows.forEach((row) => {
+      if (!row.view) {
+        return;
+      }
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "mobile-nav-subitem";
+      button.dataset.view = row.view;
+      button.textContent = String(row.label || row.view);
+      fragment.appendChild(button);
+    });
+  }
+
+  refs.mobileNavList.appendChild(fragment);
+  syncMobileNavActive(state.view || "all");
+}
+
+function syncMobileNavActive(view) {
+  if (!(refs.mobileNavList instanceof HTMLElement)) {
+    return;
+  }
+  const normalizedView = view === "catalog" || view === "search" || view === "interest" ? "all" : view;
+  const nodes = refs.mobileNavList.querySelectorAll("[data-view]");
+  nodes.forEach((node) => {
+    if (!(node instanceof HTMLElement)) {
+      return;
+    }
+    node.classList.toggle("active", String(node.dataset.view || "") === normalizedView);
+  });
+}
+
+function openMobileNavDrawer() {
+  if (!(refs.mobileNavDrawer instanceof HTMLElement) || !(refs.mobileNavBackdrop instanceof HTMLElement)) {
+    return;
+  }
+  refs.mobileNavDrawer.hidden = false;
+  refs.mobileNavBackdrop.hidden = false;
+  document.body.classList.add("mobile-nav-open");
+  if (refs.mobileNavToggle) {
+    refs.mobileNavToggle.setAttribute("aria-expanded", "true");
+  }
+}
+
+function closeMobileNavDrawer() {
+  if (!(refs.mobileNavDrawer instanceof HTMLElement) || !(refs.mobileNavBackdrop instanceof HTMLElement)) {
+    return;
+  }
+  document.body.classList.remove("mobile-nav-open");
+  if (refs.mobileNavToggle) {
+    refs.mobileNavToggle.setAttribute("aria-expanded", "false");
+  }
+  window.setTimeout(() => {
+    if (!document.body.classList.contains("mobile-nav-open")) {
+      refs.mobileNavDrawer.hidden = true;
+      refs.mobileNavBackdrop.hidden = true;
+    }
+  }, 240);
+}
+
+function toggleMobileNavDrawer() {
+  if (document.body.classList.contains("mobile-nav-open")) {
+    closeMobileNavDrawer();
+    return;
+  }
+  buildMobileNavList();
+  openMobileNavDrawer();
 }
 
 function scheduleDesktopMainNavFit(delayMs = 60) {
@@ -1307,6 +1428,7 @@ function scheduleDesktopMainNavFit(delayMs = 60) {
   mainNavFitTimer = window.setTimeout(() => {
     mainNavFitTimer = 0;
     applyDesktopMainNavFit();
+    syncTopbarHeightVar();
   }, Math.max(0, Number(delayMs || 0)));
 }
 
@@ -1744,6 +1866,7 @@ function ensureRecoveryModules() {
     return;
   }
   rehydrateCoreRefs();
+  syncTopbarHeightVar();
   if (!window.__zenixEventsBound) {
     bindEvents();
   }
@@ -2274,6 +2397,34 @@ function bindEvents() {
     });
   });
 
+  if (refs.mobileNavToggle) {
+    bindFastPress(refs.mobileNavToggle, () => {
+      toggleMobileNavDrawer();
+    });
+  }
+  if (refs.mobileNavBackdrop) {
+    bindFastPress(refs.mobileNavBackdrop, () => {
+      closeMobileNavDrawer();
+    });
+  }
+  if (refs.mobileNavCloseBtn) {
+    bindFastPress(refs.mobileNavCloseBtn, () => {
+      closeMobileNavDrawer();
+    });
+  }
+  if (refs.mobileNavList) {
+    refs.mobileNavList.addEventListener("click", (event) => {
+      const target = event.target instanceof HTMLElement ? event.target.closest("[data-view]") : null;
+      if (!(target instanceof HTMLElement)) {
+        return;
+      }
+      const view = String(target.dataset.view || "all");
+      closeMobileNavDrawer();
+      handleViewSelection(view);
+    });
+  }
+  buildMobileNavList();
+
   refs.mobileTabs.forEach((button) => {
     button.addEventListener("click", () => {
       const view = String(button.dataset.mobileView || "all");
@@ -2355,6 +2506,7 @@ function bindEvents() {
     "resize",
     () => {
       scheduleDesktopMainNavFit(50);
+      syncTopbarHeightVar();
     },
     { passive: true }
   );
@@ -3531,6 +3683,7 @@ function setActiveNav(view) {
     const mobileTarget = ["top", "movie", "tv", "list"].includes(normalizedView) ? normalizedView : "all";
     entry.classList.toggle("active", candidate === mobileTarget);
   });
+  syncMobileNavActive(targetView);
   closeNavOverflowMenu();
   scheduleDesktopMainNavFit(10);
   updateNavActiveIndicator();
@@ -9022,9 +9175,8 @@ function renderTopDaily() {
     card.dataset.cardId = String(item.id);
     const details = state.detailsCache.get(item.id) || null;
     const cover = resolveCardCover(item, details);
-    const runtime = item.runtime ? toHumanRuntime(item.runtime) : item.type === "tv" ? "Episodes" : "Film";
-    const year = getYear(item.releaseDate) || "-";
-    const languageLabel = resolveDetailLanguageLabel(details, item.id);
+    const year = getYear(item.releaseDate) || "";
+    const yearPill = year ? `<span class="meta-pill meta-pill-year">${escapeHtml(year)}</span>` : "";
     const qualityBadge = getItemQualityBadge(item);
     const isPendingUpload = isPendingUploadItem(item);
     const isComingSoonRelease = !isPendingUpload && isComingSoon(item);
@@ -9067,15 +9219,11 @@ function renderTopDaily() {
         <p class="top-meta">
           <span class="meta-pill">${escapeHtml(getItemTypeLabel(item))}</span>
           <span class="meta-pill meta-pill-quality">${escapeHtml(qualityBadge)}</span>
+          ${yearPill}
           ${isPendingUpload ? '<span class="meta-pill meta-pill-waiting">En attente</span>' : ""}
           ${!isPendingUpload && isComingSoonRelease ? '<span class="meta-pill meta-pill-soon">Bientot dispo</span>' : ""}
           ${!isPendingUpload && !isComingSoonRelease && isNewRelease ? '<span class="meta-pill meta-pill-new">Nouveau</span>' : ""}
           ${hasResume ? '<span class="meta-pill meta-pill-resume">Reprise</span>' : ""}
-          <span class="meta-dot" aria-hidden="true"></span>
-          <span>${escapeHtml(runtime)}</span>
-          <span class="meta-dot" aria-hidden="true"></span>
-          <span>${escapeHtml(year)}</span>
-          ${languageLabel ? `<span class="meta-dot" aria-hidden="true"></span><span>${escapeHtml(languageLabel)}</span>` : ""}
         </p>
       </div>
       </div>
@@ -9668,11 +9816,10 @@ function buildMediaCard(item, resume = false, progressEntry = null, position = 0
   const eagerLimit = Number(imageProfile?.eagerLimit || DESKTOP_EAGER_IMAGE_LIMIT);
   const highPriorityLimit = Number(imageProfile?.highPriorityLimit || DESKTOP_HIGH_PRIORITY_IMAGE_LIMIT);
 
-  const year = getYear(item.releaseDate) || "-";
-  const runtime = item.runtime ? toHumanRuntime(item.runtime) : item.type === "tv" ? "Episodes" : "Film";
+  const year = getYear(item.releaseDate) || "";
+  const yearPill = year ? `<span class="meta-pill meta-pill-year">${escapeHtml(year)}</span>` : "";
   const typeLabel = getItemTypeLabel(item);
   const qualityBadge = getItemQualityBadge(item);
-  const languageLabel = resolveDetailLanguageLabel(details, item.id);
   const favorite = isFavorite(item.id);
   const progress = progressEntry || state.progress[item.id] || null;
   const isPendingUpload = isPendingUploadItem(item);
@@ -9733,6 +9880,7 @@ function buildMediaCard(item, resume = false, progressEntry = null, position = 0
         <p class="media-meta">
         <span class="meta-pill">${escapeHtml(typeLabel)}</span>
         <span class="meta-pill meta-pill-quality">${escapeHtml(qualityBadge)}</span>
+        ${yearPill}
         ${isPendingUpload ? '<span class="meta-pill meta-pill-waiting">En attente</span>' : ""}
         ${!isPendingUpload && isComingSoonRelease ? '<span class="meta-pill meta-pill-soon">Bientot dispo</span>' : ""}
         ${!isPendingUpload && !isComingSoonRelease && isNewRelease ? '<span class="meta-pill meta-pill-new">Nouveau</span>' : ""}
@@ -9740,11 +9888,6 @@ function buildMediaCard(item, resume = false, progressEntry = null, position = 0
         ${isAdminForced ? '<span class="meta-pill meta-pill-admin">Admin</span>' : ""}
         ${hasWatched ? '<span class="meta-pill meta-pill-watched">Vu</span>' : ""}
         ${favorite ? '<span class="meta-pill meta-pill-favorite">Favori</span>' : ""}
-        <span class="meta-dot" aria-hidden="true"></span>
-        <span>${escapeHtml(runtime)}</span>
-        <span class="meta-dot" aria-hidden="true"></span>
-        <span>${escapeHtml(year)}</span>
-        ${languageLabel ? `<span class="meta-dot" aria-hidden="true"></span><span>${escapeHtml(languageLabel)}</span>` : ""}
       </p>
       ${resume ? '<p class="media-resume">Reprendre la lecture</p>' : ""}
     </div>
@@ -11774,6 +11917,12 @@ async function hasPlayablePurstreamSources(item, season = 1, episode = 1) {
 
 async function resolvePlayableProviderItem(item, season = 1, episode = 1) {
   if (!item || !item.isExternal) {
+    return item;
+  }
+  const externalProvider = String(item?.externalProvider || item?.external_provider || "")
+    .trim()
+    .toLowerCase();
+  if (externalProvider === "zenix" || externalProvider.includes("fastflux")) {
     return item;
   }
   const externalTmdbId = Number(
@@ -15064,7 +15213,7 @@ function collectLanguageSignals(value) {
       /\bVF\b/.test(probe) ||
       /\bFRENCH\b/.test(probe) ||
       /\bFRANCAIS\b/.test(probe) ||
-      /\bFRANÇAIS\b/.test(probe),
+      /\bFRANÃ‡AIS\b/.test(probe),
     hasVost:
       /\bVOST(?:FR)?\b/.test(probe) ||
       /\bSUB(?:BED|TITLES?|FR|FRENCH)?\b/.test(probe) ||
@@ -16231,7 +16380,7 @@ function preferFrenchAudioTrack(video) {
     const sample = [track.language, track.label, track.name]
       .map((entry) => String(entry || "").toLowerCase())
       .join(" ");
-    if (/\bfr\b|french|fran[cç]ais/.test(sample)) {
+    if (/\bfr\b|french|fran[cÃ§]ais/.test(sample)) {
       frenchTrackIndex = index;
       break;
     }
@@ -16274,7 +16423,7 @@ function inferLanguageFromAudioTracks(video) {
     const sample = [track.language, track.label, track.name]
       .map((entry) => String(entry || "").toLowerCase())
       .join(" ");
-    if (/\bfr\b|french|fran[cç]ais/.test(sample)) {
+    if (/\bfr\b|french|fran[cÃ§]ais/.test(sample)) {
       hasFrench = true;
     } else if (sample.trim().length > 0) {
       hasNonFrench = true;

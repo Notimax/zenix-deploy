@@ -16,6 +16,7 @@ CURRENT PRODUCT RULES
 - Mobile startup splash must never block the app.
 - Toast notifications are DESKTOP ONLY.
 - Toast position on desktop: bottom-right.
+- External provider for movies/series is FastFlux only.
 - Brand assets:
   - app/social icons must always use the Zenix "Z" logo (no Purstream "P" icon).
   - keep `og:image`, favicon set (`svg/png/ico`) and manifest icons aligned.
@@ -28,11 +29,19 @@ CURRENT PRODUCT RULES
   VF > VOSTFR > MULTI > VO.
 - External generic embed fallback sources were removed.
 
+LATEST FIX LOG (2026-03-16)
+- FastFlux proxy now preserves referer across redirects; playlists rewrite using final URL.
+- External FastFlux items no longer swap to internal duplicates (FastFlux stays preferred).
+- Card meta cleaned: runtime text removed, year displayed as pill.
+- Mobile nav redesigned with left drawer (hamburger), topbar shows Zenix + search + online badge.
+- Announcement banner stickiness now uses topbar height (no mid-scroll drift on phone).
+
 STREAMING/PLAYBACK NOTES
 - Auto-switch source is active when playback is blocked.
 - HLS proxy endpoint: /api/hls-proxy
 - Some upstream providers return numeric-encoded playlists.
   Server now decodes numeric playlists more robustly before rewriting.
+- FastFlux CDN redirects now preserve referer inside the proxy (fixes 403 on FastFlux readers).
 - Desktop playback resize-loop guard:
   - main nav fit recalculation is deferred while player/detail overlays are open.
   - deferred nav fit is flushed when overlays close.

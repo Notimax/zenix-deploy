@@ -11778,6 +11778,55 @@ function pipeUpstreamBodyToResponse(upstream, res) {
   });
 }
 
+async function fetchWithManualRedirect(targetUrl, options, maxRedirects = 3) {
+  let currentUrl = String(targetUrl || "");
+  let response = null;
+  let redirects = 0;
+  while (currentUrl) {
+    response = await fetch(currentUrl, { ...(options || {}), redirect: "manual" });
+    const status = Number(response.status || 0);
+    if (![301, 302, 303, 307, 308].includes(status) || redirects >= maxRedirects) {
+      try {
+        response.__zenixFinalUrl = currentUrl;
+      } catch {
+        // ignore property assignment failures
+      }
+      return response;
+    }
+    const location = response.headers.get("location");
+    if (!location) {
+      try {
+        response.__zenixFinalUrl = currentUrl;
+      } catch {
+        // ignore property assignment failures
+      }
+      return response;
+    }
+    try {
+      await response.arrayBuffer();
+    } catch {
+      // ignore body drain issues
+    }
+    let nextUrl = "";
+    try {
+      nextUrl = new URL(location, currentUrl).href;
+    } catch {
+      nextUrl = "";
+    }
+    if (!nextUrl || nextUrl === currentUrl) {
+      try {
+        response.__zenixFinalUrl = currentUrl;
+      } catch {
+        // ignore property assignment failures
+      }
+      return response;
+    }
+    currentUrl = nextUrl;
+    redirects += 1;
+  }
+  return response;
+}
+
 async function fetchHlsUpstreamWithFallback(target, range, signal, method = "GET") {
   const safeMethod = String(method || "GET").toUpperCase() === "HEAD" ? "HEAD" : "GET";
   const baseHeaders = {
@@ -11822,12 +11871,15 @@ async function fetchHlsUpstreamWithFallback(target, range, signal, method = "GET
       headers.Range = range;
     }
 
-    const upstream = await fetch(target.href, {
-      method: safeMethod,
-      headers,
-      redirect: "follow",
-      signal,
-    });
+    const upstream = await fetchWithManualRedirect(
+      target.href,
+      {
+        method: safeMethod,
+        headers,
+        signal,
+      },
+      4
+    );
     lastResponse = upstream;
     const status = Number(upstream.status || 0);
     if (status !== 403 && status !== 429) {
@@ -12095,11 +12147,13 @@ async function handleHlsProxy(req, res, requestUrl) {
       const buffer = Buffer.from(await upstream.arrayBuffer());
       const rawPlaylist = buffer.toString("utf8");
       const bodyText = decodeNumericPlaylistBody(rawPlaylist);
-      let rewritten = rewriteHlsPlaylistBody(bodyText, target.href, proxyPath);
+      const rewriteBase = upstream?.__zenixFinalUrl || target.href;
+      let rewritten = rewriteHlsPlaylistBody(bodyText, rewriteBase, proxyPath);
       if (!rewritten.includes("#EXTM3U")) {
-        const rescueDecoded = decodeNumericPlaylistBySeparators(rewritten) || decodeNumericPlaylistBySeparators(rawPlaylist);
+        const rescueDecoded =
+          decodeNumericPlaylistBySeparators(rewritten) || decodeNumericPlaylistBySeparators(rawPlaylist);
         if (rescueDecoded.includes("#EXTM3U")) {
-          rewritten = rewriteHlsPlaylistBody(rescueDecoded, target.href, proxyPath);
+          rewritten = rewriteHlsPlaylistBody(rescueDecoded, rewriteBase, proxyPath);
         }
       }
       if (!rewritten.includes("#EXTM3U")) {

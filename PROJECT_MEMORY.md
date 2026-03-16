@@ -71,6 +71,13 @@ Last update: 2026-03-16
 - Gate now protects playback endpoints only; catalog/calendar/search/media/seasons are exempt so UI always loads.
 - Cache-bust updated to `20260316-c315`.
 
+## c316 follow-up (2026-03-16)
+- HLS proxy now preserves referer across redirects; playlist rewrites use the final URL (FastFlux CDN fix).
+- External FastFlux items no longer swap to internal duplicates (FastFlux stays preferred).
+- Card meta cleaned: runtime text removed, year displayed as a pill.
+- Mobile nav redesigned with left drawer (hamburger), topbar on mobile shows Zenix + search + online badge.
+- Announcement banner stickiness now follows topbar height to avoid half-scroll on phone.
+
 ## Visual system policy (c137)
 - Keep unified visual tokens across the UI:
   - coherent radii/shadows/spacing
