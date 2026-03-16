@@ -1291,3 +1291,10 @@ BOOT HARDENING (2026-03-16, c306)
 - Added JS/CSS preloads plus a fetch+inline JS fallback if the main script fails.
 - Cache-bust bumped to `20260316-c306`.
 
+BOOT FAILSAFE + NON-BLOCKING INIT (2026-03-16, c307)
+- Boot retry now arms on DOMContentLoaded (not just window load) and adds an inline watchdog reload
+  if boot never completes (prevents blank UI when load stalls).
+- Init no longer blocks on initial catalog fetch (3.2s max wait); UI + popups render even if API stalls,
+  and the catalog re-renders as soon as data arrives.
+- Cache-bust bumped to `20260316-c307`.
+

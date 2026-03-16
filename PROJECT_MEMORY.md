@@ -1,6 +1,6 @@
 # Zenix Project Memory
 
-Last update: 2026-03-11
+Last update: 2026-03-16
 
 ## Core product constraints
 - Domain: `https://zenix.best`
@@ -41,6 +41,9 @@ Last update: 2026-03-11
   - Player repair button label updated to "CLIQUE ICI POR REPARER".
 - c306 follow-up:
   - Added asset version guard and JS/CSS preloads + inline fallback to reduce blank UI risk.
+- c307 follow-up:
+  - Boot retry now arms on DOMContentLoaded (not just window load) and adds an inline watchdog reload if boot never completes.
+  - Init no longer blocks on the initial catalog fetch (3.2s max wait) so popups + UI render even if API stalls; catalog refresh renders once it arrives.
 
 ## Visual system policy (c137)
 - Keep unified visual tokens across the UI:

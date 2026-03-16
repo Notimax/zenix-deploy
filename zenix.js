@@ -1,5 +1,5 @@
 ﻿const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260316-c306";
+const ZENIX_BUILD_VERSION = "20260316-c307";
 const STORAGE_KEY = "zenix-progress-v4";
 if (typeof window !== "undefined") {
   window.__zenixBooted = false;
@@ -1837,9 +1837,10 @@ async function init() {
   state.pendingScrollRestoreView = state.view;
 
   const topTask = loadTopDaily();
-  await loadInitialCatalog().catch(() => {
+  const catalogPromise = loadInitialCatalog().catch(() => {
     // fallback handled below
   });
+  await Promise.race([catalogPromise, wait(3200)]);
 
   if (state.catalog.length === 0) {
     state.catalog = FALLBACK_ITEMS.slice();
@@ -1900,6 +1901,20 @@ async function init() {
       if (refs.playerOverlay.hidden && refs.detailModal.hidden) {
         renderAll();
       }
+    });
+
+  catalogPromise
+    .then(() => {
+      if (refs.playerOverlay.hidden && refs.detailModal.hidden) {
+        renderAll();
+      } else {
+        renderTopDaily();
+        renderCommunityStats();
+        updateSyncText();
+      }
+    })
+    .catch(() => {
+      // keep current UI if refresh failed
     });
 
   if (state.view === "calendar") {
