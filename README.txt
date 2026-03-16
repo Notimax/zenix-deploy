@@ -1262,3 +1262,8 @@ FASTFLUX BADGE DISPLAY (2026-03-16, c300)
 - Player chips show a FastFlux badge on those sources (no longer forced to Zenix label).
 - Cache-bust bumped to `20260316-c300`.
 
+FASTFLUX TYPE FALLBACK (2026-03-16, c301)
+- If a FastFlux lookup returns no sources, the backend now retries the opposite type (movie <-> tv)
+  using title search to recover sources (helps cases like War Machine).
+- Cache-bust bumped to `20260316-c301`.
+

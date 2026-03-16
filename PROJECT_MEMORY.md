@@ -28,6 +28,8 @@ Last update: 2026-03-11
   - Admin data auto-prunes disallowed external custom entries.
 - c300 follow-up:
   - FastFlux sources now keep their label (`FastFlux`) and show a FastFlux badge in player chips.
+- c301 follow-up:
+  - FastFlux source lookup retries the opposite media type (movie/tv) when the first pass is empty.
 
 ## Visual system policy (c137)
 - Keep unified visual tokens across the UI:

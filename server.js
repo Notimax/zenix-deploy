@@ -14087,6 +14087,36 @@ async function handleZenixSource(req, res, requestUrl) {
           year,
         });
       }
+      if (sources.length === 0 && title.length >= 2) {
+        const altType = mediaType === "movie" ? "tv" : "movie";
+        let altTmdbId = 0;
+        try {
+          altTmdbId = await resolveFastfluxTmdbIdBySearch(title, altType, year);
+          if (altTmdbId <= 0 && cleanedTitle && cleanedTitle !== title) {
+            altTmdbId = await resolveFastfluxTmdbIdBySearch(cleanedTitle, altType, year);
+          }
+          if (altTmdbId <= 0 && year > 0) {
+            altTmdbId = await resolveFastfluxTmdbIdBySearch(cleanedTitle || title, altType, 0);
+          }
+        } catch {
+          altTmdbId = 0;
+        }
+        if (altTmdbId > 0) {
+          sources = await resolveFastfluxSourcesByTmdbId(altType, altTmdbId, season, episode, {
+            title,
+            year,
+          });
+          if (sources.length === 0 && cleanedTitle && cleanedTitle !== title) {
+            sources = await resolveFastfluxSourcesByTmdbId(altType, altTmdbId, season, episode, {
+              title: cleanedTitle,
+              year,
+            });
+          }
+          if (sources.length > 0) {
+            tmdbId = altTmdbId;
+          }
+        }
+      }
     } catch {
       sources = [];
     }
