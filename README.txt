@@ -1303,3 +1303,8 @@ BOOT + REF HYDRATION GUARD (2026-03-16, c308)
 - Core refs are rehydrated before event binding + recovery; missing critical DOM triggers a one-time reload.
 - Cache-bust bumped to `20260316-c308`.
 
+BOOT INLINE DUPLICATE GUARD (2026-03-16, c309)
+- Inline JS fallback now fires only when the main script reports a load error,
+  preventing duplicate script execution and the `Identifier has already been declared` crash.
+- Cache-bust bumped to `20260316-c309`.
+

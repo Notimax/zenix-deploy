@@ -47,6 +47,8 @@ Last update: 2026-03-16
 - c308 follow-up:
   - CSS fallback now arms on DOMContentLoaded to avoid unstyled pages when load stalls.
   - Core ref rehydration + critical DOM guard added to prevent null refs from breaking nav/popups/player; one-time reload if DOM is incomplete.
+- c309 follow-up:
+  - Inline JS fallback now triggers only on core script error to avoid double-load `Identifier has already been declared` crashes.
 
 ## Visual system policy (c137)
 - Keep unified visual tokens across the UI:
