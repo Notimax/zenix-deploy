@@ -1355,3 +1355,9 @@ SAFE ADBLOCK UI (2026-03-16, c315)
 - Gate now protects playback endpoints only; catalog/calendar/search/media/seasons are exempt so UI always loads.
 - Cache-bust bumped to `20260316-c315`.
 
+FASTFLUX MATCH HARDENING + MOBILE DRAWER ENFORCED (2026-03-16, c319)
+- FastFlux title search now accepts only strict title/year matches when tmdbId is missing (prevents wrong-film playback).
+- FastFlux format detection now prefers real file extensions; embed player links stay embed (no proxy).
+- Mobile nav drawer is enforced across all mobile blocks (no horizontal pills on phone).
+- Cache-bust bumped to `20260316-c319`.
+

@@ -87,6 +87,11 @@ Last update: 2026-03-16
 - FastFlux strict title matching tightened to prevent wrong-film playback.
 - FastFlux embed player links are allowed when needed; format detection prefers real media extensions.
 
+## c319 follow-up (2026-03-16)
+- FastFlux title search now only accepts strict title/year matches when tmdbId is missing (prevents wrong-film playback).
+- FastFlux format detection now prefers real file extensions; embed player links stay embed (no proxy).
+- Mobile nav drawer enforced across all mobile blocks (no horizontal pills on phone).
+
 ## Visual system policy (c137)
 - Keep unified visual tokens across the UI:
   - coherent radii/shadows/spacing

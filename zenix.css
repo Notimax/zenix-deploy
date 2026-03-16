@@ -5458,6 +5458,7 @@ body.reduce-motion .reveal-on-scroll {
 @media (max-width: 1000px) {
   .topbar {
     grid-template-columns: auto 1fr;
+    gap: 10px;
   }
 
   .main-nav-shell {
@@ -5481,12 +5482,21 @@ body.reduce-motion .reveal-on-scroll {
     flex-wrap: nowrap;
     align-items: center;
     justify-content: flex-end;
+    min-width: 0;
   }
 
   .search-wrap {
     order: 1;
     flex: 1 1 auto;
     min-width: 0;
+  }
+
+  #networkBadge {
+    order: 2;
+    flex: 0 0 auto;
+    font-size: 0.68rem;
+    padding: 6px 10px;
+    white-space: nowrap;
   }
 
   .ui-chip {
@@ -6228,42 +6238,9 @@ img[data-image-ready="1"] {
 }
 
 @media (max-width: 1000px) {
-  .main-nav-shell {
-    display: block !important;
-    max-width: 100%;
-    overflow-x: auto;
-    overflow-y: hidden;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: none;
-    touch-action: pan-x;
-    padding-bottom: 2px;
-  }
-
-  .main-nav-shell::-webkit-scrollbar {
-    display: none;
-  }
-
+  .main-nav-shell,
   .main-nav {
-    display: flex !important;
-    flex-wrap: nowrap !important;
-    justify-content: flex-start;
-    overflow-x: auto !important;
-    overflow-y: hidden;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: none;
-    scroll-snap-type: x proximity;
-    touch-action: pan-x;
-    gap: 7px;
-    padding: 0 2px 2px;
-  }
-
-  .main-nav::-webkit-scrollbar {
-    display: none;
-  }
-
-  .nav-pill {
-    flex: 0 0 auto;
-    scroll-snap-align: start;
+    display: none !important;
   }
 
   .native-banner-mount,
@@ -6278,12 +6255,6 @@ img[data-image-ready="1"] {
 }
 
 @media (max-width: 520px) {
-  .nav-pill {
-    font-size: 0.72rem;
-    min-height: 34px;
-    padding: 7px 10px;
-  }
-
   .native-banner-mount,
   .native-banner-wrap,
   .native-banner-frame {
