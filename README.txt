@@ -1308,3 +1308,8 @@ BOOT INLINE DUPLICATE GUARD (2026-03-16, c309)
   preventing duplicate script execution and the `Identifier has already been declared` crash.
 - Cache-bust bumped to `20260316-c309`.
 
+BOOT DOUBLE-LOAD GUARD (2026-03-16, c310)
+- Added `__zenixBooting` flag so fallback/watchdog scripts do not inject while main JS is already running,
+  preventing duplicate `const` declarations.
+- Cache-bust bumped to `20260316-c310`.
+

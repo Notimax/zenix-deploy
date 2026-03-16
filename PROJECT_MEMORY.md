@@ -49,6 +49,8 @@ Last update: 2026-03-16
   - Core ref rehydration + critical DOM guard added to prevent null refs from breaking nav/popups/player; one-time reload if DOM is incomplete.
 - c309 follow-up:
   - Inline JS fallback now triggers only on core script error to avoid double-load `Identifier has already been declared` crashes.
+- c310 follow-up:
+  - Booting flag prevents fallback/watchdog JS injection while main script is executing (avoids duplicate const errors).
 
 ## Visual system policy (c137)
 - Keep unified visual tokens across the UI:

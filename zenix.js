@@ -1,9 +1,10 @@
 ﻿const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260316-c309";
+const ZENIX_BUILD_VERSION = "20260316-c310";
 const STORAGE_KEY = "zenix-progress-v4";
 if (typeof window !== "undefined") {
   window.__zenixBooted = false;
   window.__zenixBootError = false;
+  window.__zenixBooting = true;
   window.__ZENIX_ACTUAL_JS = ZENIX_BUILD_VERSION;
   try {
     ensureAssetVersionMatch();
@@ -1887,6 +1888,7 @@ init().catch((error) => {
   }
   if (typeof window !== "undefined") {
     window.__zenixBootError = true;
+    window.__zenixBooting = false;
   }
   scheduleUiRecovery("boot-error");
 });
@@ -1894,6 +1896,9 @@ init().catch((error) => {
 async function init() {
   rehydrateCoreRefs();
   if (!hasCriticalRefs()) {
+    if (typeof window !== "undefined") {
+      window.__zenixBooting = false;
+    }
     forceUiReloadOnce();
     return;
   }
@@ -2049,6 +2054,7 @@ async function init() {
   initFloatingNotificationGuard();
   if (typeof window !== "undefined") {
     window.__zenixBooted = true;
+    window.__zenixBooting = false;
   }
   scheduleUiRecovery("post-boot");
 }
