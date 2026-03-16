@@ -44,6 +44,9 @@ Last update: 2026-03-16
 - c307 follow-up:
   - Boot retry now arms on DOMContentLoaded (not just window load) and adds an inline watchdog reload if boot never completes.
   - Init no longer blocks on the initial catalog fetch (3.2s max wait) so popups + UI render even if API stalls; catalog refresh renders once it arrives.
+- c308 follow-up:
+  - CSS fallback now arms on DOMContentLoaded to avoid unstyled pages when load stalls.
+  - Core ref rehydration + critical DOM guard added to prevent null refs from breaking nav/popups/player; one-time reload if DOM is incomplete.
 
 ## Visual system policy (c137)
 - Keep unified visual tokens across the UI:

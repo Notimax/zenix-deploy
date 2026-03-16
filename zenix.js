@@ -1,5 +1,5 @@
 ﻿const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260316-c307";
+const ZENIX_BUILD_VERSION = "20260316-c308";
 const STORAGE_KEY = "zenix-progress-v4";
 if (typeof window !== "undefined") {
   window.__zenixBooted = false;
@@ -726,6 +726,98 @@ const refs = {
   openDesignUpdatesBtn: document.getElementById("openDesignUpdatesBtn"),
   designUpdatesSection: document.getElementById("designUpdatesSection"),
 };
+
+function rehydrateCoreRefs() {
+  refs.startupSplash = refs.startupSplash || document.getElementById("startupSplash");
+  refs.searchInput = refs.searchInput || document.getElementById("searchInput");
+  refs.clearSearchBtn = refs.clearSearchBtn || document.getElementById("clearSearchBtn");
+  refs.filterChips = refs.filterChips || document.getElementById("filterChips");
+
+  refs.announcementBanner = refs.announcementBanner || document.getElementById("announcementBanner");
+  refs.announcementText = refs.announcementText || document.getElementById("announcementText");
+  refs.announcementClose = refs.announcementClose || document.getElementById("announcementClose");
+
+  refs.mainNavShell = refs.mainNavShell || document.querySelector(".main-nav-shell");
+  refs.mainNav = refs.mainNav || document.querySelector(".main-nav");
+  refs.navOverflow = refs.navOverflow || document.getElementById("navOverflow");
+  refs.navOverflowBtn = refs.navOverflowBtn || document.getElementById("navOverflowBtn");
+  refs.navOverflowMenu = refs.navOverflowMenu || document.getElementById("navOverflowMenu");
+  refs.navOverflowList = refs.navOverflowList || document.getElementById("navOverflowList");
+  refs.navSubmenuBackdrop = refs.navSubmenuBackdrop || document.getElementById("navSubmenuBackdrop");
+  refs.navSubmenuSheet = refs.navSubmenuSheet || document.getElementById("navSubmenuSheet");
+  refs.navSubmenuList = refs.navSubmenuList || document.getElementById("navSubmenuList");
+  refs.navSubmenuTitle = refs.navSubmenuTitle || document.getElementById("navSubmenuTitle");
+  refs.navSubmenuCloseBtn = refs.navSubmenuCloseBtn || document.getElementById("navSubmenuCloseBtn");
+  refs.navPills =
+    Array.isArray(refs.navPills) && refs.navPills.length > 0
+      ? refs.navPills
+      : Array.from(document.querySelectorAll(".nav-pill[data-view]"));
+  refs.navGroups =
+    Array.isArray(refs.navGroups) && refs.navGroups.length > 0
+      ? refs.navGroups
+      : Array.from(document.querySelectorAll(".nav-group[data-nav-group]"));
+  refs.navToggles =
+    Array.isArray(refs.navToggles) && refs.navToggles.length > 0
+      ? refs.navToggles
+      : Array.from(document.querySelectorAll("[data-nav-toggle]"));
+  refs.navSubItems =
+    Array.isArray(refs.navSubItems) && refs.navSubItems.length > 0
+      ? refs.navSubItems
+      : Array.from(document.querySelectorAll(".nav-subitem[data-view]"));
+  refs.mobileTabs =
+    Array.isArray(refs.mobileTabs) && refs.mobileTabs.length > 0
+      ? refs.mobileTabs
+      : Array.from(document.querySelectorAll(".mobile-tab[data-mobile-view]"));
+  refs.quickLinks =
+    Array.isArray(refs.quickLinks) && refs.quickLinks.length > 0
+      ? refs.quickLinks
+      : Array.from(document.querySelectorAll(".quick-link[data-view-jump]"));
+
+  refs.catalogSection = refs.catalogSection || document.getElementById("catalogSection");
+  refs.catalogGrid = refs.catalogGrid || document.getElementById("catalogGrid");
+  refs.calendarSection = refs.calendarSection || document.getElementById("calendarSection");
+  refs.infoSection = refs.infoSection || document.getElementById("infoSection");
+
+  refs.detailModal = refs.detailModal || document.getElementById("detailModal");
+  refs.detailPanel = refs.detailPanel || document.getElementById("detailPanel");
+  refs.detailTitle = refs.detailTitle || document.getElementById("detailTitle");
+  refs.detailPlayBtn = refs.detailPlayBtn || document.getElementById("detailPlayBtn");
+  refs.detailShareBtn = refs.detailShareBtn || document.getElementById("detailShareBtn");
+  refs.detailSeasonSelect = refs.detailSeasonSelect || document.getElementById("detailSeasonSelect");
+  refs.detailEpisodeSelect = refs.detailEpisodeSelect || document.getElementById("detailEpisodeSelect");
+  refs.detailLanguageSelect = refs.detailLanguageSelect || document.getElementById("detailLanguageSelect");
+  refs.detailLikeBtn = refs.detailLikeBtn || document.getElementById("detailLikeBtn");
+  refs.detailDislikeBtn = refs.detailDislikeBtn || document.getElementById("detailDislikeBtn");
+
+  refs.playerOverlay = refs.playerOverlay || document.getElementById("playerOverlay");
+  refs.playerPanel = refs.playerPanel || document.getElementById("playerPanel");
+  refs.playerVideo = refs.playerVideo || document.getElementById("playerVideo");
+  refs.playerEmbedFrame = refs.playerEmbedFrame || document.getElementById("playerEmbedFrame");
+  refs.playerSourceChips = refs.playerSourceChips || document.getElementById("playerSourceChips");
+  refs.playerSourceSelect = refs.playerSourceSelect || document.getElementById("playerSourceSelect");
+  refs.playerRepairBtn = refs.playerRepairBtn || document.getElementById("playerRepairBtn");
+  refs.playerStatus = refs.playerStatus || document.getElementById("playerStatus");
+  refs.playerLoadingIndicator = refs.playerLoadingIndicator || document.getElementById("playerLoadingIndicator");
+  refs.playerLoadingText = refs.playerLoadingText || document.getElementById("playerLoadingText");
+  refs.playerNextEpisodeBtn = refs.playerNextEpisodeBtn || document.getElementById("playerNextEpisodeBtn");
+
+  refs.adblockGate = refs.adblockGate || document.getElementById("accessLayer");
+  refs.adblockRetryBtn = refs.adblockRetryBtn || document.getElementById("accessRetryBtn");
+  refs.adblockGateStatus = refs.adblockGateStatus || document.getElementById("accessStatus");
+  refs.discordGate = refs.discordGate || document.getElementById("discordGate");
+  refs.discordJoinBtn = refs.discordJoinBtn || document.getElementById("discordJoinBtn");
+  refs.discordLaterBtn = refs.discordLaterBtn || document.getElementById("discordLaterBtn");
+  refs.backupGate = refs.backupGate || document.getElementById("backupGate");
+  refs.backupGateCloseBtn = refs.backupGateCloseBtn || document.getElementById("backupGateCloseBtn");
+  refs.backupGateBookmarkBtn = refs.backupGateBookmarkBtn || document.getElementById("backupGateBookmarkBtn");
+  refs.backupGateOkBtn = refs.backupGateOkBtn || document.getElementById("backupGateOkBtn");
+  refs.backupGateUrl = refs.backupGateUrl || document.getElementById("backupGateUrl");
+  refs.backupGateStatus = refs.backupGateStatus || document.getElementById("backupGateStatus");
+}
+
+function hasCriticalRefs() {
+  return Boolean(refs.searchInput && refs.mainNav && refs.detailModal && refs.playerOverlay);
+}
 
 let adblockFallbackOverlay = null;
 
@@ -1646,6 +1738,7 @@ function ensureRecoveryModules() {
   if (typeof window === "undefined") {
     return;
   }
+  rehydrateCoreRefs();
   if (!window.__zenixEventsBound) {
     bindEvents();
   }
@@ -1694,6 +1787,7 @@ function scheduleUiRecovery(reason = "post-boot") {
   if (typeof window === "undefined") {
     return;
   }
+  rehydrateCoreRefs();
   if (window.__zenixUiRecoveryScheduled) {
     return;
   }
@@ -1798,6 +1892,11 @@ init().catch((error) => {
 });
 
 async function init() {
+  rehydrateCoreRefs();
+  if (!hasCriticalRefs()) {
+    forceUiReloadOnce();
+    return;
+  }
   const splashStartedAt = startStartupSplash();
   applyRuntimeBrowserHints();
   registerGlobalErrorHeal();
@@ -2113,6 +2212,7 @@ function bindEvents() {
     }
     window.__zenixEventsBound = true;
   }
+  rehydrateCoreRefs();
 
   refs.navPills.forEach((button) => {
     button.addEventListener("click", () => {

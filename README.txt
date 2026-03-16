@@ -1298,3 +1298,8 @@ BOOT FAILSAFE + NON-BLOCKING INIT (2026-03-16, c307)
   and the catalog re-renders as soon as data arrives.
 - Cache-bust bumped to `20260316-c307`.
 
+BOOT + REF HYDRATION GUARD (2026-03-16, c308)
+- CSS fallback now arms on DOMContentLoaded (not just load) to avoid unstyled pages if load stalls.
+- Core refs are rehydrated before event binding + recovery; missing critical DOM triggers a one-time reload.
+- Cache-bust bumped to `20260316-c308`.
+
