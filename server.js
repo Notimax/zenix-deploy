@@ -14017,59 +14017,96 @@ async function handleZenixSource(req, res, requestUrl) {
   const mediaId = toInt(requestUrl.searchParams.get("mediaId"), 0, 0, 999999999);
   let tmdbId = toInt(requestUrl.searchParams.get("tmdbId"), 0, 0, 999999999);
   const isCarsQuatreRoues = isCarsQuatreRouesTarget(title, tmdbId);
-  if (mediaType === "movie" && isCarsQuatreRoues && PURSTREAM_CARS_DEBUG_URL) {
-    const proxiedUrl = buildHlsProxyPath(PURSTREAM_CARS_DEBUG_URL);
-    const proxiedAlt = PURSTREAM_CARS_DEBUG_URL_ALT ? buildHlsProxyPath(PURSTREAM_CARS_DEBUG_URL_ALT) : "";
-    const proxiedMobile = buildHlsProxyPath(PURSTREAM_CARS_DEBUG_URL, HLS_PROXY_MOBILE_PATH);
-    sendJson(res, 200, {
-      apiVersion: "zenix-source-v1",
-      type: "success",
-      data: {
-        title: String(title || "Cars : Quatre roues").trim(),
-        mediaType,
-        year,
-        season: 1,
-        episode: 1,
-        tmdbId: tmdbId > 0 ? tmdbId : 920,
-        count: proxiedAlt ? 3 : 2,
-        sources: [
-          {
-            stream_url: proxiedUrl,
-            source_name: "Cars Debug",
-            debug: true,
-            quality: "HD",
-            language: "VF",
-            format: "m3u8",
-            priority: 402,
-          },
-          {
-            stream_url: proxiedMobile,
-            source_name: "Cars Debug Mobile",
-            debug: true,
-            mobileOnly: true,
-            proxyOnly: true,
-            quality: "HD",
-            language: "VF",
-            format: "m3u8",
-            priority: 410,
-          },
-          ...(proxiedAlt
-            ? [
-                {
-                  stream_url: proxiedAlt,
-                  source_name: "Cars Debug 2",
-                  debug: true,
-                  quality: "Full HD",
-                  language: "MULTI",
-                  format: "m3u8",
-                  priority: 398,
-                },
-              ]
-            : []),
-        ],
-      },
-    });
-    return true;
+  if (mediaType === "movie" && isCarsQuatreRoues) {
+    let fastfluxSources = [];
+    const carsTmdbId = tmdbId > 0 ? tmdbId : 920;
+    if (USE_FASTFLUX) {
+      try {
+        fastfluxSources = await resolveFastfluxSourcesByTmdbId("movie", carsTmdbId, 1, 1, {
+          title,
+          year,
+        });
+        if (fastfluxSources.length === 0) {
+          fastfluxSources = await resolveFastfluxSourcesByTmdbId("tv", carsTmdbId, 1, 1, {
+            title,
+            year,
+          });
+        }
+      } catch {
+        fastfluxSources = [];
+      }
+    }
+    if (fastfluxSources.length > 0) {
+      sendJson(res, 200, {
+        apiVersion: "zenix-source-v1",
+        type: "success",
+        data: {
+          title: String(title || "Cars : Quatre roues").trim(),
+          mediaType,
+          year,
+          season: 1,
+          episode: 1,
+          tmdbId: carsTmdbId,
+          count: fastfluxSources.length,
+          sources: fastfluxSources,
+        },
+      });
+      return true;
+    }
+    if (PURSTREAM_CARS_DEBUG_URL) {
+      const proxiedUrl = buildHlsProxyPath(PURSTREAM_CARS_DEBUG_URL);
+      const proxiedAlt = PURSTREAM_CARS_DEBUG_URL_ALT ? buildHlsProxyPath(PURSTREAM_CARS_DEBUG_URL_ALT) : "";
+      const proxiedMobile = buildHlsProxyPath(PURSTREAM_CARS_DEBUG_URL, HLS_PROXY_MOBILE_PATH);
+      sendJson(res, 200, {
+        apiVersion: "zenix-source-v1",
+        type: "success",
+        data: {
+          title: String(title || "Cars : Quatre roues").trim(),
+          mediaType,
+          year,
+          season: 1,
+          episode: 1,
+          tmdbId: carsTmdbId,
+          count: proxiedAlt ? 3 : 2,
+          sources: [
+            {
+              stream_url: proxiedUrl,
+              source_name: "Cars Debug",
+              debug: true,
+              quality: "HD",
+              language: "VF",
+              format: "m3u8",
+              priority: 402,
+            },
+            {
+              stream_url: proxiedMobile,
+              source_name: "Cars Debug Mobile",
+              debug: true,
+              mobileOnly: true,
+              proxyOnly: true,
+              quality: "HD",
+              language: "VF",
+              format: "m3u8",
+              priority: 410,
+            },
+            ...(proxiedAlt
+              ? [
+                  {
+                    stream_url: proxiedAlt,
+                    source_name: "Cars Debug 2",
+                    debug: true,
+                    quality: "Full HD",
+                    language: "MULTI",
+                    format: "m3u8",
+                    priority: 398,
+                  },
+                ]
+              : []),
+          ],
+        },
+      });
+      return true;
+    }
   }
   if (tmdbId <= 0 && title.length >= 2) {
     try {

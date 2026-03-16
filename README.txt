@@ -1272,3 +1272,8 @@ FASTFLUX PRIORITY + SOURCES ONLY (2026-03-16, c302)
 - External titles use only FastFlux sources (no owned/repair/relay merges).
 - Cache-bust bumped to `20260316-c302`.
 
+FASTFLUX CARS OVERRIDE (2026-03-16, c303)
+- Cars : Quatre roues now returns FastFlux sources first when available (tv fallback),
+  and only falls back to the debug sources if FastFlux has none.
+- Cache-bust bumped to `20260316-c303`.
+

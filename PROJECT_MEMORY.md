@@ -33,6 +33,8 @@ Last update: 2026-03-11
 - c302 follow-up:
   - FastFlux external entries now override Purstream duplicates.
   - External playback uses FastFlux sources only.
+- c303 follow-up:
+  - Cars : Quatre roues now prefers FastFlux sources (tv fallback) before debug sources.
 
 ## Visual system policy (c137)
 - Keep unified visual tokens across the UI:
