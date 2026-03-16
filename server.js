@@ -7487,6 +7487,7 @@ function buildFastfluxSourceEntry(sourceRow, index = 0) {
     quality,
     language,
     format,
+    proxyOnly: needsProxy,
     priority:
       (language === "VF" ? 392 : language === "MULTI" ? 372 : language === "VOSTFR" ? 360 : 330) -
       Math.min(40, index * 4),

@@ -55,6 +55,12 @@ Last update: 2026-03-16
   - `.m3u8` URLs containing `/embed/` are now treated as HLS (not iframe) in server + frontend, so FastFlux sources proxy correctly on iOS.
 - c312 follow-up:
   - Frontend embed detection now ignores `.m3u8` even when format says embed (forces proxy HLS on iOS).
+- c313 follow-up:
+  - Boot watchdog no longer reinjects zenix.js when core is already loaded or a boot error is flagged
+    (prevents duplicate-const crashes). It triggers a recovery kick instead.
+  - Added `window.__zenixKick` so inline watchdogs can request UI recovery without reloading scripts.
+  - Frontend now forces proxy-only playback for fastflux/xalaflix/fsvid hosts (except r1 direct),
+    keeping proxy routing consistent with FSVID rules.
 
 ## Visual system policy (c137)
 - Keep unified visual tokens across the UI:

@@ -1,5 +1,5 @@
 ﻿const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260316-c312";
+const ZENIX_BUILD_VERSION = "20260316-c313";
 const STORAGE_KEY = "zenix-progress-v4";
 if (typeof window !== "undefined") {
   window.__zenixBooted = false;
@@ -1842,6 +1842,16 @@ function scheduleUiRecovery(reason = "post-boot") {
 
   setTimeout(runCheck, 5200);
   setTimeout(runCheck, 11000);
+}
+
+if (typeof window !== "undefined") {
+  window.__zenixKick = function (reason) {
+    try {
+      scheduleUiRecovery(reason || "kick");
+    } catch {
+      // ignore
+    }
+  };
 }
 
 function bindPlayFallbackDelegation() {
@@ -14220,7 +14230,11 @@ function normalizeSourceEntry(entry, index) {
       /debug/i.test(String(entry?.label || ""))
   );
   const proxyPath = getHlsProxyBasePath(url);
-  const proxyOnly = Boolean(entry?.proxyOnly);
+  const avoidProxyHost = shouldAvoidProxyForHost(host);
+  const forceProxyHost =
+    !avoidProxyHost &&
+    (shouldForceProxyForHost(host) || /(?:^|\\.)fastflux\\.xyz$/.test(host) || /xalaflix|fsvid/i.test(host));
+  const proxyOnly = Boolean(entry?.proxyOnly || forceProxyHost);
   const origin = String(entry?.origin || entry?.provider || entry?.source || "").trim();
   const isFastflux =
     /fastflux/i.test(origin) ||

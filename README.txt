@@ -1323,3 +1323,11 @@ EMBED DETECTION OVERRIDE (2026-03-16, c312)
   ensuring proxy playback and avoiding iframe blocks on iOS.
 - Cache-bust bumped to `20260316-c312`.
 
+BOOT WATCHDOG + PROXY GUARD (2026-03-16, c313)
+- Boot watchdog no longer reinjects zenix.js when core already loaded or boot error is flagged.
+  It triggers a recovery kick instead (prevents duplicate const errors).
+- Added `window.__zenixKick` so inline watchdogs can request UI recovery without reloading scripts.
+- Frontend now forces proxy-only playback for fastflux/xalaflix/fsvid hosts (except r1 direct),
+  aligning with the FSVID routing rules.
+- Cache-bust bumped to `20260316-c313`.
+
