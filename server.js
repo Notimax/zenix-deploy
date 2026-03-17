@@ -342,7 +342,14 @@ try {
 } catch {
   // ignore mkdir failures
 }
+const FALLBACK_DATA_DIR = path.resolve(path.join(ROOT, ".data"));
+try {
+  fs.mkdirSync(FALLBACK_DATA_DIR, { recursive: true });
+} catch {
+  // ignore mkdir failures
+}
 const ADMIN_DATA_FILE = path.resolve(process.env.ZENIX_ADMIN_DATA_FILE || path.join(DATA_DIR, "admin-data.json"));
+const ADMIN_DATA_FILE_FALLBACK = path.resolve(path.join(FALLBACK_DATA_DIR, "admin-data.json"));
 const BACKUP_CONFIG_FILE = path.resolve(
   process.env.ZENIX_BACKUP_CONFIG_FILE || path.join(DATA_DIR, "backup-config.json")
 );
@@ -2117,6 +2124,16 @@ function loadAdminData(force = false) {
   } catch {
     data = null;
   }
+  if (!data) {
+    try {
+      if (fs.existsSync(ADMIN_DATA_FILE_FALLBACK)) {
+        const raw = fs.readFileSync(ADMIN_DATA_FILE_FALLBACK, "utf-8");
+        data = parseJsonSafe(raw);
+      }
+    } catch {
+      data = null;
+    }
+  }
   const normalized = normalizeAdminData(data);
   adminDataCache.value = normalized;
   adminDataCache.loadedAt = now;
@@ -2125,12 +2142,24 @@ function loadAdminData(force = false) {
 
 function saveAdminData(data) {
   const normalized = normalizeAdminData(data);
+  let saved = false;
   try {
     const tmp = `${ADMIN_DATA_FILE}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify(normalized, null, 2), "utf-8");
     fs.renameSync(tmp, ADMIN_DATA_FILE);
+    saved = true;
   } catch {
-    // best effort
+    saved = false;
+  }
+  if (!saved) {
+    try {
+      const tmp = `${ADMIN_DATA_FILE_FALLBACK}.tmp`;
+      fs.writeFileSync(tmp, JSON.stringify(normalized, null, 2), "utf-8");
+      fs.renameSync(tmp, ADMIN_DATA_FILE_FALLBACK);
+      saved = true;
+    } catch {
+      // best effort
+    }
   }
   adminDataCache.value = normalized;
   adminDataCache.loadedAt = Date.now();

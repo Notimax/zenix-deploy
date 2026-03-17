@@ -100,6 +100,12 @@ Last update: 2026-03-16
 - Card detail prefetch deferred on mobile with tighter viewport margins.
 - Cache-bust updated to `20260317-c343`.
 
+## c344 follow-up (2026-03-17)
+- Admin data persistence hardened with fallback `.data/admin-data.json` if /var/lib/zenix is unavailable.
+- Demander Contenu now force-refreshes request list when the view opens and list is empty.
+- /api/zenix-source no longer cached; empty /stream payloads are not cached to avoid 0-lecteur stalls.
+- Cache-bust updated to `20260317-c344`.
+
 ## c316 follow-up (2026-03-16)
 - HLS proxy now preserves referer across redirects; playlist rewrites use the final URL (FastFlux CDN fix).
 - External FastFlux items no longer swap to internal duplicates (FastFlux stays preferred).

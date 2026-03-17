@@ -58,6 +58,12 @@ LATEST FIX LOG (2026-03-17, c343)
 - Card detail prefetch is deferred on mobile and uses tighter viewport margins.
 - Cache-bust bumped to 20260317-c343.
 
+LATEST FIX LOG (2026-03-17, c344)
+- Admin data persistence hardened: fallback to `.data/admin-data.json` if /var/lib/zenix is unavailable.
+- Demander Contenu now force-refreshes the request list when the view opens and list is empty.
+- Source caching guard: /api/zenix-source no longer cached; empty /stream payloads are not cached.
+- Cache-bust bumped to 20260317-c344.
+
 LATEST FIX LOG (2026-03-17, c326)
 - Mobile navbar redesigned as a full-screen streaming menu (premium overlay).
 - Mobile nav now occupies the full viewport with slide-up animation.

@@ -10906,6 +10906,11 @@ function renderRequestView() {
   }
   renderRequestSelected();
   renderRequestPublicList();
+  if (!state.request.lastUpdatedAt || !Array.isArray(state.request.list) || state.request.list.length === 0) {
+    ensureRequestData({ force: true }).catch(() => {
+      // best effort only
+    });
+  }
   if (!state.request.refreshTimer) {
     state.request.refreshTimer = window.setInterval(() => {
       ensureRequestData().catch(() => {
@@ -21470,7 +21475,22 @@ function hydrateLanguagePrefsMap() {
 }
 
 function isCacheableApiUrl(url) {
-  return !/\/stream\//i.test(url);
+  try {
+    const path = new URL(String(url || ""), window.location.origin).pathname;
+    if (/\/stream\//i.test(path)) {
+      return false;
+    }
+    if (
+      path === "/api/zenix-source" ||
+      path === "/api/zenix-anime-source" ||
+      path === "/api/repair-sources"
+    ) {
+      return false;
+    }
+    return true;
+  } catch {
+    return !/\/stream\//i.test(String(url || ""));
+  }
 }
 
 function readApiCache(url) {
@@ -21531,9 +21551,11 @@ async function fetchStreamJson(path, options = {}) {
   const safePath = String(path || "").startsWith("/") ? String(path) : `/${String(path || "")}`;
   const force = Boolean(options.force);
   const prefetch = Boolean(options.prefetch);
+  const cacheEmpty = Boolean(options.cacheEmpty);
   const requestOptions = { ...options };
   delete requestOptions.force;
   delete requestOptions.prefetch;
+  delete requestOptions.cacheEmpty;
   if (!force) {
     const cached = readStreamPayloadCache(safePath);
     if (cached) {
@@ -21554,7 +21576,10 @@ async function fetchStreamJson(path, options = {}) {
 
   const task = (async () => {
     const proxy = await fetchJson(proxyUrl, proxyOptions);
-    writeStreamPayloadCache(safePath, proxy);
+    const sources = extractSources(proxy);
+    if (cacheEmpty || (Array.isArray(sources) && sources.length > 0)) {
+      writeStreamPayloadCache(safePath, proxy);
+    }
     return proxy;
   })();
 
