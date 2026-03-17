@@ -886,6 +886,10 @@ body.nav-fit-stack .search-input {
   white-space: nowrap;
 }
 
+.net-badge-mobile {
+  display: none;
+}
+
 .net-badge.offline {
   background: rgba(255, 107, 107, 0.18);
   border-color: rgba(255, 107, 107, 0.46);
@@ -5485,6 +5489,16 @@ body.reduce-motion .reveal-on-scroll {
     min-width: 0;
   }
 
+  .brand-mark {
+    display: none;
+  }
+
+  .net-badge-mobile {
+    display: inline-flex;
+    font-size: 0.68rem;
+    padding: 6px 10px;
+  }
+
   .search-wrap {
     order: 1;
     flex: 1 1 auto;
@@ -5497,6 +5511,7 @@ body.reduce-motion .reveal-on-scroll {
     font-size: 0.68rem;
     padding: 6px 10px;
     white-space: nowrap;
+    display: none;
   }
 
   .ui-chip {

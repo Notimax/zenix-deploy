@@ -92,6 +92,10 @@ Last update: 2026-03-16
 - FastFlux format detection now prefers real file extensions; embed player links stay embed (no proxy).
 - Mobile nav drawer enforced across all mobile blocks (no horizontal pills on phone).
 
+## c320 follow-up (2026-03-17)
+- Added lightweight source probe to filter obviously invalid playback URLs and auto-add proxy fallback.
+- Mobile topbar hides the Z logo and shows the online badge next to the Zenix title.
+
 ## Visual system policy (c137)
 - Keep unified visual tokens across the UI:
   - coherent radii/shadows/spacing

@@ -1,5 +1,5 @@
 const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260316-c319";
+const ZENIX_BUILD_VERSION = "20260317-c320";
 const STORAGE_KEY = "zenix-progress-v4";
 if (typeof window !== "undefined") {
   window.__zenixBooted = false;
@@ -572,6 +572,7 @@ const refs = {
   themeSwitchBtn: document.getElementById("themeSwitchBtn"),
   motionToggleBtn: document.getElementById("motionToggleBtn"),
   networkBadge: document.getElementById("networkBadge"),
+  networkBadgeMobile: document.getElementById("networkBadgeMobile"),
   scrollProgress: document.getElementById("scrollProgress"),
   scrollProgressFill: document.getElementById("scrollProgressFill"),
   backToTopBtn: document.getElementById("backToTopBtn"),
@@ -3941,15 +3942,20 @@ function getOnlineCountSuffix() {
 function updateNetworkBadge() {
   const online = navigator.onLine !== false;
   state.networkOnline = online;
-  if (refs.networkBadge) {
+  const badges = [refs.networkBadge, refs.networkBadgeMobile].filter(Boolean);
+  if (badges.length) {
     if (!online) {
-      refs.networkBadge.textContent = "Hors ligne";
-      refs.networkBadge.classList.add("offline");
+      badges.forEach((badge) => {
+        badge.textContent = "Hors ligne";
+        badge.classList.add("offline");
+      });
     } else {
       const displayCount = getOnlineCountDisplay();
       const suffix = getOnlineCountSuffix();
-      refs.networkBadge.textContent = `Total en lignes: ${displayCount}${suffix}`;
-      refs.networkBadge.classList.remove("offline");
+      badges.forEach((badge) => {
+        badge.textContent = `Total en lignes: ${displayCount}${suffix}`;
+        badge.classList.remove("offline");
+      });
     }
   }
   if (refs.footerNetworkState) {

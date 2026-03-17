@@ -1361,3 +1361,9 @@ FASTFLUX MATCH HARDENING + MOBILE DRAWER ENFORCED (2026-03-16, c319)
 - Mobile nav drawer is enforced across all mobile blocks (no horizontal pills on phone).
 - Cache-bust bumped to `20260316-c319`.
 
+SOURCE PROBE + MOBILE BADGE LAYOUT (2026-03-17, c320)
+- Added lightweight source probing (HEAD/Range) to drop clearly invalid URLs and proxy-fallback when possible.
+- FastFlux/Purstream source selection now avoids obvious HTML/JSON links before playback.
+- Mobile topbar: Zenix logo icon hidden, online badge shown next to title (visible size).
+- Cache-bust bumped to `20260317-c320`.
+

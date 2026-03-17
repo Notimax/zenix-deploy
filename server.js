@@ -7526,6 +7526,220 @@ function normalizeFastfluxQuality(value) {
   return raw;
 }
 
+const SOURCE_PROBE_CACHE = new Map();
+const SOURCE_PROBE_TTL_MS = 6 * 60 * 1000;
+const SOURCE_PROBE_TIMEOUT_MS = 4200;
+const SOURCE_PROBE_MAX_PER_REQUEST = 4;
+const SOURCE_PROXY_AVOID_HOSTS = new Set(["r1.fsvid.lol"]);
+
+function normalizeHostName(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/^www\./, "");
+}
+
+function shouldAvoidProxyTarget(host) {
+  return SOURCE_PROXY_AVOID_HOSTS.has(normalizeHostName(host));
+}
+
+function extractProxyTargetUrl(rawUrl) {
+  const input = String(rawUrl || "").trim();
+  if (!input) {
+    return "";
+  }
+  let parsed;
+  try {
+    parsed = new URL(input, "http://localhost");
+  } catch {
+    return input;
+  }
+  const pathname = String(parsed.pathname || "");
+  if (pathname === "/api/hls-proxy" || pathname === "/api/hls-proxy-mobile") {
+    const targetParam = parsed.searchParams.get("url");
+    if (targetParam) {
+      return targetParam;
+    }
+  }
+  return input;
+}
+
+function buildProbeHeadersForHost(host) {
+  const normalizedHost = normalizeHostName(host);
+  const headers = {
+    Accept: "*/*",
+    "User-Agent": DEFAULT_BROWSER_UA,
+    "Accept-Language": DEFAULT_ACCEPT_LANGUAGE,
+  };
+  if (normalizedHost.endsWith("fastflux.xyz") || normalizedHost.endsWith("cdn.fastflux.xyz")) {
+    headers.Referer = `${FASTFLUX_BASE}/`;
+    headers.Origin = FASTFLUX_BASE;
+    return headers;
+  }
+  if (normalizedHost.endsWith("purstream.cc") || normalizedHost.endsWith("purstream.co") || normalizedHost.endsWith("fsvid.lol")) {
+    headers.Referer = `${PURSTREAM_WEB_BASE}/`;
+    headers.Origin = PURSTREAM_WEB_BASE;
+    return headers;
+  }
+  if (normalizedHost.endsWith("nakios.site")) {
+    headers.Referer = "https://nakios.site/";
+    headers.Origin = "https://nakios.site";
+    return headers;
+  }
+  return headers;
+}
+
+function classifyProbeResult(url, status, contentType) {
+  const safeStatus = Number(status || 0);
+  const type = String(contentType || "").toLowerCase();
+  const hasMediaExt = /\.(m3u8|mp4|webm|mpd)(?:$|\?)/i.test(String(url || ""));
+  if (safeStatus === 404) {
+    return "invalid";
+  }
+  if (safeStatus === 403 || safeStatus === 429) {
+    return "unknown";
+  }
+  if (safeStatus >= 400) {
+    return "invalid";
+  }
+  if (type.includes("text/html") && !hasMediaExt) {
+    return "invalid";
+  }
+  if (type.includes("application/json") && !hasMediaExt) {
+    return "invalid";
+  }
+  if (
+    type.includes("video/") ||
+    type.includes("mpegurl") ||
+    type.includes("vnd.apple.mpegurl") ||
+    type.includes("octet-stream")
+  ) {
+    return "ok";
+  }
+  if (hasMediaExt) {
+    return "ok";
+  }
+  return "unknown";
+}
+
+async function probeStreamUrl(rawUrl) {
+  const targetRaw = extractProxyTargetUrl(rawUrl);
+  const parsed = parseSafeRemoteUrl(targetRaw);
+  if (!parsed) {
+    return { status: "invalid" };
+  }
+  const cacheKey = parsed.href;
+  const cached = SOURCE_PROBE_CACHE.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.result;
+  }
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), SOURCE_PROBE_TIMEOUT_MS);
+  let result = { status: "unknown" };
+  try {
+    const headers = buildProbeHeadersForHost(parsed.hostname || "");
+    let response = await fetchWithManualRedirect(
+      parsed.href,
+      {
+        method: "HEAD",
+        headers,
+        signal: controller.signal,
+      },
+      2
+    );
+    let status = Number(response?.status || 0);
+    let contentType = String(response?.headers?.get("content-type") || "");
+    if (status === 405 || status === 403 || status === 429 || !contentType) {
+      const rangedHeaders = {
+        ...headers,
+        Range: "bytes=0-1",
+      };
+      response = await fetchWithManualRedirect(
+        parsed.href,
+        {
+          method: "GET",
+          headers: rangedHeaders,
+          signal: controller.signal,
+        },
+        2
+      );
+      status = Number(response?.status || 0);
+      contentType = String(response?.headers?.get("content-type") || "");
+    }
+    result = { status: classifyProbeResult(parsed.href, status, contentType) };
+  } catch {
+    result = { status: "unknown" };
+  } finally {
+    clearTimeout(timeoutId);
+  }
+  SOURCE_PROBE_CACHE.set(cacheKey, { result, expiresAt: Date.now() + SOURCE_PROBE_TTL_MS });
+  return result;
+}
+
+function buildProxyFallbackSource(source) {
+  const rawUrl = String(source?.stream_url || source?.url || "").trim();
+  if (!/^https?:\/\//i.test(rawUrl)) {
+    return null;
+  }
+  if (/\/api\/hls-proxy(?:-mobile)?\?url=/i.test(rawUrl)) {
+    return null;
+  }
+  try {
+    const host = new URL(rawUrl).hostname || "";
+    if (shouldAvoidProxyTarget(host)) {
+      return null;
+    }
+  } catch {
+    return null;
+  }
+  const proxiedUrl = buildHlsProxyPath(rawUrl);
+  if (!proxiedUrl) {
+    return null;
+  }
+  return {
+    ...source,
+    stream_url: proxiedUrl,
+    proxyOnly: true,
+  };
+}
+
+async function filterSourcesWithProbe(sources = []) {
+  if (!Array.isArray(sources) || sources.length === 0) {
+    return sources;
+  }
+  const results = [];
+  let probes = 0;
+  for (const source of sources) {
+    if (!source) {
+      continue;
+    }
+    const url = String(source?.stream_url || source?.url || "").trim();
+    if (!url) {
+      continue;
+    }
+    const format = inferOwnedSourceFormat(url, source?.format || "");
+    if (format === "embed") {
+      results.push(source);
+      continue;
+    }
+    if (probes >= SOURCE_PROBE_MAX_PER_REQUEST) {
+      results.push(source);
+      continue;
+    }
+    probes += 1;
+    const verdict = await probeStreamUrl(url);
+    if (verdict?.status === "invalid") {
+      const fallback = buildProxyFallbackSource(source);
+      if (fallback) {
+        results.push(fallback);
+      }
+      continue;
+    }
+    results.push(source);
+  }
+  return results.length > 0 ? results : sources;
+}
+
 function buildFastfluxSourceEntry(sourceRow, index = 0) {
   if (!sourceRow || typeof sourceRow !== "object") {
     return null;
@@ -14411,6 +14625,14 @@ async function handleZenixSource(req, res, requestUrl) {
       }
     } catch {
       sources = [];
+    }
+  }
+
+  if (sources.length > 0) {
+    try {
+      sources = await filterSourcesWithProbe(sources);
+    } catch {
+      // keep original sources on probe failure
     }
   }
 
