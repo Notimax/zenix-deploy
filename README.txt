@@ -1367,3 +1367,9 @@ SOURCE PROBE + MOBILE BADGE LAYOUT (2026-03-17, c320)
 - Mobile topbar: Zenix logo icon hidden, online badge shown next to title (visible size).
 - Cache-bust bumped to `20260317-c320`.
 
+FASTFLUX-ONLY SOURCES + PROXY MP4 FIX (2026-03-17, c321)
+- External (FastFlux) items now show only FastFlux sources (other readers ignored).
+- Proxied MP4 sources are now valid playback candidates (fixes FastFlux MP4 on mobile).
+- Mobile topbar badge moved to the far right (search row) and spaced from title.
+- Cache-bust bumped to `20260317-c321`.
+

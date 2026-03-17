@@ -96,6 +96,11 @@ Last update: 2026-03-16
 - Added lightweight source probe to filter obviously invalid playback URLs and auto-add proxy fallback.
 - Mobile topbar hides the Z logo and shows the online badge next to the Zenix title.
 
+## c321 follow-up (2026-03-17)
+- External (FastFlux) items now expose only FastFlux sources in the player.
+- Proxied MP4 sources are treated as valid playback candidates (fixes FastFlux MP4 on mobile).
+- Mobile topbar badge moved to the far right (next to search), spaced from the title.
+
 ## Visual system policy (c137)
 - Keep unified visual tokens across the UI:
   - coherent radii/shadows/spacing

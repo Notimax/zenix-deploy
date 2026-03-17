@@ -1,5 +1,5 @@
 const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260317-c320";
+const ZENIX_BUILD_VERSION = "20260317-c321";
 const STORAGE_KEY = "zenix-progress-v4";
 if (typeof window !== "undefined") {
   window.__zenixBooted = false;
@@ -12067,7 +12067,8 @@ async function resolveEpisodePayloadWithStrategy(item, season = 1, episode = 1) 
 async function resolveExternalItemSources(item) {
   const { season, episode } = getExternalPlaybackContext(item);
   const fastfluxOnly = await appendNakiosSources(item, season, episode, []);
-  const relayed = filterMovieSourcesForFrench(fastfluxOnly);
+  const fastfluxFiltered = fastfluxOnly.filter((entry) => isFastfluxSourceEntry(entry));
+  const relayed = filterMovieSourcesForFrench(fastfluxFiltered.length ? fastfluxFiltered : fastfluxOnly);
   return {
     sources: relayed,
     season,
@@ -13180,6 +13181,24 @@ async function fetchDebugOnlySources(item) {
   }
 }
 
+function isFastfluxSourceEntry(entry) {
+  if (!entry) {
+    return false;
+  }
+  const origin = String(entry?.origin || entry?.provider || entry?.source || "")
+    .trim()
+    .toLowerCase();
+  if (origin.includes("fastflux")) {
+    return true;
+  }
+  const name = String(entry?.source_name || entry?.name || "").toLowerCase();
+  if (name.includes("fastflux")) {
+    return true;
+  }
+  const url = String(entry?.url || entry?.stream_url || "").toLowerCase();
+  return url.includes("fastflux.xyz") || url.includes("cdn.fastflux.xyz");
+}
+
 async function appendNakiosSources(item, season, episode, sources) {
   const base = Array.isArray(sources) ? sources.slice() : [];
   if (!item) {
@@ -13243,15 +13262,18 @@ async function appendNakiosSources(item, season, episode, sources) {
 
     const existing = new Set(base.map((entry) => getSourceDedupKey(entry)).filter(Boolean));
     const nakiosSources = raw
-      .map((entry, index) =>
-        normalizeSourceEntry(
+      .map((entry, index) => {
+        const isFastflux = isFastfluxSourceEntry(entry);
+        const fallbackName = isFastflux ? "FastFlux" : "Zenix";
+        const sourceName = String(entry?.source_name || entry?.name || fallbackName).trim() || fallbackName;
+        return normalizeSourceEntry(
           {
             ...entry,
-            source_name: String(entry?.source_name || entry?.name || "Zenix").trim() || "Zenix",
+            source_name: sourceName,
           },
           index
-        )
-      )
+        );
+      })
       .filter((entry) => {
         if (!entry) {
           return false;
@@ -16053,6 +16075,14 @@ function buildPlayableSourceCandidates(source, options = {}) {
     return Array.from(new Set(candidates.filter(Boolean)));
   }
 
+  if (isProxied && !looksLikeHls) {
+    candidates.push(normalizedProxyAbsolute);
+    if (!requireProxy && proxiedTarget) {
+      candidates.push(proxiedTarget);
+    }
+    return Array.from(new Set(candidates.filter(Boolean)));
+  }
+
   if (looksLikeHls && options.preferDirectHls) {
     if (!requireProxy) {
       candidates.push(absolute);
@@ -16064,6 +16094,9 @@ function buildPlayableSourceCandidates(source, options = {}) {
   }
 
   if (proxyUrl && looksLikeHls) {
+    candidates.push(proxyUrl);
+  }
+  if (!looksLikeHls && requireProxy && proxyUrl) {
     candidates.push(proxyUrl);
   }
   if (!requireProxy) {

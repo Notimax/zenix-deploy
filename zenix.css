@@ -5461,7 +5461,7 @@ body.reduce-motion .reveal-on-scroll {
 
 @media (max-width: 1000px) {
   .topbar {
-    grid-template-columns: auto 1fr;
+    grid-template-columns: auto minmax(0, 1fr);
     gap: 10px;
   }
 
@@ -5497,6 +5497,9 @@ body.reduce-motion .reveal-on-scroll {
     display: inline-flex;
     font-size: 0.68rem;
     padding: 6px 10px;
+    margin-left: 8px;
+    order: 2;
+    flex: 0 0 auto;
   }
 
   .search-wrap {
