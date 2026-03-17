@@ -567,9 +567,11 @@ themeFilters: {
     source: "auto",
     country: "France",
     query: "",
-    limit: 260,
+    limit: 180,
     countries: [],
     searchTimer: 0,
+    panelOpen: false,
+    renderKey: "",
   },
   repairCache: new Map(),
   repairInFlight: new Map(),
@@ -618,6 +620,10 @@ const refs = {
   tvChannelEmpty: document.getElementById("tvChannelEmpty"),
   tvSearchInput: document.getElementById("tvSearchInput"),
   tvCountrySelect: document.getElementById("tvCountrySelect"),
+  tvPanelToggle: document.getElementById("tvPanelToggle"),
+  tvPanelBackdrop: document.getElementById("tvPanelBackdrop"),
+  tvChannelPanel: document.getElementById("tvChannelPanel"),
+  tvPanelClose: document.getElementById("tvPanelClose"),
   suggestionForm: document.getElementById("suggestionForm"),
   suggestionType: document.getElementById("suggestionType"),
   suggestionTitle: document.getElementById("suggestionTitle"),
@@ -896,6 +902,10 @@ function rehydrateCoreRefs() {
   refs.tvChannelEmpty = refs.tvChannelEmpty || document.getElementById("tvChannelEmpty");
   refs.tvSearchInput = refs.tvSearchInput || document.getElementById("tvSearchInput");
   refs.tvCountrySelect = refs.tvCountrySelect || document.getElementById("tvCountrySelect");
+  refs.tvPanelToggle = refs.tvPanelToggle || document.getElementById("tvPanelToggle");
+  refs.tvPanelBackdrop = refs.tvPanelBackdrop || document.getElementById("tvPanelBackdrop");
+  refs.tvChannelPanel = refs.tvChannelPanel || document.getElementById("tvChannelPanel");
+  refs.tvPanelClose = refs.tvPanelClose || document.getElementById("tvPanelClose");
 
   refs.detailModal = refs.detailModal || document.getElementById("detailModal");
   refs.detailPanel = refs.detailPanel || document.getElementById("detailPanel");
@@ -2935,6 +2945,22 @@ function bindEvents() {
     });
   }
 
+  if (refs.tvPanelToggle) {
+    bindFastPress(refs.tvPanelToggle, () => {
+      setTvPanelOpen(true);
+    });
+  }
+  if (refs.tvPanelClose) {
+    bindFastPress(refs.tvPanelClose, () => {
+      setTvPanelOpen(false);
+    });
+  }
+  if (refs.tvPanelBackdrop) {
+    bindFastPress(refs.tvPanelBackdrop, () => {
+      setTvPanelOpen(false);
+    });
+  }
+
   if (refs.tvCountrySelect) {
     refs.tvCountrySelect.addEventListener("change", (event) => {
       const value = String(event.target.value || "France").trim() || "France";
@@ -4707,6 +4733,7 @@ function applyNativeAdPlacement() {
       teardownTvPlayback();
       state.tv.selected = null;
     }
+    setTvPanelOpen(false);
   }
 
   const showNativeDetail = !isPlayerOpen && isDetailOpen;
@@ -10726,11 +10753,19 @@ async function performRequestSearch(query, token) {
       tmdbId: Number(row?.tmdbId || row?.tmdb_id || 0) || 0,
     }))
     .filter((row) => row.title && row.tmdbId > 0);
-  state.request.results = normalized;
+  const sorted = normalized.slice().sort((left, right) => {
+    const leftExists = Boolean(findCatalogMatchForCandidate(left));
+    const rightExists = Boolean(findCatalogMatchForCandidate(right));
+    if (leftExists !== rightExists) {
+      return leftExists ? 1 : -1;
+    }
+    return 0;
+  });
+  state.request.results = sorted;
   renderRequestSearchPanel();
   setRequestStatus(
-    normalized.length > 0 ? `${normalized.length} resultat(s).` : "Aucun resultat pour ce titre.",
-    normalized.length === 0
+    sorted.length > 0 ? `${sorted.length} resultat(s).` : "Aucun resultat pour ce titre.",
+    sorted.length === 0
   );
 }
 
@@ -10957,6 +10992,7 @@ function normalizeTvChannel(entry) {
     return null;
   }
   const type = String(entry.type || "").toLowerCase();
+  const priority = getTvChannelPriority(name);
   return {
     id: id || `${normalizeTitleKey(name)}:${normalizeTitleKey(url)}`,
     name,
@@ -10965,8 +11001,53 @@ function normalizeTvChannel(entry) {
     logo: String(entry.logo || "").trim(),
     group: String(entry.group || "").trim(),
     country: String(entry.country || "").trim(),
-    order: Number(entry.order || 0) || 0,
+    order: Number(entry.order || 0) || priority || 0,
   };
+}
+
+function getTvChannelPriority(name) {
+  const key = normalizeTitleKey(name || "");
+  if (!key) {
+    return 0;
+  }
+  const map = new Map([
+    ["tf1", 1],
+    ["france2", 2],
+    ["france 2", 2],
+    ["france3", 3],
+    ["france 3", 3],
+    ["canal", 4],
+    ["canalplus", 4],
+    ["m6", 5],
+    ["arte", 6],
+    ["c8", 7],
+    ["w9", 8],
+    ["tmc", 9],
+    ["tfx", 10],
+    ["lci", 11],
+    ["france4", 12],
+    ["france 4", 12],
+    ["france5", 13],
+    ["france 5", 13],
+    ["bfmtv", 14],
+    ["cnews", 15],
+    ["gulli", 16],
+    ["6ter", 17],
+    ["rmcstory", 18],
+    ["rmcdecouverte", 19],
+    ["franceinfo", 20],
+    ["lcp", 21],
+  ]);
+  if (map.has(key)) {
+    return map.get(key);
+  }
+  if (key.startsWith("tf1")) return 1;
+  if (key.startsWith("france2")) return 2;
+  if (key.startsWith("france3")) return 3;
+  if (key.startsWith("france4")) return 12;
+  if (key.startsWith("france5")) return 13;
+  if (key.startsWith("franceinfo")) return 20;
+  return 0;
 }
 
 function syncTvControls() {
@@ -11009,6 +11090,29 @@ function syncTvControls() {
       refs.tvCountrySelect.value = current;
     }
   }
+}
+
+function setTvPanelOpen(open) {
+  const shouldOpen = Boolean(open);
+  state.tv.panelOpen = shouldOpen;
+  if (!isCompactViewport()) {
+    document.body.classList.remove("tv-panel-open");
+    if (refs.tvPanelBackdrop) {
+      refs.tvPanelBackdrop.hidden = true;
+    }
+    return;
+  }
+  document.body.classList.toggle("tv-panel-open", shouldOpen);
+  if (refs.tvPanelBackdrop) {
+    refs.tvPanelBackdrop.hidden = !shouldOpen;
+  }
+}
+
+function getTvRenderKey(list) {
+  const rows = Array.isArray(list) ? list : [];
+  const head = rows.slice(0, 30).map((entry) => entry.id).join("|");
+  const tail = rows.slice(-30).map((entry) => entry.id).join("|");
+  return `${rows.length}:${head}:${tail}:${state.tv.country || ""}:${state.tv.query || ""}`;
 }
 
 function scheduleTvSearch(value) {
@@ -11135,6 +11239,7 @@ function renderTvView() {
     return;
   }
   syncTvControls();
+  setTvPanelOpen(state.tv.panelOpen);
   const list = Array.isArray(state.tv.list) ? state.tv.list : [];
   const sorted = list.slice().sort((a, b) => {
     const orderDiff = Number(a.order || 0) - Number(b.order || 0);
@@ -11143,39 +11248,56 @@ function renderTvView() {
     }
     return String(a.name || "").localeCompare(String(b.name || ""), "fr", { sensitivity: "base" });
   });
-  refs.tvChannelList.innerHTML = "";
-  if (sorted.length === 0) {
-    if (refs.tvChannelEmpty) refs.tvChannelEmpty.hidden = false;
-    return;
-  }
-  if (refs.tvChannelEmpty) refs.tvChannelEmpty.hidden = true;
-  const fragment = document.createDocumentFragment();
-  sorted.forEach((channel) => {
-    const card = document.createElement("button");
-    card.type = "button";
-    card.className = "tv-channel-card";
-    if (state.tv.selected && state.tv.selected.id === channel.id) {
-      card.classList.add("active");
-    }
-    const logo = channel.logo ? `<img src="${escapeHtml(channel.logo)}" alt="" loading="lazy" />` : "";
-    const metaText = channel.group || channel.country;
-    const meta = metaText ? `<span class="tv-channel-meta">${escapeHtml(metaText)}</span>` : "";
-    card.innerHTML = `
-      <span class="tv-channel-logo">${logo}</span>
-      <span class="tv-channel-info">
-        <span class="tv-channel-name">${escapeHtml(channel.name)}</span>
-        ${meta}
-      </span>
-    `;
-    bindSafeTap(card, () => {
-      playTvChannel(channel).catch(() => {
-        // handled in play
-      });
-      renderTvView();
+  const renderKey = getTvRenderKey(sorted);
+  if (renderKey === state.tv.renderKey && refs.tvChannelList.children.length === sorted.length) {
+    const activeId = String(state.tv.selected?.id || "");
+    const nodes = refs.tvChannelList.querySelectorAll(".tv-channel-card");
+    nodes.forEach((node) => {
+      node.classList.toggle("active", node.dataset.tvId === activeId);
     });
-    fragment.appendChild(card);
-  });
-  refs.tvChannelList.appendChild(fragment);
+  } else {
+    refs.tvChannelList.innerHTML = "";
+    if (sorted.length === 0) {
+      if (refs.tvChannelEmpty) refs.tvChannelEmpty.hidden = false;
+      state.tv.renderKey = renderKey;
+      return;
+    }
+    if (refs.tvChannelEmpty) refs.tvChannelEmpty.hidden = true;
+    const fragment = document.createDocumentFragment();
+    sorted.forEach((channel) => {
+      const card = document.createElement("button");
+      card.type = "button";
+      card.className = "tv-channel-card";
+      card.dataset.tvId = channel.id;
+      if (state.tv.selected && state.tv.selected.id === channel.id) {
+        card.classList.add("active");
+      }
+      const logo = channel.logo
+        ? `<img src="${escapeHtml(channel.logo)}" alt="" loading="lazy" decoding="async" />`
+        : "";
+      const metaText = channel.group || channel.country;
+      const meta = metaText ? `<span class="tv-channel-meta">${escapeHtml(metaText)}</span>` : "";
+      card.innerHTML = `
+        <span class="tv-channel-logo">${logo}</span>
+        <span class="tv-channel-info">
+          <span class="tv-channel-name">${escapeHtml(channel.name)}</span>
+          ${meta}
+        </span>
+      `;
+      bindSafeTap(card, () => {
+        playTvChannel(channel).catch(() => {
+          // handled in play
+        });
+        if (isCompactViewport()) {
+          setTvPanelOpen(false);
+        }
+        renderTvView();
+      });
+      fragment.appendChild(card);
+    });
+    refs.tvChannelList.appendChild(fragment);
+    state.tv.renderKey = renderKey;
+  }
 
   if (!state.tv.refreshTimer) {
     state.tv.refreshTimer = window.setInterval(() => {

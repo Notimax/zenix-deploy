@@ -79,6 +79,14 @@ Last update: 2026-03-16
 - Added TV Directs controls (country + search).
 - Cache-bust updated to `20260317-c340`.
 
+## c341 follow-up (2026-03-17)
+- Request search now merges FastFlux + TMDB results (requires `TMDB_API_KEY`) and sorts
+  results so missing titles appear first.
+- TV Directs: mobile channel list now uses a dedicated sheet + backdrop,
+  channel cards avoid blink on refresh, and priority ordering for FR channels (TF1/France2/etc).
+- HLS proxy is no longer gate-protected to avoid playback failures when gate tokens expire.
+- Cache-bust updated to `20260317-c341`.
+
 ## c316 follow-up (2026-03-16)
 - HLS proxy now preserves referer across redirects; playlist rewrites use the final URL (FastFlux CDN fix).
 - External FastFlux items no longer swap to internal duplicates (FastFlux stays preferred).

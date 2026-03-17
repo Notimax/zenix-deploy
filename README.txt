@@ -37,6 +37,14 @@ LATEST FIX LOG (2026-03-17, c340)
 - Added TV Directs controls (country + search).
 - Cache-bust bumped to 20260317-c340.
 
+LATEST FIX LOG (2026-03-17, c341)
+- Request search now merges FastFlux + TMDB (if TMDB_API_KEY is set) and sorts results so
+  missing titles appear first.
+- TV Directs: mobile channel list now opens as a clean sub-menu sheet, with a backdrop + close,
+  channel cards no longer blink on refresh, and French priority ordering (TF1/France2/etc).
+- HLS proxy is no longer gate-protected to prevent playback failures when gate tokens expire.
+- Cache-bust bumped to 20260317-c341.
+
 LATEST FIX LOG (2026-03-17, c326)
 - Mobile navbar redesigned as a full-screen streaming menu (premium overlay).
 - Mobile nav now occupies the full viewport with slide-up animation.

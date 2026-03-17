@@ -17,6 +17,9 @@ const FASTFLUX_API_BASE = `${FASTFLUX_BASE}/api/v1/index.php`;
 const FASTFLUX_API_KEY = String(process.env.FASTFLUX_API_KEY || "").trim();
 const FASTFLUX_ENABLED = Boolean(FASTFLUX_API_KEY);
 const USE_FASTFLUX = FASTFLUX_ENABLED;
+const TMDB_API_KEY = String(process.env.TMDB_API_KEY || "").trim();
+const TMDB_BASE_URL = "https://api.themoviedb.org/3";
+const TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p";
 const LIVEWATCH_API_URL = "https://v2.livewatch.sbs/?action=api";
 const LIVEWATCH_CACHE_MS = Math.max(2 * 60 * 1000, Number(process.env.LIVEWATCH_CACHE_MS || 12 * 60 * 1000));
 const NAKIOS_BASE = "https://nakios.site";
@@ -101,6 +104,7 @@ const FASTFLUX_SEARCH_CACHE_MS = Math.max(
   30 * 1000,
   Number(process.env.FASTFLUX_SEARCH_CACHE_MS || 6 * 60 * 1000)
 );
+const TMDB_SEARCH_CACHE_MS = Math.max(60 * 1000, Number(process.env.TMDB_SEARCH_CACHE_MS || 10 * 60 * 1000));
 const FASTFLUX_SOURCE_REMOTE_TIMEOUT_MS = Math.max(
   10_000,
   toInt(process.env.FASTFLUX_SOURCE_REMOTE_TIMEOUT_MS, 20_000, 8000, 60_000)
@@ -545,6 +549,7 @@ const fastfluxSeriesCache = {
   map: new Map(),
 };
 const fastfluxSearchCache = new Map();
+const tmdbSearchCache = new Map();
 const filmer2CatalogCache = {
   loadedAt: 0,
   entries: [],
@@ -975,14 +980,23 @@ function normalizeLivewatchChannel(entry) {
   if (!entry || typeof entry !== "object") {
     return null;
   }
-  const name = sanitizeSuggestionText(entry.cleanName || entry.name, 120);
-  const url = sanitizeHttpUrl(entry.embed_url, 520);
+  const name = sanitizeSuggestionText(
+    entry.cleanName ||
+      entry.clean_name ||
+      entry.name ||
+      entry.title ||
+      entry.tvg_name ||
+      entry.stream_name ||
+      entry.channel,
+    120
+  );
+  const url = sanitizeHttpUrl(entry.embed_url || entry.url || entry.stream_url, 520);
   if (!name || !url) {
     return null;
   }
   const id = sanitizeToken(entry.id, 80) || `lw_${crypto.randomBytes(5).toString("hex")}`;
-  const logo = sanitizeHttpUrl(entry.logo, 420);
-  const group = sanitizeSuggestionText(entry.group || entry.genre, 60);
+  const logo = sanitizeHttpUrl(entry.logo || entry.tvg_logo, 420);
+  const group = sanitizeSuggestionText(entry.group || entry.genre || entry.category, 60);
   const country = sanitizeSuggestionText(entry.country, 60);
   return {
     id: `lw_${id}`,
@@ -8385,6 +8399,80 @@ function scoreFastfluxSearchEntry(entry, queryKey, mediaType, safeYear) {
   return score;
 }
 
+function buildTmdbImageUrl(path, size = "w600_and_h900_bestv2") {
+  const safe = String(path || "").trim();
+  if (!safe) {
+    return "";
+  }
+  const normalized = safe.startsWith("/") ? safe : `/${safe}`;
+  return `${TMDB_IMAGE_BASE}/${size}${normalized}`;
+}
+
+function extractTmdbYear(dateString) {
+  const raw = String(dateString || "").trim();
+  if (!raw) {
+    return 0;
+  }
+  const year = Number.parseInt(raw.slice(0, 4), 10);
+  return Number.isFinite(year) ? year : 0;
+}
+
+async function searchTmdbCatalog(query, mediaType) {
+  if (!TMDB_API_KEY) {
+    return [];
+  }
+  const safeQuery = String(query || "").trim();
+  if (safeQuery.length < 2) {
+    return [];
+  }
+  const normalizedType = mediaType === "tv" ? "tv" : "movie";
+  const cacheKey = `tmdb:${normalizedType}:${normalizeTitleKey(safeQuery)}`;
+  const cached = tmdbSearchCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.items || [];
+  }
+  const params = new URLSearchParams({
+    api_key: TMDB_API_KEY,
+    language: "fr-FR",
+    query: safeQuery,
+    include_adult: "false",
+  });
+  const endpoint = normalizedType === "tv" ? "search/tv" : "search/movie";
+  const target = `${TMDB_BASE_URL}/${endpoint}?${params.toString()}`;
+  let results = [];
+  try {
+    const response = await fetchRemote(target, { headers: { "Accept-Language": DEFAULT_ACCEPT_LANGUAGE } });
+    const payload = response.status >= 200 && response.status < 300 ? parseJsonSafe(response.body) : null;
+    results = Array.isArray(payload?.results) ? payload.results : [];
+  } catch {
+    results = [];
+  }
+  const mapped = results
+    .map((entry) => {
+      const tmdbId = toInt(entry?.id, 0, 0, 999999999);
+      const title = String(entry?.title || entry?.name || entry?.original_title || entry?.original_name || "").trim();
+      if (!tmdbId || !title) {
+        return null;
+      }
+      const year = extractTmdbYear(entry?.release_date || entry?.first_air_date);
+      return {
+        title,
+        type: normalizedType,
+        year,
+        poster: buildTmdbImageUrl(entry?.poster_path || "", "w600_and_h900_bestv2"),
+        backdrop: buildTmdbImageUrl(entry?.backdrop_path || "", "w1920_and_h1080_bestv2"),
+        overview: String(entry?.overview || "").trim(),
+        tmdbId,
+      };
+    })
+    .filter(Boolean);
+  tmdbSearchCache.set(cacheKey, {
+    items: mapped,
+    expiresAt: Date.now() + TMDB_SEARCH_CACHE_MS,
+  });
+  return mapped;
+}
+
 function isFastfluxTitleMatch(entry, title, year = 0) {
   const queryKey = normalizeTitleKey(String(title || ""));
   if (!queryKey) {
@@ -12611,6 +12699,9 @@ function isGateProtectedPath(pathname) {
   if (pathname === "/api/suggestions") {
     return false;
   }
+  if (pathname === "/api/hls-proxy") {
+    return false;
+  }
   if (pathname === "/api/hls-proxy-mobile") {
     return false;
   }
@@ -14090,14 +14181,77 @@ async function handleFilmer2Search(req, res, requestUrl) {
         backdrop,
         overview,
         tmdbId,
+        source: "fastflux",
       };
     })
     .filter(Boolean)
     .filter((row) => (normalizedType ? row.type === normalizedType : true));
-  const scored = normalizedMatches
+  let tmdbMatches = [];
+  if (TMDB_API_KEY) {
+    try {
+      if (normalizedType) {
+        tmdbMatches = await searchTmdbCatalog(query, normalizedType);
+      } else {
+        const [tmdbMovies, tmdbSeries] = await Promise.all([
+          searchTmdbCatalog(query, "movie"),
+          searchTmdbCatalog(query, "tv"),
+        ]);
+        tmdbMatches = [...(tmdbMovies || []), ...(tmdbSeries || [])];
+      }
+    } catch {
+      tmdbMatches = [];
+    }
+  }
+
+  const merged = [];
+  const byKey = new Map();
+  const mergeRow = (incoming, source) => {
+    const tmdbId = toInt(incoming?.tmdbId || incoming?.tmdb_id, 0, 0, 999999999);
+    const type = String(incoming?.type || "").trim();
+    if (!tmdbId || !type) {
+      return;
+    }
+    const key = `${type}:${tmdbId}`;
+    const existing = byKey.get(key);
+    if (!existing) {
+      const row = { ...incoming, source: source || incoming?.source || "" };
+      byKey.set(key, row);
+      merged.push(row);
+      return;
+    }
+    if (source === "fastflux" && existing.source !== "fastflux") {
+      const row = {
+        ...existing,
+        ...incoming,
+        source: "fastflux",
+      };
+      row.poster = incoming.poster || existing.poster || "";
+      row.backdrop = incoming.backdrop || existing.backdrop || "";
+      row.overview = incoming.overview || existing.overview || "";
+      row.year = incoming.year || existing.year || 0;
+      row.url = incoming.url || existing.url || "";
+      byKey.set(key, row);
+      const idx = merged.findIndex((entry) => entry === existing);
+      if (idx >= 0) {
+        merged[idx] = row;
+      }
+      return;
+    }
+    existing.poster = existing.poster || incoming.poster || "";
+    existing.backdrop = existing.backdrop || incoming.backdrop || "";
+    existing.overview = existing.overview || incoming.overview || "";
+    existing.year = existing.year || incoming.year || 0;
+    existing.url = existing.url || incoming.url || "";
+    byKey.set(key, existing);
+  };
+
+  normalizedMatches.forEach((row) => mergeRow(row, "fastflux"));
+  tmdbMatches.forEach((row) => mergeRow(row, "tmdb"));
+
+  const scored = merged
     .map((row) => ({
       row,
-      score: scoreFastfluxSearchEntry(row, queryKey, normalizedType, safeYear),
+      score: scoreFastfluxSearchEntry(row, queryKey, normalizedType, safeYear) + (row.source === "fastflux" ? 12 : 0),
     }))
     .sort((left, right) => right.score - left.score);
   const best = scored[0]?.row || null;
