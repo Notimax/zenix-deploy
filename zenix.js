@@ -598,6 +598,7 @@ const refs = {
   topbar: document.querySelector(".topbar"),
   mobileNavToggle: document.getElementById("mobileNavToggle"),
   mobileNavDrawer: document.getElementById("mobileNavDrawer"),
+  mobileNavPreview: document.getElementById("mobileNavPreview"),
   mobileNavBackdrop: document.getElementById("mobileNavBackdrop"),
   mobileNavCloseBtn: document.getElementById("mobileNavCloseBtn"),
   mobileNavList: document.getElementById("mobileNavList"),
@@ -756,6 +757,7 @@ function rehydrateCoreRefs() {
   refs.topbar = refs.topbar || document.querySelector(".topbar");
   refs.mobileNavToggle = refs.mobileNavToggle || document.getElementById("mobileNavToggle");
   refs.mobileNavDrawer = refs.mobileNavDrawer || document.getElementById("mobileNavDrawer");
+  refs.mobileNavPreview = refs.mobileNavPreview || document.getElementById("mobileNavPreview");
   refs.mobileNavBackdrop = refs.mobileNavBackdrop || document.getElementById("mobileNavBackdrop");
   refs.mobileNavCloseBtn = refs.mobileNavCloseBtn || document.getElementById("mobileNavCloseBtn");
   refs.mobileNavList = refs.mobileNavList || document.getElementById("mobileNavList");
@@ -1320,6 +1322,76 @@ function syncTopbarHeightVar() {
   document.documentElement.style.setProperty("--topbar-height", `${height}px`);
 }
 
+function getMobileNavIcon(view, isSub = false) {
+  const name = String(view || "").toLowerCase();
+  const base =
+    name === "all"
+      ? "M3 5h18v12H3z M9 9l6 4-6 4z"
+      : name === "movie"
+      ? "M4 6h16v12H4z M6 6v12 M10 6v12 M14 6v12 M18 6v12"
+      : name === "tv"
+      ? "M4 7h16v10H4z M9 19h6 M10 5l2 2 2-2"
+      : name === "anime"
+      ? "M12 3l2.2 3.8 4.3.6-3.2 3.1.8 4.4L12 13.2 7.9 15 8.7 10.6 5.5 7.4l4.3-.6z"
+      : name === "calendar"
+      ? "M5 6h14v12H5z M7 3v4 M17 3v4 M7 10h10"
+      : name === "latest"
+      ? "M12 4l1.5 4.5H18l-3.6 2.6 1.4 4.4L12 13l-3.8 2.5 1.4-4.4L6 8.5h4.5z"
+      : name === "popular"
+      ? "M12 4l4 8-4 8-4-8z"
+      : name === "top"
+      ? "M6 18h12 M8 18V9l4-3 4 3v9"
+      : name === "list"
+      ? "M7 8h10 M7 12h10 M7 16h10"
+      : name === "recommendation"
+      ? "M4 12h16 M12 4l2 4 4 2-4 2-2 4-2-4-4-2 4-2z"
+      : name === "info"
+      ? "M12 7h.01 M11 10h2v6h-2z"
+      : "M5 6h14v12H5z";
+  const size = isSub ? 18 : 20;
+  return `
+    <svg viewBox="0 0 24 24" width="${size}" height="${size}" aria-hidden="true" focusable="false">
+      <path d="${base}" fill="currentColor"></path>
+    </svg>
+  `;
+}
+
+function buildMobileNavPreview() {
+  if (!(refs.mobileNavPreview instanceof HTMLElement)) {
+    return;
+  }
+  const pool = Array.isArray(getVisibleCatalog()) ? getVisibleCatalog() : [];
+  const fallback = Array.isArray(state.catalog) ? state.catalog : [];
+  const source = pool.length > 0 ? pool : fallback;
+  const picks = [];
+  for (const item of source) {
+    if (!item || picks.length >= 12) {
+      break;
+    }
+    const cover = resolveCardCover(item);
+    if (!cover) {
+      continue;
+    }
+    picks.push({ id: item.id, title: item.title || "Affiche", cover });
+  }
+  if (picks.length === 0) {
+    refs.mobileNavPreview.innerHTML = "";
+    refs.mobileNavPreview.hidden = true;
+    return;
+  }
+  refs.mobileNavPreview.hidden = false;
+  refs.mobileNavPreview.innerHTML = `
+    <div class="mobile-nav-preview-grid">
+      ${picks
+        .map(
+          (row) =>
+            `<img src="${escapeHtml(row.cover)}" alt="${escapeHtml(row.title)}" loading="lazy" decoding="async" />`
+        )
+        .join("")}
+    </div>
+  `;
+}
+
 function buildMobileNavList() {
   if (!(refs.mobileNavList instanceof HTMLElement)) {
     return;
@@ -1335,7 +1407,11 @@ function buildMobileNavList() {
     button.type = "button";
     button.className = "mobile-nav-item";
     button.dataset.view = view;
-    button.textContent = String(pill.textContent || view);
+    const label = String(pill.textContent || view);
+    button.innerHTML = `
+      <span class="mobile-nav-icon">${getMobileNavIcon(view, false)}</span>
+      <span class="mobile-nav-label">${escapeHtml(label)}</span>
+    `;
     fragment.appendChild(button);
   });
 
@@ -1359,7 +1435,11 @@ function buildMobileNavList() {
       button.type = "button";
       button.className = "mobile-nav-subitem";
       button.dataset.view = row.view;
-      button.textContent = String(row.label || row.view);
+      const label = String(row.label || row.view);
+      button.innerHTML = `
+        <span class="mobile-nav-icon">${getMobileNavIcon(row.view, true)}</span>
+        <span class="mobile-nav-label">${escapeHtml(label)}</span>
+      `;
       fragment.appendChild(button);
     });
   }
@@ -1416,6 +1496,7 @@ function toggleMobileNavDrawer() {
     return;
   }
   buildMobileNavList();
+  buildMobileNavPreview();
   openMobileNavDrawer();
 }
 
@@ -2425,6 +2506,23 @@ function bindEvents() {
       const view = String(target.dataset.view || "all");
       closeMobileNavDrawer();
       handleViewSelection(view);
+    });
+    const pressClass = "is-pressed";
+    const clearPress = () => {
+      refs.mobileNavList?.querySelectorAll(`.${pressClass}`).forEach((node) => {
+        node.classList.remove(pressClass);
+      });
+    };
+    refs.mobileNavList.addEventListener("pointerdown", (event) => {
+      const target = event.target instanceof HTMLElement ? event.target.closest("[data-view]") : null;
+      if (!(target instanceof HTMLElement)) {
+        return;
+      }
+      clearPress();
+      target.classList.add(pressClass);
+    });
+    ["pointerup", "pointercancel", "pointerleave"].forEach((evt) => {
+      refs.mobileNavList?.addEventListener(evt, clearPress);
     });
   }
   buildMobileNavList();

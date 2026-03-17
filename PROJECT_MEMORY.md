@@ -129,6 +129,10 @@ Last update: 2026-03-16
 ## c327 follow-up (2026-03-17)
 - Mobile search input font-size forced to 16px to prevent iOS zoom on focus.
 
+## c328 follow-up (2026-03-17)
+- Mobile nav overlay now shows a blurred catalogue preview background.
+- Mobile nav items now include category icons + glow on press.
+
 ## Visual system policy (c137)
 - Keep unified visual tokens across the UI:
   - coherent radii/shadows/spacing

@@ -33,9 +33,12 @@ LATEST FIX LOG (2026-03-17, c326)
 - Mobile navbar redesigned as a full-screen streaming menu (premium overlay).
 - Mobile nav now occupies the full viewport with slide-up animation.
 
+LATEST FIX LOG (2026-03-17, c328)
+- Mobile nav overlay now includes a blurred catalogue preview background.
+- Mobile nav items now include category icons + glow on press.
+
 LATEST FIX LOG (2026-03-17, c327)
 - Mobile search input font-size forced to 16px to prevent iOS zoom on focus.
-
 LATEST FIX LOG (2026-03-17, c325)
 - Topbar now accounts for iOS safe-area (prevents cut-off at top before scroll).
 - VisualViewport events refresh topbar height on mobile address bar changes.
