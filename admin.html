@@ -1,15 +1,15 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="fr">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="robots" content="noindex, nofollow" />
   <title>Zenix Admin</title>
-  <link rel="stylesheet" href="/admin.css?v=20260316-c317" />
+  <link rel="stylesheet" href="/admin.css?v=20260317-c339" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet" />
-  <script defer src="/admin.js?v=20260316-c317"></script>
+  <script defer src="/admin.js?v=20260317-c339"></script>
 </head>
 <body class="admin-body">
   <div class="admin-shell">
@@ -108,6 +108,48 @@
             <button class="admin-btn admin-ghost" id="suggestNextBtn" type="button">Suivant</button>
           </div>
           <p class="admin-muted" id="suggestStatus"></p>
+        </section>
+
+        <section class="admin-card" id="adminRequestsCard">
+          <h2>Demandes de contenu</h2>
+          <p class="admin-muted">Demandes publiques depuis "Demander Contenu". Modifie le statut ou supprime.</p>
+          <div class="admin-list" id="adminRequestList"></div>
+          <p class="admin-muted" id="adminRequestEmpty" hidden>Aucune demande pour le moment.</p>
+          <p class="admin-muted" id="adminRequestStatus"></p>
+        </section>
+
+        <section class="admin-card" id="adminTvCard">
+          <h2>TV Directs</h2>
+          <p class="admin-muted">Ajoute des chaines (HLS ou embed) pour la page TV Directs.</p>
+          <div class="admin-field">
+            <label for="tvChannelName">Nom</label>
+            <input id="tvChannelName" type="text" placeholder="Ex: France 2" />
+          </div>
+          <div class="admin-field">
+            <label for="tvChannelUrl">URL</label>
+            <input id="tvChannelUrl" type="url" placeholder="https://..." />
+          </div>
+          <div class="admin-field">
+            <label for="tvChannelType">Type</label>
+            <select id="tvChannelType">
+              <option value="hls">HLS (.m3u8)</option>
+              <option value="mp4">MP4</option>
+              <option value="embed">Embed/Player</option>
+            </select>
+          </div>
+          <div class="admin-field">
+            <label for="tvChannelLogo">Logo (optionnel)</label>
+            <input id="tvChannelLogo" type="url" placeholder="https://.../logo.png" />
+          </div>
+          <div class="admin-field">
+            <label for="tvChannelGroup">Groupe (optionnel)</label>
+            <input id="tvChannelGroup" type="text" placeholder="Ex: News / Sport" />
+          </div>
+          <div class="admin-actions">
+            <button class="admin-btn" id="tvChannelAddBtn" type="button">Ajouter</button>
+          </div>
+          <p class="admin-muted" id="tvChannelStatus"></p>
+          <div class="admin-list" id="tvChannelList"></div>
         </section>
 
         <section class="admin-card">

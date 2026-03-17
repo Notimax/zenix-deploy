@@ -76,6 +76,12 @@ LATEST FIX LOG (2026-03-17, c338)
 - Auto-validation now probes in background then starts the fastest reader for real playback.
 - If the chosen reader fails to play, we continue to the next one instead of getting stuck.
 
+LATEST FIX LOG (2026-03-17, c339)
+- Added "Demander Contenu" public requests flow + admin moderation (status + delete).
+- Added "TV Directs" with admin-managed channel list (HLS/MP4/embed).
+- Added public endpoints `/api/requests` and `/api/tv-channels` (adblock gate exempt).
+- FastFlux search now returns overview/backdrop for request previews.
+
 LATEST FIX LOG (2026-03-17, c327)
 - Mobile search input font-size forced to 16px to prevent iOS zoom on focus.
 LATEST FIX LOG (2026-03-17, c325)

@@ -78,6 +78,17 @@ const refs = {
   analyticsTotal: document.getElementById("adminAnalyticsTotal"),
   analyticsUpdated: document.getElementById("adminAnalyticsUpdated"),
   analyticsStatus: document.getElementById("adminAnalyticsStatus"),
+  requestList: document.getElementById("adminRequestList"),
+  requestEmpty: document.getElementById("adminRequestEmpty"),
+  requestStatus: document.getElementById("adminRequestStatus"),
+  tvChannelName: document.getElementById("tvChannelName"),
+  tvChannelUrl: document.getElementById("tvChannelUrl"),
+  tvChannelType: document.getElementById("tvChannelType"),
+  tvChannelLogo: document.getElementById("tvChannelLogo"),
+  tvChannelGroup: document.getElementById("tvChannelGroup"),
+  tvChannelAddBtn: document.getElementById("tvChannelAddBtn"),
+  tvChannelStatus: document.getElementById("tvChannelStatus"),
+  tvChannelList: document.getElementById("tvChannelList"),
 };
 
 const FASTFLUX_BASE = "https://fastflux.xyz";
@@ -97,7 +108,40 @@ const state = {
     queue: [],
     loading: false,
   },
+  requests: [],
+  tvChannels: [],
 };
+
+const REQUEST_STATUS_LABELS = {
+  pending: "En attente",
+  in_progress: "En cours",
+  refused: "Refuse",
+  in_catalog: "En catalogue",
+};
+
+function normalizeRequestStatus(value) {
+  const raw = String(value || "")
+    .toLowerCase()
+    .replace(/[\s_-]+/g, " ")
+    .trim();
+  if (!raw) return "pending";
+  if (["en attente", "attente", "pending"].includes(raw)) return "pending";
+  if (["en cours", "in progress", "processing", "progress"].includes(raw)) return "in_progress";
+  if (["refuse", "refused", "rejete"].includes(raw)) return "refused";
+  if (["catalogue", "en catalogue", "in catalog", "in_catalog"].includes(raw)) return "in_catalog";
+  return "pending";
+}
+
+function getRequestStatusLabel(value) {
+  const normalized = normalizeRequestStatus(value);
+  return REQUEST_STATUS_LABELS[normalized] || REQUEST_STATUS_LABELS.pending;
+}
+
+function setAdminRequestStatus(message, isError = false) {
+  if (!refs.requestStatus) return;
+  refs.requestStatus.textContent = String(message || "").trim();
+  refs.requestStatus.style.color = isError ? "#ff949b" : "";
+}
 
 function extractSearchRows(payload) {
   const merged = [];
@@ -646,6 +690,149 @@ function renderAnnouncement(data) {
   }
 }
 
+function renderRequestList(items = []) {
+  if (!refs.requestList || !refs.requestEmpty) {
+    return;
+  }
+  refs.requestList.innerHTML = "";
+  const list = Array.isArray(items) ? items.slice() : [];
+  list.sort((a, b) => {
+    const left = Number(a?.updatedAt || a?.createdAt || 0);
+    const right = Number(b?.updatedAt || b?.createdAt || 0);
+    return right - left;
+  });
+  if (list.length === 0) {
+    refs.requestEmpty.hidden = false;
+    return;
+  }
+  refs.requestEmpty.hidden = true;
+  list.forEach((entry) => {
+    const status = normalizeRequestStatus(entry?.status || "pending");
+    const typeLabel = entry?.type === "tv" ? "Serie" : "Film";
+    const year = entry?.year ? ` - ${entry.year}` : "";
+    const wrapper = document.createElement("div");
+    wrapper.className = "admin-item";
+    wrapper.dataset.requestId = String(entry?.id || "");
+    wrapper.innerHTML = `
+      <div class="admin-request-row">
+        <div class="admin-item-title">${entry?.title || "Sans titre"}</div>
+        <div class="admin-request-meta">${typeLabel}${year}</div>
+        <span class="admin-request-status ${status}">${getRequestStatusLabel(status)}</span>
+      </div>
+      <div class="admin-request-actions">
+        <select class="admin-select" data-request-status>
+          <option value="pending"${status === "pending" ? " selected" : ""}>En attente</option>
+          <option value="in_progress"${status === "in_progress" ? " selected" : ""}>En cours</option>
+          <option value="refused"${status === "refused" ? " selected" : ""}>Refuse</option>
+          <option value="in_catalog"${status === "in_catalog" ? " selected" : ""}>En catalogue</option>
+        </select>
+        <button class="admin-btn admin-danger" type="button" data-request-action="delete">Supprimer</button>
+      </div>
+    `;
+    refs.requestList.appendChild(wrapper);
+  });
+}
+
+async function updateRequestStatus(id, status) {
+  if (!id) return;
+  setAdminRequestStatus("Mise a jour...");
+  try {
+    await apiFetch("/api/admin/requests/update", {
+      method: "POST",
+      body: JSON.stringify({ id, status }),
+    });
+    setAdminRequestStatus("Statut mis a jour.");
+    await loadData();
+  } catch (err) {
+    setAdminRequestStatus(err.message || "Erreur mise a jour.", true);
+  }
+}
+
+async function deleteRequest(id) {
+  if (!id) return;
+  setAdminRequestStatus("Suppression...");
+  try {
+    await apiFetch("/api/admin/requests/delete", {
+      method: "POST",
+      body: JSON.stringify({ id }),
+    });
+    setAdminRequestStatus("Supprime.");
+    await loadData();
+  } catch (err) {
+    setAdminRequestStatus(err.message || "Suppression impossible.", true);
+  }
+}
+
+function renderTvChannelList(items = []) {
+  if (!refs.tvChannelList) {
+    return;
+  }
+  refs.tvChannelList.innerHTML = "";
+  const list = Array.isArray(items) ? items.slice() : [];
+  if (list.length === 0) {
+    refs.tvChannelList.innerHTML = "<div class=\"admin-muted\">Aucune chaine pour le moment.</div>";
+    return;
+  }
+  list.forEach((entry) => {
+    const wrapper = document.createElement("div");
+    wrapper.className = "admin-item";
+    wrapper.dataset.tvId = String(entry?.id || "");
+    wrapper.innerHTML = `
+      <div class="admin-tv-row">
+        <div class="admin-tv-name">${entry?.name || "Sans titre"}</div>
+        <div class="admin-tv-meta">${entry?.type || "hls"} • ${entry?.url || ""}</div>
+      </div>
+      <div class="admin-actions">
+        <button class="admin-btn admin-danger" type="button" data-tv-action="delete">Supprimer</button>
+      </div>
+    `;
+    refs.tvChannelList.appendChild(wrapper);
+  });
+}
+
+async function handleAddTvChannel() {
+  if (!refs.tvChannelName || !refs.tvChannelUrl || !refs.tvChannelType) return;
+  const name = refs.tvChannelName.value.trim();
+  const url = refs.tvChannelUrl.value.trim();
+  const type = refs.tvChannelType.value.trim();
+  const logo = refs.tvChannelLogo ? refs.tvChannelLogo.value.trim() : "";
+  const group = refs.tvChannelGroup ? refs.tvChannelGroup.value.trim() : "";
+  if (!name || !url) {
+    if (refs.tvChannelStatus) refs.tvChannelStatus.textContent = "Nom et URL requis.";
+    return;
+  }
+  if (refs.tvChannelStatus) refs.tvChannelStatus.textContent = "Ajout...";
+  try {
+    await apiFetch("/api/admin/tv-channels", {
+      method: "POST",
+      body: JSON.stringify({ name, url, type, logo, group }),
+    });
+    if (refs.tvChannelStatus) refs.tvChannelStatus.textContent = "Chaine ajoutee.";
+    refs.tvChannelName.value = "";
+    refs.tvChannelUrl.value = "";
+    if (refs.tvChannelLogo) refs.tvChannelLogo.value = "";
+    if (refs.tvChannelGroup) refs.tvChannelGroup.value = "";
+    await loadData();
+  } catch (err) {
+    if (refs.tvChannelStatus) refs.tvChannelStatus.textContent = err.message || "Erreur ajout.";
+  }
+}
+
+async function deleteTvChannel(id) {
+  if (!id) return;
+  if (refs.tvChannelStatus) refs.tvChannelStatus.textContent = "Suppression...";
+  try {
+    await apiFetch("/api/admin/tv-channels", {
+      method: "DELETE",
+      body: JSON.stringify({ id }),
+    });
+    if (refs.tvChannelStatus) refs.tvChannelStatus.textContent = "Supprime.";
+    await loadData();
+  } catch (err) {
+    if (refs.tvChannelStatus) refs.tvChannelStatus.textContent = err.message || "Erreur suppression.";
+  }
+}
+
 function renderAnalyticsCounters(payload) {
   if (!payload) return;
   if (refs.analyticsLive) refs.analyticsLive.textContent = String(payload.activeNow ?? 0);
@@ -811,9 +998,13 @@ async function loadData() {
   }
   state.overridesById = state.data?.overrides?.byId || {};
   state.overridesByExternalKey = state.data?.overrides?.byExternalKey || {};
+  state.requests = Array.isArray(state.data?.requests) ? state.data.requests : [];
+  state.tvChannels = Array.isArray(state.data?.tvChannels) ? state.data.tvChannels : [];
   renderAnnouncement(state.data);
   renderCustomList(state.data.custom || []);
   renderOverrideList(state.data);
+  renderRequestList(state.requests);
+  renderTvChannelList(state.tvChannels);
   renderSelectedItem();
 }
 
@@ -1162,6 +1353,62 @@ function bindEvents() {
   if (refs.selectedHideBtn) refs.selectedHideBtn.addEventListener("click", handleSelectedHide);
   if (refs.selectedShowBtn) refs.selectedShowBtn.addEventListener("click", handleSelectedShow);
   if (refs.selectedDeleteBtn) refs.selectedDeleteBtn.addEventListener("click", handleSelectedDelete);
+  if (refs.requestList) {
+    refs.requestList.addEventListener("change", (event) => {
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      if (!(target instanceof HTMLSelectElement) || !target.matches("[data-request-status]")) {
+        return;
+      }
+      const wrapper = target.closest("[data-request-id]");
+      if (!(wrapper instanceof HTMLElement)) {
+        return;
+      }
+      const id = String(wrapper.dataset.requestId || "").trim();
+      if (!id) {
+        return;
+      }
+      updateRequestStatus(id, target.value);
+    });
+    refs.requestList.addEventListener("click", (event) => {
+      const target = event.target instanceof HTMLElement ? event.target.closest("[data-request-action]") : null;
+      if (!(target instanceof HTMLElement)) {
+        return;
+      }
+      const wrapper = target.closest("[data-request-id]");
+      if (!(wrapper instanceof HTMLElement)) {
+        return;
+      }
+      const id = String(wrapper.dataset.requestId || "").trim();
+      if (!id) {
+        return;
+      }
+      if (target.dataset.requestAction === "delete") {
+        deleteRequest(id);
+      }
+    });
+  }
+  if (refs.tvChannelAddBtn) {
+    refs.tvChannelAddBtn.addEventListener("click", handleAddTvChannel);
+  }
+  if (refs.tvChannelList) {
+    refs.tvChannelList.addEventListener("click", (event) => {
+      const target = event.target instanceof HTMLElement ? event.target.closest("[data-tv-action]") : null;
+      if (!(target instanceof HTMLElement)) {
+        return;
+      }
+      const wrapper = target.closest("[data-tv-id]");
+      if (!(wrapper instanceof HTMLElement)) {
+        return;
+      }
+      const id = String(wrapper.dataset.tvId || "").trim();
+      if (!id) {
+        return;
+      }
+      if (target.dataset.tvAction === "delete") {
+        deleteTvChannel(id);
+      }
+    });
+  }
 }
 
 bindEvents();

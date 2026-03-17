@@ -420,6 +420,11 @@ const SUGGESTIONS_DUPLICATE_TTL_MS = Math.max(
   60 * 1000,
   Number(process.env.SUGGESTIONS_DUPLICATE_TTL_MS || 6 * 60 * 60 * 1000)
 );
+const REQUEST_RATE_LIMIT_MS = Math.max(5000, Number(process.env.REQUEST_RATE_LIMIT_MS || 25 * 1000));
+const REQUEST_DUPLICATE_TTL_MS = Math.max(
+  60 * 1000,
+  Number(process.env.REQUEST_DUPLICATE_TTL_MS || 6 * 60 * 60 * 1000)
+);
 const HLS_PROXY_USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36";
 const DISCORD_STATS_STATE_FILE = path.join(ROOT, ".discord-stats-state.json");
@@ -562,6 +567,8 @@ const analyticsGeoCache = new Map();
 const analyticsGeoInFlight = new Map();
 const suggestionRateLimitMap = new Map();
 const suggestionFingerprintMap = new Map();
+const requestRateLimitMap = new Map();
+const requestFingerprintMap = new Map();
 let analyticsTotalSeen = 0;
 let analyticsTotalsHydrated = false;
 let analyticsPersistTimer = null;
@@ -778,6 +785,168 @@ function rememberSuggestionFingerprint(fingerprint, now = Date.now()) {
     return;
   }
   suggestionFingerprintMap.set(key, now);
+}
+
+function sanitizeHttpUrl(value, maxLength = 420) {
+  const raw = sanitizeToken(value, maxLength);
+  if (!raw) {
+    return "";
+  }
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return "";
+    }
+    return parsed.toString();
+  } catch {
+    return "";
+  }
+}
+
+function normalizeRequestType(value) {
+  return String(value || "").toLowerCase() === "tv" ? "tv" : "movie";
+}
+
+function normalizeRequestStatus(value) {
+  const raw = String(value || "")
+    .toLowerCase()
+    .replace(/[\s_-]+/g, " ")
+    .trim();
+  if (!raw) return "pending";
+  if (["en attente", "attente", "pending"].includes(raw)) return "pending";
+  if (["en cours", "in progress", "processing", "progress"].includes(raw)) return "in_progress";
+  if (["refuse", "refused", "rejete"].includes(raw)) return "refused";
+  if (["catalogue", "en catalogue", "in catalog", "in_catalog"].includes(raw)) return "in_catalog";
+  return "pending";
+}
+
+function buildRequestKey(entry) {
+  if (!entry) {
+    return "";
+  }
+  const type = normalizeRequestType(entry.type);
+  const tmdbId = toInt(entry.tmdbId || entry.tmdb_id || entry.external_tmdb_id, 0, 0, 999999999);
+  if (tmdbId > 0) {
+    return `tmdb:${tmdbId}:${type}`;
+  }
+  const titleKey = normalizeTitleKey(entry.title || "");
+  if (!titleKey) {
+    return "";
+  }
+  const year = toInt(entry.year, 0, 0, 2099);
+  return `${titleKey}:${type}:${year}`;
+}
+
+function checkRequestRateLimit(ip, now = Date.now()) {
+  const key = sanitizeToken(ip, 80) || "unknown";
+  const last = Number(requestRateLimitMap.get(key) || 0);
+  if (now - last < REQUEST_RATE_LIMIT_MS) {
+    return {
+      limited: true,
+      retryAfterMs: Math.max(0, REQUEST_RATE_LIMIT_MS - (now - last)),
+    };
+  }
+  requestRateLimitMap.set(key, now);
+  const staleBefore = now - REQUEST_RATE_LIMIT_MS * 12;
+  for (const [entryKey, entryValue] of requestRateLimitMap.entries()) {
+    if (Number(entryValue || 0) < staleBefore) {
+      requestRateLimitMap.delete(entryKey);
+    }
+  }
+  return { limited: false, retryAfterMs: 0 };
+}
+
+function buildRequestFingerprint(payload) {
+  const raw = JSON.stringify(payload || {});
+  return crypto.createHash("sha256").update(raw).digest("hex");
+}
+
+function checkRequestDuplicate(fingerprint, now = Date.now()) {
+  const key = String(fingerprint || "").trim();
+  if (!key) {
+    return { duplicate: false, retryAfterMs: 0 };
+  }
+  const staleBefore = now - REQUEST_DUPLICATE_TTL_MS * 2;
+  for (const [entryKey, entryValue] of requestFingerprintMap.entries()) {
+    if (Number(entryValue || 0) < staleBefore) {
+      requestFingerprintMap.delete(entryKey);
+    }
+  }
+  const last = Number(requestFingerprintMap.get(key) || 0);
+  if (last > 0 && now - last < REQUEST_DUPLICATE_TTL_MS) {
+    return {
+      duplicate: true,
+      retryAfterMs: Math.max(0, REQUEST_DUPLICATE_TTL_MS - (now - last)),
+    };
+  }
+  return { duplicate: false, retryAfterMs: 0 };
+}
+
+function rememberRequestFingerprint(fingerprint, now = Date.now()) {
+  const key = String(fingerprint || "").trim();
+  if (!key) {
+    return;
+  }
+  requestFingerprintMap.set(key, now);
+}
+
+function normalizeRequestEntry(raw) {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+  const title = sanitizeSuggestionText(raw.title, 140);
+  if (!title) {
+    return null;
+  }
+  const type = normalizeRequestType(raw.type);
+  const tmdbId = toInt(raw.tmdbId || raw.tmdb_id || raw.external_tmdb_id, 0, 0, 999999999);
+  const year = toInt(raw.year, 0, 0, 2099);
+  const poster = sanitizeHttpUrl(raw.poster, 420);
+  const backdrop = sanitizeHttpUrl(raw.backdrop, 420);
+  const overview = sanitizeSuggestionText(raw.overview, 600);
+  const status = normalizeRequestStatus(raw.status || "pending");
+  const id = sanitizeToken(raw.id, 80) || `req_${crypto.randomBytes(6).toString("hex")}`;
+  const createdAt = raw.createdAt ? new Date(raw.createdAt).toISOString() : new Date().toISOString();
+  const updatedAt = raw.updatedAt ? new Date(raw.updatedAt).toISOString() : createdAt;
+  return {
+    id,
+    tmdbId,
+    type,
+    title,
+    year,
+    poster,
+    backdrop,
+    overview,
+    status,
+    createdAt,
+    updatedAt,
+  };
+}
+
+function normalizeTvChannelEntry(raw) {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+  const name = sanitizeSuggestionText(raw.name, 80);
+  const url = sanitizeHttpUrl(raw.url || raw.stream_url, 520);
+  if (!name || !url) {
+    return null;
+  }
+  const type = sanitizeToken(raw.type, 24).toLowerCase();
+  const logo = sanitizeHttpUrl(raw.logo, 420);
+  const group = sanitizeSuggestionText(raw.group, 60);
+  const id = sanitizeToken(raw.id, 80) || `tv_${crypto.randomBytes(5).toString("hex")}`;
+  const order = toInt(raw.order, 0, 0, 9999);
+  return {
+    id,
+    name,
+    url,
+    type,
+    logo,
+    group,
+    order,
+    updatedAt: new Date().toISOString(),
+  };
 }
 
 function parseJsonSafe(value) {
@@ -1613,6 +1782,8 @@ function buildDefaultAdminData() {
     suggestions: {
       skips: {},
     },
+    requests: [],
+    tvChannels: [],
     analytics: {
       totalSeen: 0,
       updatedAt: "",
@@ -1643,6 +1814,12 @@ function normalizeAdminData(raw) {
   base.suggestions = {
     skips: suggestions.skips && typeof suggestions.skips === "object" ? suggestions.skips : {},
   };
+  base.requests = Array.isArray(raw.requests)
+    ? raw.requests.map((entry) => normalizeRequestEntry(entry)).filter(Boolean)
+    : [];
+  base.tvChannels = Array.isArray(raw.tvChannels)
+    ? raw.tvChannels.map((entry) => normalizeTvChannelEntry(entry)).filter(Boolean)
+    : [];
   const analytics = raw.analytics || {};
   base.analytics = {
     totalSeen: Number(analytics.totalSeen || 0) || 0,
@@ -12273,6 +12450,12 @@ function isGateProtectedPath(pathname) {
   if (pathname === "/api/backup-config") {
     return false;
   }
+  if (pathname === "/api/requests") {
+    return false;
+  }
+  if (pathname === "/api/tv-channels") {
+    return false;
+  }
   if (pathname === "/api/suggestions") {
     return false;
   }
@@ -12813,6 +12996,274 @@ async function handleSuggestionSubmit(req, res, requestUrl) {
     sendJson(res, 502, { error: "Suggestions relay unavailable" });
     return true;
   }
+}
+
+async function handleRequestsPublic(req, res, requestUrl) {
+  if (requestUrl.pathname !== "/api/requests") {
+    return false;
+  }
+  if (req.method === "OPTIONS") {
+    res.writeHead(204, {
+      Allow: "GET, POST, OPTIONS",
+      "Cache-Control": "no-cache",
+    });
+    res.end();
+    return true;
+  }
+  if (req.method === "GET") {
+    const data = loadAdminData(true);
+    const list = Array.isArray(data.requests) ? data.requests : [];
+    sendJson(res, 200, { type: "success", data: list });
+    return true;
+  }
+  if (req.method !== "POST") {
+    sendJson(res, 405, { error: "Method Not Allowed" });
+    return true;
+  }
+
+  let payload;
+  try {
+    payload = await readJsonBody(req, 16 * 1024);
+  } catch {
+    sendJson(res, 400, { error: "Invalid request body" });
+    return true;
+  }
+
+  const sanitizedEntry = normalizeRequestEntry({
+    ...payload,
+    type: normalizeRequestType(payload?.type),
+    status: "pending",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
+  if (!sanitizedEntry) {
+    sendJson(res, 400, { error: "Missing title" });
+    return true;
+  }
+
+  const remoteIp = getRemoteAddress(req);
+  const rateLimit = checkRequestRateLimit(remoteIp);
+  if (rateLimit.limited) {
+    sendJson(res, 429, {
+      error: "Too many requests, please try again in a moment.",
+      retryAfterMs: rateLimit.retryAfterMs,
+    });
+    return true;
+  }
+
+  const fingerprint = buildRequestFingerprint({
+    ip: sanitizeToken(remoteIp, 80),
+    tmdbId: sanitizedEntry.tmdbId,
+    type: sanitizedEntry.type,
+    title: sanitizedEntry.title,
+    year: sanitizedEntry.year,
+  });
+  const dupe = checkRequestDuplicate(fingerprint);
+  if (dupe.duplicate) {
+    sendJson(res, 200, { ok: true, duplicate: true });
+    return true;
+  }
+
+  const data = loadAdminData(true);
+  const list = Array.isArray(data.requests) ? data.requests.slice() : [];
+  const key = buildRequestKey(sanitizedEntry);
+  if (key) {
+    const existingIndex = list.findIndex((entry) => buildRequestKey(entry) === key);
+    if (existingIndex >= 0) {
+      const existing = normalizeRequestEntry(list[existingIndex]) || list[existingIndex];
+      const updated = {
+        ...existing,
+        updatedAt: new Date().toISOString(),
+      };
+      list[existingIndex] = updated;
+      data.requests = list;
+      saveAdminData(data);
+      rememberRequestFingerprint(fingerprint);
+      sendJson(res, 200, { ok: true, duplicate: true, data: updated });
+      return true;
+    }
+  }
+
+  list.unshift(sanitizedEntry);
+  if (list.length > 320) {
+    list.length = 320;
+  }
+  data.requests = list;
+  saveAdminData(data);
+  rememberRequestFingerprint(fingerprint);
+  sendJson(res, 200, { ok: true, data: sanitizedEntry });
+  return true;
+}
+
+async function handleAdminRequestsUpdate(req, res, requestUrl) {
+  if (requestUrl.pathname !== "/api/admin/requests/update") {
+    return false;
+  }
+  if (req.method !== "POST") {
+    sendJson(res, 405, { error: "Method Not Allowed" });
+    return true;
+  }
+  if (!isAdminAuthenticated(req)) {
+    sendJson(res, 401, { error: "Unauthorized" });
+    return true;
+  }
+  let body = null;
+  try {
+    body = await readJsonBody(req, 4096);
+  } catch {
+    sendJson(res, 400, { error: "Invalid JSON" });
+    return true;
+  }
+  const id = sanitizeToken(body?.id, 80);
+  if (!id) {
+    sendJson(res, 400, { error: "Missing request id" });
+    return true;
+  }
+  const status = normalizeRequestStatus(body?.status || "pending");
+  const data = loadAdminData(true);
+  const list = Array.isArray(data.requests) ? data.requests.slice() : [];
+  const idx = list.findIndex((entry) => String(entry?.id || "") === id);
+  if (idx < 0) {
+    sendJson(res, 404, { error: "Request not found" });
+    return true;
+  }
+  const updated = {
+    ...list[idx],
+    status,
+    updatedAt: new Date().toISOString(),
+  };
+  list[idx] = updated;
+  data.requests = list;
+  saveAdminData(data);
+  sendJson(res, 200, { ok: true, data: updated });
+  return true;
+}
+
+async function handleAdminRequestsDelete(req, res, requestUrl) {
+  if (requestUrl.pathname !== "/api/admin/requests/delete") {
+    return false;
+  }
+  if (req.method !== "POST") {
+    sendJson(res, 405, { error: "Method Not Allowed" });
+    return true;
+  }
+  if (!isAdminAuthenticated(req)) {
+    sendJson(res, 401, { error: "Unauthorized" });
+    return true;
+  }
+  let body = null;
+  try {
+    body = await readJsonBody(req, 4096);
+  } catch {
+    sendJson(res, 400, { error: "Invalid JSON" });
+    return true;
+  }
+  const id = sanitizeToken(body?.id, 80);
+  if (!id) {
+    sendJson(res, 400, { error: "Missing request id" });
+    return true;
+  }
+  const data = loadAdminData(true);
+  const list = Array.isArray(data.requests) ? data.requests : [];
+  const next = list.filter((entry) => String(entry?.id || "") !== id);
+  data.requests = next;
+  saveAdminData(data);
+  sendJson(res, 200, { ok: true });
+  return true;
+}
+
+async function handleTvChannelsPublic(req, res, requestUrl) {
+  if (requestUrl.pathname !== "/api/tv-channels") {
+    return false;
+  }
+  if (req.method === "OPTIONS") {
+    res.writeHead(204, {
+      Allow: "GET, OPTIONS",
+      "Cache-Control": "no-cache",
+    });
+    res.end();
+    return true;
+  }
+  if (req.method !== "GET") {
+    sendJson(res, 405, { error: "Method Not Allowed" });
+    return true;
+  }
+  const data = loadAdminData(true);
+  const list = Array.isArray(data.tvChannels) ? data.tvChannels.slice() : [];
+  list.sort((left, right) => {
+    const orderDiff = Number(left?.order || 0) - Number(right?.order || 0);
+    if (orderDiff !== 0) return orderDiff;
+    return String(left?.name || "").localeCompare(String(right?.name || ""), "fr", { sensitivity: "base" });
+  });
+  sendJson(res, 200, { type: "success", data: list });
+  return true;
+}
+
+async function handleAdminTvChannels(req, res, requestUrl) {
+  if (requestUrl.pathname !== "/api/admin/tv-channels") {
+    return false;
+  }
+  if (!isAdminAuthenticated(req)) {
+    sendJson(res, 401, { error: "Unauthorized" });
+    return true;
+  }
+  if (req.method === "POST") {
+    let body = null;
+    try {
+      body = await readJsonBody(req, 8192);
+    } catch {
+      sendJson(res, 400, { error: "Invalid JSON" });
+      return true;
+    }
+    const entry = normalizeTvChannelEntry(body);
+    if (!entry) {
+      sendJson(res, 400, { error: "Invalid channel data" });
+      return true;
+    }
+    const data = loadAdminData(true);
+    const list = Array.isArray(data.tvChannels) ? data.tvChannels.slice() : [];
+    const idx = list.findIndex(
+      (channel) =>
+        String(channel?.id || "") === entry.id ||
+        (String(channel?.url || "") === entry.url && normalizeTitleKey(channel?.name || "") === normalizeTitleKey(entry.name))
+    );
+    if (idx >= 0) {
+      list[idx] = { ...list[idx], ...entry, updatedAt: new Date().toISOString() };
+    } else {
+      list.push(entry);
+    }
+    list.sort((left, right) => {
+      const orderDiff = Number(left?.order || 0) - Number(right?.order || 0);
+      if (orderDiff !== 0) return orderDiff;
+      return String(left?.name || "").localeCompare(String(right?.name || ""), "fr", { sensitivity: "base" });
+    });
+    data.tvChannels = list;
+    saveAdminData(data);
+    sendJson(res, 200, { ok: true, data: entry });
+    return true;
+  }
+  if (req.method === "DELETE") {
+    let body = null;
+    try {
+      body = await readJsonBody(req, 4096);
+    } catch {
+      sendJson(res, 400, { error: "Invalid JSON" });
+      return true;
+    }
+    const id = sanitizeToken(body?.id, 80);
+    if (!id) {
+      sendJson(res, 400, { error: "Missing channel id" });
+      return true;
+    }
+    const data = loadAdminData(true);
+    const list = Array.isArray(data.tvChannels) ? data.tvChannels : [];
+    data.tvChannels = list.filter((entry) => String(entry?.id || "") !== id);
+    saveAdminData(data);
+    sendJson(res, 200, { ok: true });
+    return true;
+  }
+  sendJson(res, 405, { error: "Method Not Allowed" });
+  return true;
 }
 
 async function handleAnnouncement(req, res, requestUrl) {
@@ -13443,12 +13894,19 @@ async function handleFilmer2Search(req, res, requestUrl) {
       }
       const typeRaw = String(row?.type || row?.media_type || "").toLowerCase();
       const rowType = typeRaw === "series" || typeRaw === "tv" ? "tv" : "movie";
+      const poster = String(row?.poster || row?.poster_path || "").trim();
+      const backdrop = String(
+        row?.backdrop || row?.backdrop_path || row?.backdrop_url || row?.fanart || ""
+      ).trim();
+      const overview = String(row?.overview || row?.description || row?.synopsis || row?.plot || "").trim();
       return {
         title,
         type: rowType,
         year: toInt(row?.year, 0, 0, 2099),
         url: buildFastfluxImportUrlFromCandidate({ tmdbId, type: rowType }),
-        poster: row?.poster || "",
+        poster,
+        backdrop,
+        overview,
         tmdbId,
       };
     })
@@ -15286,6 +15744,24 @@ const server = http.createServer((req, res) => {
       if (handledAdminSuggestAccept) {
         return true;
       }
+      return handleAdminRequestsUpdate(req, res, requestUrl);
+    })
+    .then((handledAdminRequestsUpdate) => {
+      if (handledAdminRequestsUpdate) {
+        return true;
+      }
+      return handleAdminRequestsDelete(req, res, requestUrl);
+    })
+    .then((handledAdminRequestsDelete) => {
+      if (handledAdminRequestsDelete) {
+        return true;
+      }
+      return handleAdminTvChannels(req, res, requestUrl);
+    })
+    .then((handledAdminTvChannels) => {
+      if (handledAdminTvChannels) {
+        return true;
+      }
       return handleFilmer2Search(req, res, requestUrl);
     })
     .then((handledFilmer2Search) => {
@@ -15338,6 +15814,18 @@ const server = http.createServer((req, res) => {
     })
     .then((handledSuggestions) => {
       if (handledSuggestions) {
+        return true;
+      }
+      return handleRequestsPublic(req, res, requestUrl);
+    })
+    .then((handledRequestsPublic) => {
+      if (handledRequestsPublic) {
+        return true;
+      }
+      return handleTvChannelsPublic(req, res, requestUrl);
+    })
+    .then((handledTvChannelsPublic) => {
+      if (handledTvChannelsPublic) {
         return true;
       }
       return handleCalendarOverview(req, res, requestUrl);

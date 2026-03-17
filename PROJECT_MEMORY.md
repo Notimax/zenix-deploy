@@ -172,6 +172,12 @@ Last update: 2026-03-16
 - Background validation now probes then starts the chosen reader for real playback.
 - If the validated reader fails to play, we continue to the next reader (no dead-end).
 
+## c339 follow-up (2026-03-17)
+- Added "Demander Contenu" (public requests) + admin moderation (status + delete).
+- Added "TV Directs" page with admin-managed channels (HLS/MP4/embed).
+- Public endpoints `/api/requests` and `/api/tv-channels` are exempt from gate.
+- FastFlux search now returns overview/backdrop for request previews.
+
 ## Visual system policy (c137)
 - Keep unified visual tokens across the UI:
   - coherent radii/shadows/spacing

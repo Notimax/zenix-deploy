@@ -67,15 +67,15 @@
       "logo": "https://zenix.best/android-chrome-512x512.png"
     }
   </script>
-    <link rel="preload" as="style" href="/zenix.css?v=20260317-c338" />
-    <link rel="preload" as="script" href="/zenix.js?v=20260317-c338" />
+    <link rel="preload" as="style" href="/zenix.css?v=20260317-c339" />
+    <link rel="preload" as="script" href="/zenix.js?v=20260317-c339" />
     <script>
-      window.__ZENIX_ASSET_VERSION = "20260317-c338";
+      window.__ZENIX_ASSET_VERSION = "20260317-c339";
     </script>
-    <link id="zenixStylesheet" rel="stylesheet" href="/zenix.css?v=20260317-c338" onerror="window.__zenixCssRetry && window.__zenixCssRetry()" />
+    <link id="zenixStylesheet" rel="stylesheet" href="/zenix.css?v=20260317-c339" onerror="window.__zenixCssRetry && window.__zenixCssRetry()" />
     <script>
       (function () {
-        var cssHref = "/zenix.css?v=20260317-c338";
+        var cssHref = "/zenix.css?v=20260317-c339";
         var maxRetries = 2;
         function hasCss() {
           var sheets = document.styleSheets || [];
@@ -205,7 +205,7 @@
         }
       })();
     </script>
-    <script id="zenixCoreScript" defer src="/zenix.js?v=20260317-c338"></script>
+    <script id="zenixCoreScript" defer src="/zenix.js?v=20260317-c339"></script>
     <script>
       (function () {
         var core = document.getElementById("zenixCoreScript");
@@ -236,7 +236,7 @@
           window.__zenixRetryScriptAdded = true;
           var script = document.createElement("script");
           script.defer = true;
-          script.src = "/zenix.js?v=20260317-c338&retry=" + Date.now();
+          script.src = "/zenix.js?v=20260317-c339&retry=" + Date.now();
           document.head.appendChild(script);
         }
 
@@ -245,7 +245,7 @@
             return;
           }
           window.__zenixInlineFallbackLoaded = true;
-          var inlineSrc = "/zenix.js?v=20260317-c338&inline=" + Date.now();
+          var inlineSrc = "/zenix.js?v=20260317-c339&inline=" + Date.now();
           fetch(inlineSrc, { cache: "no-store" })
             .then(function (res) {
               if (!res.ok) {
@@ -358,7 +358,7 @@
             }
             var script = document.createElement("script");
             script.defer = true;
-            script.src = "/zenix.js?v=20260317-c338&watch=" + Date.now();
+            script.src = "/zenix.js?v=20260317-c339&watch=" + Date.now();
             document.head.appendChild(script);
             setTimeout(function () {
               if (!window.__zenixBooted) {
@@ -440,6 +440,8 @@
             <button class="nav-subitem" type="button" role="menuitem" data-view="top">Top du jour</button>
             <button class="nav-subitem" type="button" role="menuitem" data-view="list">Ma liste</button>
             <button class="nav-subitem" type="button" role="menuitem" data-view="recommendation">Recommandation</button>
+            <button class="nav-subitem" type="button" role="menuitem" data-view="request">Demander Contenu</button>
+            <button class="nav-subitem" type="button" role="menuitem" data-view="tv-live">TV Directs</button>
           </div>
         </div>
         <button class="nav-pill" data-view="info" type="button">Infos</button>
@@ -593,6 +595,62 @@
           <div class="recommendation-grid" id="recommendationGrid"></div>
         </div>
       </div>
+    </section>
+
+    <section class="request-section" id="requestSection" hidden>
+      <div class="section-head">
+        <h2>Demander Contenu</h2>
+        <p>Demande un film ou une serie, on traite ta requete rapidement.</p>
+      </div>
+      <div class="request-shell">
+        <div class="request-form">
+          <div class="request-type-toggle" id="requestTypeToggle" role="group" aria-label="Type de contenu">
+            <button class="request-type-btn active" type="button" data-request-type="movie">Film</button>
+            <button class="request-type-btn" type="button" data-request-type="tv">Serie</button>
+          </div>
+          <div class="request-search">
+            <input id="requestSearchInput" type="search" placeholder="Rechercher un titre..." autocomplete="off" />
+            <div class="request-search-panel" id="requestSearchPanel" hidden></div>
+          </div>
+          <p class="request-status" id="requestStatus"></p>
+        </div>
+        <div class="request-selected" id="requestSelected">
+          <p class="request-empty">Tape un titre pour voir les resultats.</p>
+        </div>
+      </div>
+      <div class="request-public">
+        <div class="section-head section-head-compact">
+          <h3>Demandes en public</h3>
+          <p>Statut en temps reel: en attente, en cours, refuse ou en catalogue.</p>
+        </div>
+        <div class="request-grid" id="requestPublicGrid"></div>
+        <p class="request-empty" id="requestPublicEmpty" hidden>Aucune demande pour le moment.</p>
+      </div>
+    </section>
+
+    <section class="tv-section" id="tvSection" hidden>
+      <div class="section-head">
+        <h2>TV Directs</h2>
+        <p>Chaines francaises en direct, selectionne une chaine pour lancer le live.</p>
+      </div>
+      <div class="tv-shell">
+        <div class="tv-player-card">
+          <div class="tv-player-head">
+            <div>
+              <p class="tv-player-kicker">En direct</p>
+              <h3 id="tvPlayerTitle">Choisis une chaine</h3>
+            </div>
+            <span class="tv-player-status" id="tvPlayerStatus"></span>
+          </div>
+          <div class="tv-video-wrap">
+            <div class="tv-player-empty" id="tvPlayerEmpty">Aucune chaine selectionnee.</div>
+            <video id="tvPlayerVideo" controls playsinline hidden></video>
+            <iframe id="tvPlayerEmbed" title="TV Direct" allow="autoplay; fullscreen" hidden></iframe>
+          </div>
+        </div>
+        <div class="tv-channel-list" id="tvChannelList"></div>
+      </div>
+      <p class="request-empty" id="tvChannelEmpty" hidden>Aucune chaine ajoutee pour le moment.</p>
     </section>
 
     <section class="continue" id="continueSection" hidden>

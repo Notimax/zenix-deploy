@@ -1,5 +1,5 @@
 const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260317-c338";
+const ZENIX_BUILD_VERSION = "20260317-c339";
 const STORAGE_KEY = "zenix-progress-v4";
 const COVER_CACHE_KEY = "zenix-cover-cache-v1";
 const LOCAL_PLAY_KEY = "zenix-local-plays-v1";
@@ -24,6 +24,9 @@ const ACTIVE_VIEW_SYNC_MS = 45 * 1000;
 const REQUEST_TIMEOUT_MS = 15000;
 const RETRY_DELAYS_MS = [350, 900];
 const SEARCH_DEBOUNCE_MS = 180;
+const REQUEST_SEARCH_DEBOUNCE_MS = 260;
+const REQUEST_PUBLIC_REFRESH_MS = 45 * 1000;
+const TV_REFRESH_MS = 60 * 1000;
 const API_CACHE_TTL_MS = 45 * 1000;
 const STREAM_CACHE_TTL_MS = 2 * 60 * 1000;
 const STREAM_PREFETCH_COOLDOWN_MS = 15 * 1000;
@@ -538,6 +541,29 @@ themeFilters: {
     results: [],
     seed: Date.now(),
   },
+  request: {
+    type: "movie",
+    query: "",
+    results: [],
+    selected: null,
+    list: [],
+    loading: false,
+    submitInFlight: false,
+    searchToken: 0,
+    searchTimer: 0,
+    searchAbort: null,
+    lastUpdatedAt: 0,
+    refreshTimer: 0,
+  },
+  tv: {
+    list: [],
+    selected: null,
+    loading: false,
+    lastUpdatedAt: 0,
+    playToken: 0,
+    hls: null,
+    refreshTimer: 0,
+  },
   repairCache: new Map(),
   repairInFlight: new Map(),
   sourceWarningMessage: "",
@@ -567,6 +593,22 @@ const refs = {
   recommendationResults: document.getElementById("recommendationResults"),
   recommendationGrid: document.getElementById("recommendationGrid"),
   recommendationRestartBtn: document.getElementById("recommendationRestartBtn"),
+  requestSection: document.getElementById("requestSection"),
+  requestTypeToggle: document.getElementById("requestTypeToggle"),
+  requestSearchInput: document.getElementById("requestSearchInput"),
+  requestSearchPanel: document.getElementById("requestSearchPanel"),
+  requestStatus: document.getElementById("requestStatus"),
+  requestSelected: document.getElementById("requestSelected"),
+  requestPublicGrid: document.getElementById("requestPublicGrid"),
+  requestPublicEmpty: document.getElementById("requestPublicEmpty"),
+  tvSection: document.getElementById("tvSection"),
+  tvPlayerTitle: document.getElementById("tvPlayerTitle"),
+  tvPlayerStatus: document.getElementById("tvPlayerStatus"),
+  tvPlayerEmpty: document.getElementById("tvPlayerEmpty"),
+  tvPlayerVideo: document.getElementById("tvPlayerVideo"),
+  tvPlayerEmbed: document.getElementById("tvPlayerEmbed"),
+  tvChannelList: document.getElementById("tvChannelList"),
+  tvChannelEmpty: document.getElementById("tvChannelEmpty"),
   suggestionForm: document.getElementById("suggestionForm"),
   suggestionType: document.getElementById("suggestionType"),
   suggestionTitle: document.getElementById("suggestionTitle"),
@@ -826,6 +868,23 @@ function rehydrateCoreRefs() {
   refs.catalogGrid = refs.catalogGrid || document.getElementById("catalogGrid");
   refs.calendarSection = refs.calendarSection || document.getElementById("calendarSection");
   refs.infoSection = refs.infoSection || document.getElementById("infoSection");
+  refs.recommendationSection = refs.recommendationSection || document.getElementById("recommendationSection");
+  refs.requestSection = refs.requestSection || document.getElementById("requestSection");
+  refs.requestTypeToggle = refs.requestTypeToggle || document.getElementById("requestTypeToggle");
+  refs.requestSearchInput = refs.requestSearchInput || document.getElementById("requestSearchInput");
+  refs.requestSearchPanel = refs.requestSearchPanel || document.getElementById("requestSearchPanel");
+  refs.requestStatus = refs.requestStatus || document.getElementById("requestStatus");
+  refs.requestSelected = refs.requestSelected || document.getElementById("requestSelected");
+  refs.requestPublicGrid = refs.requestPublicGrid || document.getElementById("requestPublicGrid");
+  refs.requestPublicEmpty = refs.requestPublicEmpty || document.getElementById("requestPublicEmpty");
+  refs.tvSection = refs.tvSection || document.getElementById("tvSection");
+  refs.tvPlayerTitle = refs.tvPlayerTitle || document.getElementById("tvPlayerTitle");
+  refs.tvPlayerStatus = refs.tvPlayerStatus || document.getElementById("tvPlayerStatus");
+  refs.tvPlayerEmpty = refs.tvPlayerEmpty || document.getElementById("tvPlayerEmpty");
+  refs.tvPlayerVideo = refs.tvPlayerVideo || document.getElementById("tvPlayerVideo");
+  refs.tvPlayerEmbed = refs.tvPlayerEmbed || document.getElementById("tvPlayerEmbed");
+  refs.tvChannelList = refs.tvChannelList || document.getElementById("tvChannelList");
+  refs.tvChannelEmpty = refs.tvChannelEmpty || document.getElementById("tvChannelEmpty");
 
   refs.detailModal = refs.detailModal || document.getElementById("detailModal");
   refs.detailPanel = refs.detailPanel || document.getElementById("detailPanel");
@@ -1160,6 +1219,8 @@ function getNavGroupFallbackItems(group) {
     { view: "top", label: "Top du jour" },
     { view: "list", label: "Ma liste" },
     { view: "recommendation", label: "Recommandation" },
+    { view: "request", label: "Demander Contenu" },
+    { view: "tv-live", label: "TV Directs" },
   ];
 }
 
@@ -1372,6 +1433,10 @@ function getMobileNavIcon(view, isSub = false) {
       ? "M7 8h10 M7 12h10 M7 16h10"
       : name === "recommendation"
       ? "M4 12h16 M12 4l2 4 4 2-4 2-2 4-2-4-4-2 4-2z"
+      : name === "request"
+      ? "M4 6h16v12H4z M7 9h10 M7 12h6 M7 15h4"
+      : name === "tv-live"
+      ? "M4 7h16v10H4z M9 19h6 M10 5l2 2 2-2 M8 10l6 4-6 4z"
       : name === "info"
       ? "M12 7h.01 M11 10h2v6h-2z"
       : "M5 6h14v12H5z";
@@ -2768,6 +2833,82 @@ function bindEvents() {
     });
   }
 
+  if (refs.requestTypeToggle) {
+    refs.requestTypeToggle.addEventListener("click", (event) => {
+      const target = event.target instanceof HTMLElement ? event.target.closest("[data-request-type]") : null;
+      if (!(target instanceof HTMLElement)) {
+        return;
+      }
+      const nextType = normalizeRequestType(target.dataset.requestType || "movie");
+      if (state.request.type === nextType) {
+        return;
+      }
+      state.request.type = nextType;
+      Array.from(refs.requestTypeToggle.querySelectorAll("[data-request-type]")).forEach((btn) => {
+        btn.classList.toggle(
+          "active",
+          normalizeRequestType(btn.dataset.requestType || "movie") === state.request.type
+        );
+      });
+      state.request.results = [];
+      renderRequestSearchPanel();
+      if (refs.requestSearchInput) {
+        refs.requestSearchInput.value = "";
+      }
+      state.request.selected = null;
+      renderRequestSelected();
+    });
+  }
+
+  if (refs.requestSearchInput) {
+    refs.requestSearchInput.addEventListener("input", (event) => {
+      const value = String(event.target.value || "");
+      handleRequestSearchInput(value);
+    });
+    refs.requestSearchInput.addEventListener("focus", (event) => {
+      const value = String(event.target.value || "");
+      handleRequestSearchInput(value);
+      renderRequestSearchPanel();
+    });
+    refs.requestSearchInput.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        if (refs.requestSearchPanel) {
+          refs.requestSearchPanel.hidden = true;
+        }
+      }
+    });
+    refs.requestSearchInput.addEventListener("blur", () => {
+      window.setTimeout(() => {
+        if (refs.requestSearchPanel) {
+          refs.requestSearchPanel.hidden = true;
+        }
+      }, 120);
+    });
+  }
+
+  if (refs.requestSearchPanel) {
+    refs.requestSearchPanel.addEventListener("click", (event) => {
+      const target = event.target instanceof HTMLElement ? event.target.closest("[data-request-index]") : null;
+      if (!(target instanceof HTMLElement)) {
+        return;
+      }
+      const index = Number(target.dataset.requestIndex || -1);
+      if (!Number.isFinite(index) || index < 0) {
+        return;
+      }
+      const candidate = Array.isArray(state.request.results) ? state.request.results[index] : null;
+      if (!candidate) {
+        return;
+      }
+      state.request.selected = candidate;
+      if (refs.requestSearchInput) {
+        refs.requestSearchInput.value = candidate.title || "";
+      }
+      refs.requestSearchPanel.hidden = true;
+      renderRequestSelected();
+    });
+  }
+
   if (refs.searchInput) {
     refs.searchInput.addEventListener("input", (event) => {
     const nextQuery = String(event.target.value || "").trim();
@@ -3865,11 +4006,23 @@ function handleViewSelection(view) {
       showToast("Calendrier indisponible temporairement.", true);
     });
   }
+
+  if (normalizedView === "request") {
+    ensureRequestData({ force: true }).catch(() => {
+      showToast("Demandes indisponibles temporairement.", true);
+    });
+  }
+
+  if (normalizedView === "tv-live") {
+    ensureTvChannels({ force: true }).catch(() => {
+      showToast("TV Directs indisponible temporairement.", true);
+    });
+  }
 }
 
 function setActiveNav(view) {
   const normalizedView = view === "catalog" || view === "search" || view === "interest" ? "all" : view;
-  const groupedViews = new Set(["calendar", "latest", "popular", "top", "list", "recommendation"]);
+  const groupedViews = new Set(["calendar", "latest", "popular", "top", "list", "recommendation", "request", "tv-live"]);
   const group = normalizedView === "info" ? "info" : groupedViews.has(normalizedView) ? "discover" : "";
   const hasMatch = refs.navPills.some((entry) => (entry.dataset.view || "") === normalizedView);
   const targetView = hasMatch ? normalizedView : "all";
@@ -3952,7 +4105,7 @@ function getLoadedCatalogPage() {
 function resolveCatalogViewForSearch() {
   const query = String(state.query || "").trim();
   if (query.length === 0) {
-    return state.view === "recommendation" ? "all" : state.view;
+    return ["recommendation", "request", "tv-live"].includes(state.view) ? "all" : state.view;
   }
   if (state.view === "all" || isCatalogCategoryView(state.view)) {
     return state.view;
@@ -4477,7 +4630,31 @@ function applyNativeAdPlacement() {
   const isListView = !hasQuery && state.view === "list";
   const isTopView = !hasQuery && state.view === "top";
   const isRecommendationView = !hasQuery && state.view === "recommendation";
-  const showBrowseView = !isInfoView && !isCalendarView && !isTopView && !isListView && !isRecommendationView;
+  const isRequestView = !hasQuery && state.view === "request";
+  const isTvView = !hasQuery && state.view === "tv-live";
+  const showBrowseView =
+    !isInfoView &&
+    !isCalendarView &&
+    !isTopView &&
+    !isListView &&
+    !isRecommendationView &&
+    !isRequestView &&
+    !isTvView;
+
+  if (!isRequestView && state.request.refreshTimer) {
+    clearInterval(state.request.refreshTimer);
+    state.request.refreshTimer = 0;
+  }
+  if (!isTvView) {
+    if (state.tv.refreshTimer) {
+      clearInterval(state.tv.refreshTimer);
+      state.tv.refreshTimer = 0;
+    }
+    if (state.tv.selected) {
+      teardownTvPlayback();
+      state.tv.selected = null;
+    }
+  }
 
   const showNativeDetail = !isPlayerOpen && isDetailOpen;
   const showNativeHome = !showNativeDetail && !isPlayerOpen && showBrowseView && !hasQuery && state.view === "all";
@@ -8225,6 +8402,14 @@ function renderAll() {
     renderRecommendationView();
   }
 
+  if (isRequestView) {
+    renderRequestView();
+  }
+
+  if (isTvView) {
+    renderTvView();
+  }
+
   if (isCalendarView) {
     renderCalendarSection();
   }
@@ -8232,13 +8417,21 @@ function renderAll() {
   updateCatalogHeading(hasQuery, visible.length);
 
   setHidden(refs.heroSection, !showHero);
-  setHidden(refs.statusStrip, isInfoView || isCalendarView || isRecommendationView);
+  setHidden(refs.statusStrip, isInfoView || isCalendarView || isRecommendationView || isRequestView || isTvView);
   setHidden(refs.quickLinksSection, true);
-  setHidden(refs.filtersPanel, HIDE_BROWSE_PANELS || isInfoView || isCalendarView || isTopView || isListView || isRecommendationView);
-  setHidden(refs.communityPanel, HIDE_BROWSE_PANELS || isInfoView || isCalendarView || isTopView || isListView || isRecommendationView);
+  setHidden(
+    refs.filtersPanel,
+    HIDE_BROWSE_PANELS || isInfoView || isCalendarView || isTopView || isListView || isRecommendationView || isRequestView || isTvView
+  );
+  setHidden(
+    refs.communityPanel,
+    HIDE_BROWSE_PANELS || isInfoView || isCalendarView || isTopView || isListView || isRecommendationView || isRequestView || isTvView
+  );
   setHidden(refs.infoSection, !isInfoView);
   setHidden(refs.calendarSection, !isCalendarView);
   setHidden(refs.recommendationSection, !isRecommendationView);
+  setHidden(refs.requestSection, !isRequestView);
+  setHidden(refs.tvSection, !isTvView);
 
   setHidden(refs.topSection, !isTopView);
   setHidden(refs.trendingSection, true);
@@ -10265,6 +10458,635 @@ function renderRecommendationView() {
     state.recommendation.results = pickRecommendationResults();
   }
   renderRecommendationResults();
+}
+
+const REQUEST_STATUS_LABELS = {
+  pending: "En attente",
+  in_progress: "En cours",
+  refused: "Refuse",
+  in_catalog: "En catalogue",
+};
+
+function normalizeRequestType(value) {
+  return String(value || "").toLowerCase() === "tv" ? "tv" : "movie";
+}
+
+function normalizeRequestStatus(value) {
+  const raw = String(value || "")
+    .toLowerCase()
+    .replace(/[\s_-]+/g, " ")
+    .trim();
+  if (!raw) {
+    return "pending";
+  }
+  if (["en attente", "attente", "pending"].includes(raw)) {
+    return "pending";
+  }
+  if (["en cours", "processing", "in progress", "progress"].includes(raw)) {
+    return "in_progress";
+  }
+  if (["refuse", "refused", "rejete", "rejected"].includes(raw)) {
+    return "refused";
+  }
+  if (["catalogue", "en catalogue", "in catalog", "in_catalog"].includes(raw)) {
+    return "in_catalog";
+  }
+  return "pending";
+}
+
+function getRequestStatusLabel(status) {
+  const normalized = normalizeRequestStatus(status);
+  return REQUEST_STATUS_LABELS[normalized] || REQUEST_STATUS_LABELS.pending;
+}
+
+function getRequestStatusClass(status) {
+  return `request-status-${normalizeRequestStatus(status)}`;
+}
+
+function buildRequestKey(entry) {
+  if (!entry) {
+    return "";
+  }
+  const type = normalizeRequestType(entry.type);
+  const tmdbId = Number(entry.tmdbId || entry.tmdb_id || entry.external_tmdb_id || 0);
+  if (Number.isFinite(tmdbId) && tmdbId > 0) {
+    return `tmdb:${tmdbId}:${type}`;
+  }
+  const titleKey = normalizeTitleKey(entry.title || "");
+  if (!titleKey) {
+    return "";
+  }
+  const year = Number(entry.year || 0) || 0;
+  return `${titleKey}:${type}:${year}`;
+}
+
+function findRequestInList(candidate) {
+  const key = buildRequestKey(candidate);
+  if (!key) {
+    return null;
+  }
+  return (state.request.list || []).find((entry) => buildRequestKey(entry) === key) || null;
+}
+
+function findCatalogMatchForCandidate(candidate) {
+  if (!candidate || !Array.isArray(state.catalog)) {
+    return null;
+  }
+  const type = normalizeRequestType(candidate.type);
+  const tmdbId = Number(
+    candidate.tmdbId || candidate.tmdb_id || candidate.external_tmdb_id || candidate.externalTmdbId || 0
+  );
+  if (Number.isFinite(tmdbId) && tmdbId > 0) {
+    const match = state.catalog.find((item) => {
+      if (!item) {
+        return false;
+      }
+      const itemType = item.type === "tv" ? "tv" : "movie";
+      if (itemType !== type) {
+        return false;
+      }
+      const itemTmdb = Number(
+        item?.tmdbId || item?.tmdb_id || item?.external_tmdb_id || item?.externalTmdbId || 0
+      );
+      return itemTmdb > 0 && itemTmdb === tmdbId;
+    });
+    if (match) {
+      return match;
+    }
+  }
+  const titleKey = normalizeTitleKey(candidate.title || "");
+  if (!titleKey) {
+    return null;
+  }
+  const year = Number(candidate.year || 0) || 0;
+  const match = state.catalog.find((item) => {
+    if (!item) {
+      return false;
+    }
+    const itemType = item.type === "tv" ? "tv" : "movie";
+    if (itemType !== type) {
+      return false;
+    }
+    const itemKey = item.titleKey || normalizeTitleKey(item.title || "");
+    if (!itemKey) {
+      return false;
+    }
+    if (itemKey !== titleKey && !itemKey.includes(titleKey) && !titleKey.includes(itemKey)) {
+      return false;
+    }
+    if (year > 0) {
+      const itemYear = getCatalogReleaseYear(item);
+      if (itemYear > 0 && Math.abs(itemYear - year) > 1) {
+        return false;
+      }
+    }
+    return true;
+  });
+  return match || null;
+}
+
+function setRequestStatus(message, isError = false) {
+  if (!refs.requestStatus) {
+    return;
+  }
+  refs.requestStatus.textContent = String(message || "").trim();
+  refs.requestStatus.classList.toggle("error", Boolean(isError));
+}
+
+function renderRequestSearchPanel() {
+  if (!refs.requestSearchPanel) {
+    return;
+  }
+  const results = Array.isArray(state.request.results) ? state.request.results : [];
+  refs.requestSearchPanel.innerHTML = "";
+  if (results.length === 0 || !state.request.query) {
+    refs.requestSearchPanel.hidden = true;
+    return;
+  }
+  const fragment = document.createDocumentFragment();
+  results.slice(0, 10).forEach((row, index) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "request-search-item";
+    button.dataset.requestIndex = String(index);
+    const cover = normalizeImageUrl(row.poster || row.backdrop || "");
+    const typeLabel = row.type === "tv" ? "Serie" : "Film";
+    const year = row.year ? ` • ${row.year}` : "";
+    const exists = findCatalogMatchForCandidate(row);
+    button.innerHTML = `
+      <span class="request-search-cover" style="background-image:url('${escapeHtml(cover || "")}')"></span>
+      <span class="request-search-info">
+        <span class="request-search-title">${escapeHtml(row.title || "Sans titre")}</span>
+        <span class="request-search-meta">${escapeHtml(typeLabel)}${escapeHtml(year)}</span>
+        ${exists ? `<span class="request-search-badge">Deja sur Zenix</span>` : ""}
+      </span>
+    `;
+    fragment.appendChild(button);
+  });
+  refs.requestSearchPanel.appendChild(fragment);
+  refs.requestSearchPanel.hidden = false;
+}
+
+async function performRequestSearch(query, token) {
+  const safeQuery = String(query || "").trim();
+  if (safeQuery.length < 2) {
+    state.request.results = [];
+    renderRequestSearchPanel();
+    return;
+  }
+  setRequestStatus("Recherche en cours...");
+  const params = new URLSearchParams({
+    q: safeQuery,
+    type: normalizeRequestType(state.request.type),
+  });
+  let payload = null;
+  try {
+    payload = await fetchJson(`${API_BASE}/zenix-search?${params.toString()}`, {
+      timeoutMs: 9000,
+      noCache: true,
+    });
+  } catch {
+    payload = null;
+  }
+  if (token !== state.request.searchToken) {
+    return;
+  }
+  const matches = Array.isArray(payload?.data?.matches) ? payload.data.matches : [];
+  const normalized = matches
+    .map((row) => ({
+      title: String(row?.title || "").trim(),
+      type: normalizeRequestType(row?.type || "movie"),
+      year: Number(row?.year || 0) || 0,
+      poster: String(row?.poster || "").trim(),
+      backdrop: String(row?.backdrop || "").trim(),
+      overview: String(row?.overview || "").trim(),
+      tmdbId: Number(row?.tmdbId || row?.tmdb_id || 0) || 0,
+    }))
+    .filter((row) => row.title && row.tmdbId > 0);
+  state.request.results = normalized;
+  renderRequestSearchPanel();
+  setRequestStatus(
+    normalized.length > 0 ? `${normalized.length} resultat(s).` : "Aucun resultat pour ce titre.",
+    normalized.length === 0
+  );
+}
+
+function handleRequestSearchInput(value) {
+  const query = String(value || "").trim();
+  state.request.query = query;
+  if (state.request.searchTimer) {
+    clearTimeout(state.request.searchTimer);
+    state.request.searchTimer = 0;
+  }
+  state.request.searchToken += 1;
+  if (query.length < 2) {
+    state.request.results = [];
+    renderRequestSearchPanel();
+    setRequestStatus("");
+    return;
+  }
+  const token = state.request.searchToken;
+  state.request.searchTimer = window.setTimeout(() => {
+    performRequestSearch(query, token);
+  }, REQUEST_SEARCH_DEBOUNCE_MS);
+}
+
+function renderRequestSelected() {
+  if (!refs.requestSelected) {
+    return;
+  }
+  const selected = state.request.selected;
+  if (!selected) {
+    refs.requestSelected.innerHTML = `<p class="request-empty">Tape un titre pour voir les resultats.</p>`;
+    return;
+  }
+  const cover = normalizeImageUrl(selected.poster || selected.backdrop || "");
+  const typeLabel = selected.type === "tv" ? "Serie" : "Film";
+  const year = selected.year ? ` • ${selected.year}` : "";
+  const overview = selected.overview ? `<p class="request-overview">${escapeHtml(selected.overview)}</p>` : "";
+  const existing = findCatalogMatchForCandidate(selected);
+  const alreadyRequested = findRequestInList(selected);
+  const status = alreadyRequested ? normalizeRequestStatus(alreadyRequested.status) : "";
+  const statusLabel = alreadyRequested ? getRequestStatusLabel(status) : "";
+  const statusClass = alreadyRequested ? getRequestStatusClass(status) : "";
+
+  refs.requestSelected.innerHTML = `
+    <article class="request-card request-card-selected">
+      <div class="request-card-cover" style="background-image:url('${escapeHtml(cover || "")}')"></div>
+      <div class="request-card-body">
+        <div class="request-card-head">
+          <span class="request-pill">${escapeHtml(typeLabel)}</span>
+          ${selected.year ? `<span class="request-pill">${escapeHtml(String(selected.year))}</span>` : ""}
+        </div>
+        <h3 class="request-card-title">${escapeHtml(selected.title || "Sans titre")}</h3>
+        <p class="request-card-meta">${escapeHtml(typeLabel)}${escapeHtml(year)}</p>
+        ${overview}
+        <div class="request-card-actions">
+          ${existing ? `<span class="request-status ${statusClass || "request-status-in_catalog"}">Deja sur Zenix</span>` : ""}
+          ${alreadyRequested && !existing ? `<span class="request-status ${statusClass}">${escapeHtml(statusLabel)}</span>` : ""}
+          ${existing ? `<button class="btn btn-soft btn-compact" type="button" data-request-open>Voir la fiche</button>` : ""}
+          ${
+            !existing && !alreadyRequested
+              ? `<button class="btn btn-primary btn-compact" type="button" data-request-submit>Demander l'ajout</button>`
+              : ""
+          }
+        </div>
+      </div>
+    </article>
+  `;
+  const openBtn = refs.requestSelected.querySelector("[data-request-open]");
+  if (openBtn && existing) {
+    bindFastPress(openBtn, () => {
+      openDetails(existing.id).catch(() => {
+        showMessage("Impossible d'ouvrir la fiche.", true);
+      });
+    });
+  }
+  const submitBtn = refs.requestSelected.querySelector("[data-request-submit]");
+  if (submitBtn) {
+    bindFastPress(submitBtn, () => {
+      submitRequestCandidate(selected).catch(() => {
+        showToast("Impossible d'envoyer la demande.", true);
+      });
+    });
+  }
+}
+
+function renderRequestPublicList() {
+  if (!refs.requestPublicGrid || !refs.requestPublicEmpty) {
+    return;
+  }
+  const list = Array.isArray(state.request.list) ? state.request.list.slice() : [];
+  list.sort((a, b) => {
+    const left = Number(a?.updatedAt || a?.createdAt || 0);
+    const right = Number(b?.updatedAt || b?.createdAt || 0);
+    return right - left;
+  });
+  refs.requestPublicGrid.innerHTML = "";
+  if (list.length === 0) {
+    refs.requestPublicEmpty.hidden = false;
+    return;
+  }
+  refs.requestPublicEmpty.hidden = true;
+  const fragment = document.createDocumentFragment();
+  list.slice(0, 36).forEach((entry) => {
+    const cover = normalizeImageUrl(entry.poster || entry.backdrop || "");
+    const status = normalizeRequestStatus(entry.status);
+    const typeLabel = entry.type === "tv" ? "Serie" : "Film";
+    const year = entry.year ? ` • ${entry.year}` : "";
+    const match = findCatalogMatchForCandidate(entry);
+    const card = document.createElement("article");
+    card.className = "request-card request-card-public";
+    card.innerHTML = `
+      <div class="request-card-cover" style="background-image:url('${escapeHtml(cover || "")}')"></div>
+      <div class="request-card-body">
+        <span class="request-status ${getRequestStatusClass(status)}">${escapeHtml(getRequestStatusLabel(status))}</span>
+        <h4 class="request-card-title">${escapeHtml(entry.title || "Sans titre")}</h4>
+        <p class="request-card-meta">${escapeHtml(typeLabel)}${escapeHtml(year)}</p>
+        ${match ? `<button class="btn btn-soft btn-compact" type="button" data-request-open>Voir</button>` : ""}
+      </div>
+    `;
+    const openBtn = card.querySelector("[data-request-open]");
+    if (openBtn && match) {
+      bindFastPress(openBtn, () => {
+        openDetails(match.id).catch(() => {
+          showMessage("Impossible d'ouvrir la fiche.", true);
+        });
+      });
+    }
+    fragment.appendChild(card);
+  });
+  refs.requestPublicGrid.appendChild(fragment);
+}
+
+function renderRequestView() {
+  if (!refs.requestSection) {
+    return;
+  }
+  renderRequestSelected();
+  renderRequestPublicList();
+  if (!state.request.refreshTimer) {
+    state.request.refreshTimer = window.setInterval(() => {
+      ensureRequestData().catch(() => {
+        // best effort only
+      });
+    }, REQUEST_PUBLIC_REFRESH_MS);
+  }
+}
+
+async function ensureRequestData(options = {}) {
+  if (state.request.loading) {
+    return;
+  }
+  const now = Date.now();
+  if (!options.force && now - state.request.lastUpdatedAt < REQUEST_PUBLIC_REFRESH_MS - 1000) {
+    return;
+  }
+  state.request.loading = true;
+  try {
+    const payload = await fetchJson(`${API_BASE}/requests`, { timeoutMs: 7000, noCache: true });
+    const list = Array.isArray(payload?.data) ? payload.data : Array.isArray(payload?.requests) ? payload.requests : [];
+    state.request.list = list.map((entry) => ({
+      title: String(entry?.title || "").trim(),
+      type: normalizeRequestType(entry?.type || "movie"),
+      year: Number(entry?.year || 0) || 0,
+      poster: String(entry?.poster || "").trim(),
+      backdrop: String(entry?.backdrop || "").trim(),
+      tmdbId: Number(entry?.tmdbId || entry?.tmdb_id || 0) || 0,
+      status: normalizeRequestStatus(entry?.status || "pending"),
+      createdAt: entry?.createdAt || "",
+      updatedAt: entry?.updatedAt || "",
+    }));
+    state.request.lastUpdatedAt = Date.now();
+    if (state.view === "request") {
+      renderRequestPublicList();
+      renderRequestSelected();
+    }
+  } catch {
+    // best effort only
+  } finally {
+    state.request.loading = false;
+  }
+}
+
+async function submitRequestCandidate(candidate) {
+  if (state.request.submitInFlight || !candidate) {
+    return;
+  }
+  state.request.submitInFlight = true;
+  setRequestStatus("Envoi de la demande...");
+  try {
+    const payload = {
+      tmdbId: candidate.tmdbId || 0,
+      type: normalizeRequestType(candidate.type),
+      title: candidate.title || "",
+      year: candidate.year || 0,
+      poster: candidate.poster || "",
+      backdrop: candidate.backdrop || "",
+      overview: candidate.overview || "",
+      page: window.location.pathname || "/",
+    };
+    await fetchJson(`${API_BASE}/requests`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+      headers: { "Content-Type": "application/json" },
+      timeoutMs: 8000,
+      noCache: true,
+    });
+    setRequestStatus("Demande envoyee ! Merci.");
+    await ensureRequestData({ force: true });
+    renderRequestSelected();
+  } catch (error) {
+    setRequestStatus("Impossible d'envoyer la demande.", true);
+  } finally {
+    state.request.submitInFlight = false;
+  }
+}
+
+function normalizeTvChannel(entry) {
+  if (!entry || typeof entry !== "object") {
+    return null;
+  }
+  const id = String(entry.id || "").trim();
+  const name = String(entry.name || entry.title || "").trim();
+  const url = String(entry.url || entry.stream_url || "").trim();
+  if (!name || !url) {
+    return null;
+  }
+  const type = String(entry.type || "").toLowerCase();
+  return {
+    id: id || `${normalizeTitleKey(name)}:${normalizeTitleKey(url)}`,
+    name,
+    url,
+    type,
+    logo: String(entry.logo || "").trim(),
+    group: String(entry.group || "").trim(),
+    order: Number(entry.order || 0) || 0,
+  };
+}
+
+function teardownTvPlayback() {
+  if (state.tv.hls && typeof state.tv.hls.destroy === "function") {
+    try {
+      state.tv.hls.destroy();
+    } catch {
+      // ignore
+    }
+  }
+  state.tv.hls = null;
+  if (refs.tvPlayerVideo) {
+    refs.tvPlayerVideo.pause();
+    refs.tvPlayerVideo.removeAttribute("src");
+    refs.tvPlayerVideo.load();
+    refs.tvPlayerVideo.hidden = true;
+  }
+  if (refs.tvPlayerEmbed) {
+    refs.tvPlayerEmbed.src = "";
+    refs.tvPlayerEmbed.hidden = true;
+  }
+  if (refs.tvPlayerEmpty) {
+    refs.tvPlayerEmpty.hidden = false;
+  }
+  if (refs.tvPlayerStatus) {
+    refs.tvPlayerStatus.textContent = "";
+  }
+}
+
+async function playTvChannel(channel) {
+  if (!channel || !refs.tvPlayerTitle) {
+    return;
+  }
+  const token = (state.tv.playToken += 1);
+  state.tv.selected = channel;
+  refs.tvPlayerTitle.textContent = channel.name || "TV Direct";
+  if (refs.tvPlayerStatus) {
+    refs.tvPlayerStatus.textContent = "Connexion...";
+  }
+  teardownTvPlayback();
+  if (token !== state.tv.playToken) {
+    return;
+  }
+  const url = channel.url;
+  const isHls = /m3u8/i.test(url) || channel.type === "hls";
+  const isEmbed = channel.type === "embed" || /youtube|player|embed/i.test(url);
+
+  if (isEmbed) {
+    if (refs.tvPlayerEmbed) {
+      refs.tvPlayerEmbed.hidden = false;
+      refs.tvPlayerEmbed.src = url;
+    }
+    if (refs.tvPlayerEmpty) refs.tvPlayerEmpty.hidden = true;
+    if (refs.tvPlayerStatus) refs.tvPlayerStatus.textContent = "Lecture en cours";
+    return;
+  }
+
+  if (!refs.tvPlayerVideo) {
+    return;
+  }
+
+  refs.tvPlayerVideo.hidden = false;
+  if (refs.tvPlayerEmpty) refs.tvPlayerEmpty.hidden = true;
+
+  try {
+    if (isHls) {
+      if (shouldUseNativeHls(refs.tvPlayerVideo)) {
+        refs.tvPlayerVideo.src = url;
+        await refs.tvPlayerVideo.play();
+      } else {
+        const Hls = await loadHlsLibrary();
+        if (!Hls || !Hls.isSupported()) {
+          refs.tvPlayerVideo.src = url;
+          await refs.tvPlayerVideo.play();
+        } else {
+          const hls = new Hls({ lowLatencyMode: true });
+          state.tv.hls = hls;
+          hls.attachMedia(refs.tvPlayerVideo);
+          hls.on(Hls.Events.MEDIA_ATTACHED, () => {
+            hls.loadSource(url);
+          });
+          await new Promise((resolve, reject) => {
+            const timeoutId = setTimeout(() => reject(new Error("TV HLS timeout")), 5200);
+            hls.on(Hls.Events.MANIFEST_PARSED, () => {
+              clearTimeout(timeoutId);
+              resolve();
+            });
+            hls.on(Hls.Events.ERROR, (_evt, data) => {
+              if (data?.fatal) {
+                clearTimeout(timeoutId);
+                reject(new Error("TV HLS error"));
+              }
+            });
+          });
+          await refs.tvPlayerVideo.play();
+        }
+      }
+    } else {
+      refs.tvPlayerVideo.src = url;
+      await refs.tvPlayerVideo.play();
+    }
+    if (refs.tvPlayerStatus) refs.tvPlayerStatus.textContent = "Lecture en cours";
+  } catch {
+    if (refs.tvPlayerStatus) refs.tvPlayerStatus.textContent = "Lecture impossible";
+    if (refs.tvPlayerEmpty) refs.tvPlayerEmpty.hidden = false;
+  }
+}
+
+function renderTvView() {
+  if (!refs.tvSection || !refs.tvChannelList) {
+    return;
+  }
+  const list = Array.isArray(state.tv.list) ? state.tv.list : [];
+  const sorted = list.slice().sort((a, b) => {
+    const orderDiff = Number(a.order || 0) - Number(b.order || 0);
+    if (orderDiff !== 0) {
+      return orderDiff;
+    }
+    return String(a.name || "").localeCompare(String(b.name || ""), "fr", { sensitivity: "base" });
+  });
+  refs.tvChannelList.innerHTML = "";
+  if (sorted.length === 0) {
+    if (refs.tvChannelEmpty) refs.tvChannelEmpty.hidden = false;
+    return;
+  }
+  if (refs.tvChannelEmpty) refs.tvChannelEmpty.hidden = true;
+  const fragment = document.createDocumentFragment();
+  sorted.forEach((channel) => {
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "tv-channel-card";
+    if (state.tv.selected && state.tv.selected.id === channel.id) {
+      card.classList.add("active");
+    }
+    const logo = channel.logo ? `<img src="${escapeHtml(channel.logo)}" alt="" loading="lazy" />` : "";
+    const meta = channel.group ? `<span class="tv-channel-meta">${escapeHtml(channel.group)}</span>` : "";
+    card.innerHTML = `
+      <span class="tv-channel-logo">${logo}</span>
+      <span class="tv-channel-info">
+        <span class="tv-channel-name">${escapeHtml(channel.name)}</span>
+        ${meta}
+      </span>
+    `;
+    bindSafeTap(card, () => {
+      playTvChannel(channel).catch(() => {
+        // handled in play
+      });
+      renderTvView();
+    });
+    fragment.appendChild(card);
+  });
+  refs.tvChannelList.appendChild(fragment);
+
+  if (!state.tv.refreshTimer) {
+    state.tv.refreshTimer = window.setInterval(() => {
+      ensureTvChannels().catch(() => {
+        // best effort
+      });
+    }, TV_REFRESH_MS);
+  }
+}
+
+async function ensureTvChannels(options = {}) {
+  if (state.tv.loading) {
+    return;
+  }
+  const now = Date.now();
+  if (!options.force && now - state.tv.lastUpdatedAt < TV_REFRESH_MS - 1000) {
+    return;
+  }
+  state.tv.loading = true;
+  try {
+    const payload = await fetchJson(`${API_BASE}/tv-channels`, { timeoutMs: 7000, noCache: true });
+    const list = Array.isArray(payload?.data) ? payload.data : Array.isArray(payload?.channels) ? payload.channels : [];
+    state.tv.list = list.map(normalizeTvChannel).filter(Boolean);
+    state.tv.lastUpdatedAt = Date.now();
+    if (state.view === "tv-live") {
+      renderTvView();
+    }
+  } catch {
+    // best effort
+  } finally {
+    state.tv.loading = false;
+  }
 }
 function getContinueEntries(limit = 6) {
   return Object.values(state.progress)
@@ -19125,6 +19947,8 @@ function applySavedBrowseState() {
     "list",
     "info",
     "recommendation",
+    "request",
+    "tv-live",
   ]);
   const allowedChips = new Set(["all", "recent", "movie", "tv", "anime"]);
   const allowedSort = new Set([
@@ -20483,6 +21307,12 @@ function isGateProtectedUrl(url) {
       return false;
     }
     if (pathname === "/api/suggestions") {
+      return false;
+    }
+    if (pathname === "/api/requests") {
+      return false;
+    }
+    if (pathname === "/api/tv-channels") {
       return false;
     }
     if (pathname.startsWith("/api/gate/")) {
