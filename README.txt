@@ -64,6 +64,13 @@ LATEST FIX LOG (2026-03-17, c344)
 - Source caching guard: /api/zenix-source no longer cached; empty /stream payloads are not cached.
 - Cache-bust bumped to 20260317-c344.
 
+LATEST FIX LOG (2026-03-18, c345)
+- Demander Contenu desktop cards compacted to match Nakios-style suggestions.
+- TV Directs now uses iptv-org API (FR TNT 1-26 only); admin/livewatch list is cleared.
+- TV Directs mobile layout tightened (smaller cards, no zoomy feel).
+- Source format detection now treats /e/ and /player URLs as embeds to avoid broken video loads.
+- Cache-bust bumped to 20260318-c345.
+
 LATEST FIX LOG (2026-03-17, c326)
 - Mobile navbar redesigned as a full-screen streaming menu (premium overlay).
 - Mobile nav now occupies the full viewport with slide-up animation.

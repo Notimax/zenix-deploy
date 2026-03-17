@@ -106,6 +106,13 @@ Last update: 2026-03-16
 - /api/zenix-source no longer cached; empty /stream payloads are not cached to avoid 0-lecteur stalls.
 - Cache-bust updated to `20260317-c344`.
 
+## c345 follow-up (2026-03-18)
+- Demander Contenu desktop cards compacted to a Nakios-style suggestions layout.
+- TV Directs now uses iptv-org API (FR TNT 1-26 only); admin/livewatch list cleared.
+- TV Directs mobile layout tightened (smaller cards).
+- Source format detection now treats /e/ and /player URLs as embeds to prevent broken video loads.
+- Cache-bust updated to `20260318-c345`.
+
 ## c316 follow-up (2026-03-16)
 - HLS proxy now preserves referer across redirects; playlist rewrites use the final URL (FastFlux CDN fix).
 - External FastFlux items no longer swap to internal duplicates (FastFlux stays preferred).

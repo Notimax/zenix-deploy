@@ -22,6 +22,9 @@ const TMDB_BASE_URL = "https://api.themoviedb.org/3";
 const TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p";
 const LIVEWATCH_API_URL = "https://v2.livewatch.sbs/?action=api";
 const LIVEWATCH_CACHE_MS = Math.max(2 * 60 * 1000, Number(process.env.LIVEWATCH_CACHE_MS || 12 * 60 * 1000));
+const IPTV_CHANNELS_URL = "https://iptv-org.github.io/api/channels.json";
+const IPTV_STREAMS_URL = "https://iptv-org.github.io/api/streams.json";
+const IPTV_CACHE_MS = Math.max(5 * 60 * 1000, Number(process.env.IPTV_CACHE_MS || 20 * 60 * 1000));
 const NAKIOS_BASE = "https://nakios.site";
 const NAKIOS_HOST = "nakios.site";
 const NAKIOS_API_BASE = "https://api.nakios.site";
@@ -363,6 +366,8 @@ const adminSessions = new Map();
 const adminDataCache = { loadedAt: 0, value: null };
 const backupConfigCache = { loadedAt: 0, value: null };
 const livewatchCache = { loadedAt: 0, payload: null, inFlight: null };
+const iptvCache = { loadedAt: 0, payload: null, inFlight: null };
+let tvChannelsPurged = false;
 const HARD_HIDDEN_MEDIA_IDS = new Set([1507947720]);
 const NAKIOS_PINNED_TITLES = [
   { title: "Go Karts", mediaType: "movie", year: 2020 },
@@ -1208,6 +1213,211 @@ async function getLivewatchChannels(options = {}) {
     countries: sortedCountries,
     total: rows.length,
   };
+}
+
+function normalizeIptvChannelName(value) {
+  const key = normalizeTitleKey(value || "");
+  return key.replace(/[^a-z0-9]/g, "");
+}
+
+const IPTV_TNT_CHANNELS = [
+  { order: 1, names: ["tf1"] },
+  { order: 2, names: ["france2", "france 2"] },
+  { order: 3, names: ["france3", "france 3"] },
+  { order: 4, names: ["canal+", "canalplus"] },
+  { order: 5, names: ["france5", "france 5"] },
+  { order: 6, names: ["m6"] },
+  { order: 7, names: ["arte"] },
+  { order: 8, names: ["c8"] },
+  { order: 9, names: ["w9"] },
+  { order: 10, names: ["tmc"] },
+  { order: 11, names: ["tfx"] },
+  { order: 12, names: ["nrj12", "nrj 12"] },
+  { order: 13, names: ["lcp", "publicsenat", "public senate", "public senat"] },
+  { order: 14, names: ["france4", "france 4"] },
+  { order: 15, names: ["bfmtv", "bfm tv"] },
+  { order: 16, names: ["cnews", "c news"] },
+  { order: 17, names: ["cstar", "c star"] },
+  { order: 18, names: ["gulli"] },
+  { order: 19, names: ["franceo", "france o", "franceô"] },
+  { order: 20, names: ["tf1seriesfilms", "tf1 series films", "tf1 series"] },
+  { order: 21, names: ["lequipe", "l'equipe", "equipe21", "equipe 21"] },
+  { order: 22, names: ["6ter"] },
+  { order: 23, names: ["rmcstory", "rmc story", "numero23", "numero 23"] },
+  { order: 24, names: ["rmcdecouverte", "rmc decouverte"] },
+  { order: 25, names: ["cherie25", "cherie 25", "chérie25", "chérie 25"] },
+  { order: 26, names: ["lci"] },
+];
+
+async function fetchIptvPayload() {
+  const now = Date.now();
+  if (iptvCache.payload && now - iptvCache.loadedAt < IPTV_CACHE_MS) {
+    return iptvCache.payload;
+  }
+  if (iptvCache.inFlight) {
+    return iptvCache.inFlight;
+  }
+  const task = (async () => {
+    const [channelsResponse, streamsResponse] = await Promise.all([
+      fetchRemote(IPTV_CHANNELS_URL, { Accept: "application/json" }),
+      fetchRemote(IPTV_STREAMS_URL, { Accept: "application/json" }),
+    ]);
+    if (channelsResponse.status < 200 || channelsResponse.status >= 300) {
+      throw new Error(`IPTV channels HTTP ${channelsResponse.status}`);
+    }
+    if (streamsResponse.status < 200 || streamsResponse.status >= 300) {
+      throw new Error(`IPTV streams HTTP ${streamsResponse.status}`);
+    }
+    const channels = parseJsonSafe(channelsResponse.body) || [];
+    const streams = parseJsonSafe(streamsResponse.body) || [];
+    iptvCache.payload = {
+      channels: Array.isArray(channels) ? channels : [],
+      streams: Array.isArray(streams) ? streams : [],
+    };
+    iptvCache.loadedAt = Date.now();
+    return iptvCache.payload;
+  })();
+  iptvCache.inFlight = task;
+  try {
+    return await task;
+  } catch (error) {
+    if (iptvCache.payload) {
+      return iptvCache.payload;
+    }
+    throw error;
+  } finally {
+    iptvCache.inFlight = null;
+  }
+}
+
+function getIptvChannelNameKeys(channel) {
+  const names = [];
+  if (channel?.name) {
+    names.push(channel.name);
+  }
+  if (Array.isArray(channel?.alt_names)) {
+    names.push(...channel.alt_names);
+  }
+  return Array.from(
+    new Set(
+      names
+        .map((entry) => normalizeIptvChannelName(entry))
+        .filter(Boolean)
+    )
+  );
+}
+
+function matchesChannelNames(channel, targets) {
+  const keys = getIptvChannelNameKeys(channel);
+  if (keys.length === 0) {
+    return false;
+  }
+  const normalizedTargets = targets.map((entry) => normalizeIptvChannelName(entry)).filter(Boolean);
+  return normalizedTargets.some((target) =>
+    keys.some((key) => key === target || key.includes(target) || target.includes(key))
+  );
+}
+
+function pickBestStream(streams) {
+  const list = Array.isArray(streams) ? streams.slice() : [];
+  if (list.length === 0) {
+    return null;
+  }
+  list.sort((left, right) => {
+    const leftUrl = String(left?.url || "");
+    const rightUrl = String(right?.url || "");
+    const leftHttps = leftUrl.startsWith("https");
+    const rightHttps = rightUrl.startsWith("https");
+    if (leftHttps !== rightHttps) {
+      return leftHttps ? -1 : 1;
+    }
+    const leftHls = /\.m3u8($|[?#])/i.test(leftUrl);
+    const rightHls = /\.m3u8($|[?#])/i.test(rightUrl);
+    if (leftHls !== rightHls) {
+      return leftHls ? -1 : 1;
+    }
+    return 0;
+  });
+  return list[0] || null;
+}
+
+async function getIptvOrgFrChannels(options = {}) {
+  const payload = await fetchIptvPayload();
+  const channels = Array.isArray(payload?.channels) ? payload.channels : [];
+  const streams = Array.isArray(payload?.streams) ? payload.streams : [];
+
+  const frChannels = channels.filter(
+    (entry) => String(entry?.country || "").trim().toUpperCase() === "FR"
+  );
+  const channelById = new Map(
+    frChannels
+      .map((entry) => [String(entry?.id || "").trim(), entry])
+      .filter(([key]) => Boolean(key))
+  );
+  const streamsByChannel = new Map();
+  streams.forEach((entry) => {
+    const channelId = String(entry?.channel || "").trim();
+    const url = String(entry?.url || "").trim();
+    if (!channelId || !url || !/^https?:\/\//i.test(url)) {
+      return;
+    }
+    if (!channelById.has(channelId)) {
+      return;
+    }
+    const rows = streamsByChannel.get(channelId) || [];
+    rows.push(entry);
+    streamsByChannel.set(channelId, rows);
+  });
+
+  const queryKey = normalizeTitleKey(options.query || "");
+  const results = [];
+
+  IPTV_TNT_CHANNELS.forEach((slot) => {
+    const match = frChannels.find((entry) => matchesChannelNames(entry, slot.names));
+    if (!match) {
+      return;
+    }
+    const channelId = String(match?.id || "").trim();
+    const stream = pickBestStream(streamsByChannel.get(channelId) || []);
+    if (!stream || !stream.url) {
+      return;
+    }
+    const url = String(stream.url || "").trim();
+    const metaName = String(match.name || "").trim();
+    if (queryKey) {
+      const haystack = `${metaName} ${match.alt_names ? match.alt_names.join(" ") : ""}`;
+      if (!normalizeTitleKey(haystack).includes(queryKey)) {
+        return;
+      }
+    }
+    const entry = normalizeTvChannelEntry({
+      id: `iptv_${channelId}`,
+      name: metaName || slot.names[0],
+      url,
+      type: /\.m3u8($|[?#])/i.test(url) ? "hls" : /youtube|embed|player/i.test(url) ? "embed" : "mp4",
+      logo: String(match.logo || "").trim(),
+      group: "TNT",
+      country: "France",
+      order: slot.order,
+    });
+    if (entry) {
+      results.push(entry);
+    }
+  });
+
+  return results;
+}
+
+function purgeAdminTvChannelsOnce() {
+  if (tvChannelsPurged) {
+    return;
+  }
+  tvChannelsPurged = true;
+  const data = loadAdminData(true);
+  if (Array.isArray(data.tvChannels) && data.tvChannels.length > 0) {
+    data.tvChannels = [];
+    saveAdminData(data);
+  }
 }
 
 function mergeTvChannelLists(primary, secondary) {
@@ -13580,42 +13790,29 @@ async function handleTvChannelsPublic(req, res, requestUrl) {
     sendJson(res, 405, { error: "Method Not Allowed" });
     return true;
   }
-  const source = String(requestUrl.searchParams.get("source") || "auto").trim().toLowerCase();
-  const country = String(requestUrl.searchParams.get("country") || "France").trim() || "France";
+  purgeAdminTvChannelsOnce();
+  const source = "iptv-org";
+  const country = "France";
   const query = String(requestUrl.searchParams.get("q") || "").trim();
-  const limit = toInt(requestUrl.searchParams.get("limit"), 260, 0, 2000);
+  const limit = toInt(requestUrl.searchParams.get("limit"), 0, 0, 2000);
 
-  const includeAdmin = source !== "livewatch";
-  const includeLivewatch = source !== "admin";
-  const data = loadAdminData(true);
-  const adminList = Array.isArray(data.tvChannels) ? data.tvChannels.slice() : [];
-  adminList.sort((left, right) => {
-    const orderDiff = Number(left?.order || 0) - Number(right?.order || 0);
-    if (orderDiff !== 0) return orderDiff;
-    return String(left?.name || "").localeCompare(String(right?.name || ""), "fr", { sensitivity: "base" });
-  });
-
-  let livewatchMeta = null;
-  let livewatchList = [];
-  if (includeLivewatch) {
-    try {
-      const livewatch = await getLivewatchChannels({ country, query, limit });
-      livewatchList = livewatch.list || [];
-      livewatchMeta = { countries: livewatch.countries || [], total: livewatch.total || 0 };
-    } catch {
-      // keep admin list if livewatch fails
-    }
+  let list = [];
+  try {
+    list = await getIptvOrgFrChannels({ query });
+  } catch {
+    list = [];
   }
-
-  const merged = mergeTvChannelLists(includeAdmin ? adminList : [], livewatchList);
+  if (limit > 0 && list.length > limit) {
+    list = list.slice(0, limit);
+  }
   sendJson(res, 200, {
     type: "success",
-    data: merged,
+    data: list,
     meta: {
       source,
       country,
-      count: merged.length,
-      ...(livewatchMeta || {}),
+      count: list.length,
+      countries: [country],
     },
   });
   return true;

@@ -16293,6 +16293,9 @@ function guessSourceFormat(entry, url) {
     return "dash";
   }
 
+  if (/\/e\/|\/embed[-_/]|\/player\b|player\.php|embed\.php/i.test(cleanUrl)) {
+    return "embed";
+  }
   if (/video\.sibnet\.ru\/shell\.php/i.test(cleanUrl)) {
     return "embed";
   }
@@ -17216,7 +17219,13 @@ function isEmbedSource(source, url = "") {
   if (format === "embed" || format === "iframe") {
     return true;
   }
-  return /video\.sibnet\.ru\/shell\.php/i.test(raw) || /\/embed[-_/]/i.test(raw);
+  return (
+    /video\.sibnet\.ru\/shell\.php/i.test(raw) ||
+    /\/embed[-_/]/i.test(raw) ||
+    /\/e\//i.test(raw) ||
+    /\/player\b/i.test(raw) ||
+    /player\.php/i.test(raw)
+  );
 }
 
 function markEmbedLoadStart(source, url = "") {
