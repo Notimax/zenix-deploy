@@ -29,6 +29,10 @@ CURRENT PRODUCT RULES
   VF > VOSTFR > MULTI > VO.
 - External generic embed fallback sources were removed.
 
+LATEST FIX LOG (2026-03-17, c323)
+- Playback now silently refreshes the gate token on every “Démarrer”.
+- If the token refresh succeeds, adblock false-positives are cleared.
+
 LATEST FIX LOG (2026-03-17, c322)
 - Adblock detection hardened (double-check) to reduce false positives that can block playback.
 - Gate token keepalive added to avoid expiry mid-session.

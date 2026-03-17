@@ -108,6 +108,10 @@ Last update: 2026-03-16
 - Mobile search input padding reduced so placeholder text fits on phone.
 - Mobile nav drawer styling polished.
 
+## c323 follow-up (2026-03-17)
+- Playback now silently refreshes the gate token on each “Démarrer”.
+- If the refresh succeeds, adblock false-positives are cleared.
+
 ## Visual system policy (c137)
 - Keep unified visual tokens across the UI:
   - coherent radii/shadows/spacing

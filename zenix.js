@@ -4982,6 +4982,15 @@ async function refreshGateToken(options = {}) {
   }
 }
 
+async function primePlaybackGate(options = {}) {
+  const clearBlocked = options.clearBlocked !== false;
+  const gateOk = await refreshGateToken({ force: true }).catch(() => false);
+  if (gateOk && state.adblockDetected && clearBlocked) {
+    applyAdblockDetectionState(false, { manual: false });
+  }
+  return gateOk;
+}
+
 function isCompactViewport() {
   if (typeof window.matchMedia === "function") {
     return window.matchMedia(`(max-width: ${MOBILE_VIEWPORT_MAX_WIDTH}px)`).matches;
@@ -11530,11 +11539,9 @@ async function openPlayer(id, options = {}) {
     showMessage("Lecture indisponible pour ce titre.", true);
     throw new Error("Item not found");
   }
-  if (!state.gateReady && !state.adblockDetected) {
-    await refreshGateToken({ force: true }).catch(() => {
-      // handled later if still blocked
-    });
-  }
+  await primePlaybackGate().catch(() => {
+    // handled later if still blocked
+  });
   ensureDetails(id).catch(() => null);
 
   const token = ++state.playToken;
