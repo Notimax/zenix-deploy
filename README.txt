@@ -1,5 +1,5 @@
 ZENIX STREAM - OPERATIONS MEMORY
-Last updated: 2026-03-16
+Last updated: 2026-03-17
 
 LIVE DOMAIN
 - https://zenix.best
@@ -28,6 +28,13 @@ CURRENT PRODUCT RULES
 - Movie/series language priority for FR audience:
   VF > VOSTFR > MULTI > VO.
 - External generic embed fallback sources were removed.
+
+LATEST FIX LOG (2026-03-17, c322)
+- Adblock detection hardened (double-check) to reduce false positives that can block playback.
+- Gate token keepalive added to avoid expiry mid-session.
+- Adblock detection no longer clears the last gate token (prevents sudden “no playback” after a while).
+- Mobile search input padding reduced so placeholder text fits on phone.
+- Mobile nav drawer styling improved.
 
 LATEST FIX LOG (2026-03-16)
 - FastFlux proxy now preserves referer across redirects; playlists rewrite using final URL.

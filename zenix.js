@@ -260,6 +260,9 @@ const NATIVE_AD_FRAME_CLASS = "native-banner-frame";
 const NATIVE_AD_FRAME_SANDBOX = "allow-scripts allow-same-origin";
 const ADBLOCK_MONITOR_INTERVAL_MS = 8500;
 const ADBLOCK_BOOT_DELAY_MS = 950;
+const ADBLOCK_CONFIRM_DELAY_MS = 160;
+const GATE_KEEPALIVE_MS = 8 * 60 * 1000;
+const GATE_KEEPALIVE_MIN_AGE_MS = 6 * 60 * 1000;
 const GATE_CHALLENGE_PATH = "/api/gate/challenge";
 const GATE_ISSUE_PATH = "/api/gate/issue";
 const GATE_PROOF_TIMEOUT_MS = 3200;
@@ -4741,14 +4744,13 @@ async function detectAdblockBait() {
   document.body.appendChild(bait);
   await wait(70);
   const style = window.getComputedStyle(bait);
+  const displayHidden = !style || style.display === "none" || style.visibility === "hidden";
+  const sizeHidden = bait.offsetHeight === 0 || bait.clientHeight === 0;
+  const opacityHidden = Number(style?.opacity || 1) === 0;
   const blocked =
-    !style ||
-    style.display === "none" ||
-    style.visibility === "hidden" ||
-    Number(style.opacity || 1) === 0 ||
-    bait.offsetHeight === 0 ||
-    bait.clientHeight === 0 ||
-    bait.offsetParent === null;
+    displayHidden ||
+    (sizeHidden && opacityHidden) ||
+    (sizeHidden && !style);
   bait.remove();
   return blocked;
 }
@@ -4760,8 +4762,8 @@ function applyAdblockDetectionState(blocked, options = {}) {
   setAdblockGateVisible(nextBlocked);
   if (nextBlocked) {
     state.gateReady = false;
-    state.gateToken = "";
-    saveGateToken("");
+    // Keep the last gate token to avoid false-positive lockouts.
+    // If the token is truly invalid, the server will reject it and we'll refresh.
     setSupportInfoMessage(ADBLOCK_SOFT_MESSAGE);
     setAdblockGateStatus(
       ADBLOCK_SOFT_MODE
@@ -4788,7 +4790,13 @@ async function runAdblockDetection(options = {}) {
   }
   state.adblockProbeInFlight = true;
   try {
-    const blocked = await detectAdblockBait();
+    const blockedFirst = await detectAdblockBait();
+    let blocked = blockedFirst;
+    if (blockedFirst && !options.manual) {
+      await wait(ADBLOCK_CONFIRM_DELAY_MS);
+      const blockedSecond = await detectAdblockBait();
+      blocked = blockedFirst && blockedSecond;
+    }
     applyAdblockDetectionState(blocked, options);
     return blocked;
   } catch {
@@ -4830,6 +4838,19 @@ function initAdblockGuard() {
       // best effort only
     });
   }, ADBLOCK_MONITOR_INTERVAL_MS);
+
+  window.setInterval(() => {
+    if (state.adblockDetected) {
+      return;
+    }
+    const age = Date.now() - Number(state.gateLastIssuedAt || 0);
+    if (!state.gateLastIssuedAt || age < GATE_KEEPALIVE_MIN_AGE_MS) {
+      return;
+    }
+    refreshGateToken({ force: true }).catch(() => {
+      // best effort only
+    });
+  }, GATE_KEEPALIVE_MS);
 }
 
 function loadGateProofScript(scriptUrl, nonce) {

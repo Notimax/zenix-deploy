@@ -101,6 +101,13 @@ Last update: 2026-03-16
 - Proxied MP4 sources are treated as valid playback candidates (fixes FastFlux MP4 on mobile).
 - Mobile topbar badge moved to the far right (next to search), spaced from the title.
 
+## c322 follow-up (2026-03-17)
+- Adblock detection now double-checks before marking blocked (reduces false positives).
+- Adblock detection no longer clears the last gate token (prevents sudden playback lockouts).
+- Gate token keepalive refresh added (avoids mid-session expiry).
+- Mobile search input padding reduced so placeholder text fits on phone.
+- Mobile nav drawer styling polished.
+
 ## Visual system policy (c137)
 - Keep unified visual tokens across the UI:
   - coherent radii/shadows/spacing

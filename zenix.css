@@ -410,9 +410,10 @@ body.startup-lock {
   justify-content: center;
   width: 40px;
   height: 40px;
-  border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  background: rgba(255, 255, 255, 0.06);
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02));
+  box-shadow: 0 10px 26px rgba(4, 6, 12, 0.45);
   color: #f5f7ff;
   cursor: pointer;
 }
@@ -465,13 +466,25 @@ body.startup-lock {
   grid-template-rows: auto 1fr;
   gap: 8px;
   padding: 16px 14px;
-  border-right: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(10, 12, 18, 0.96);
+  border-right: 1px solid rgba(255, 255, 255, 0.16);
+  background:
+    linear-gradient(160deg, rgba(18, 22, 34, 0.98), rgba(8, 10, 16, 0.98));
   backdrop-filter: blur(16px);
-  box-shadow: 0 26px 60px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 28px 64px rgba(0, 0, 0, 0.6);
   transform: translateX(-110%);
   transition: transform 240ms ease;
   z-index: 130;
+}
+
+.mobile-nav-drawer::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 3px;
+  height: 100%;
+  background: linear-gradient(180deg, rgba(241, 20, 36, 0.9), rgba(255, 168, 76, 0.2));
+  opacity: 0.65;
 }
 
 .mobile-nav-drawer-head {
@@ -480,6 +493,7 @@ body.startup-lock {
   justify-content: space-between;
   gap: 8px;
   font-weight: 700;
+  letter-spacing: 0.04em;
 }
 
 .mobile-nav-close {
@@ -511,18 +525,24 @@ body.startup-lock {
 .mobile-nav-item,
 .mobile-nav-subitem {
   border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.04);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.06);
   color: #e7ecfa;
   font: inherit;
   text-align: left;
-  padding: 10px 12px;
+  padding: 11px 14px;
   cursor: pointer;
 }
 
 .mobile-nav-subitem {
   margin-left: 8px;
   font-size: 0.92rem;
+}
+
+.mobile-nav-item:hover,
+.mobile-nav-subitem:hover {
+  border-color: rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.1);
 }
 
 .mobile-nav-item.active,
@@ -5487,6 +5507,7 @@ body.reduce-motion .reveal-on-scroll {
     align-items: center;
     justify-content: flex-end;
     min-width: 0;
+    width: 100%;
   }
 
   .brand-mark {
@@ -5506,6 +5527,16 @@ body.reduce-motion .reveal-on-scroll {
     order: 1;
     flex: 1 1 auto;
     min-width: 0;
+  }
+
+  .search-input {
+    padding-right: 68px;
+  }
+
+  .search-clear-btn {
+    font-size: 0.68rem;
+    min-height: 26px;
+    padding: 4px 8px;
   }
 
   #networkBadge {
@@ -6065,6 +6096,18 @@ img[data-image-ready="1"] {
   .trending-track {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 10px;
+  }
+}
+
+@media (max-width: 520px) {
+  .search-input {
+    padding-right: 56px;
+    font-size: 0.92rem;
+  }
+
+  .net-badge-mobile {
+    font-size: 0.64rem;
+    padding: 5px 8px;
   }
 }
 
