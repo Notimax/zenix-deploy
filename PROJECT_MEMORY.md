@@ -94,6 +94,12 @@ Last update: 2026-03-16
 - TV Directs mobile text-size adjusted to reduce iOS zoom.
 - Cache-bust updated to `20260317-c342`.
 
+## c343 follow-up (2026-03-17)
+- FastFlux MP4 now tries proxy first (even when direct exists) to avoid hotlink failures.
+- Mobile/scroll perf tuned: smaller render chunks, lower warmup limits, slower hydrate concurrency.
+- Card detail prefetch deferred on mobile with tighter viewport margins.
+- Cache-bust updated to `20260317-c343`.
+
 ## c316 follow-up (2026-03-16)
 - HLS proxy now preserves referer across redirects; playlist rewrites use the final URL (FastFlux CDN fix).
 - External FastFlux items no longer swap to internal duplicates (FastFlux stays preferred).

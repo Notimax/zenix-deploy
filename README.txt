@@ -52,6 +52,12 @@ LATEST FIX LOG (2026-03-17, c342)
 - TV Directs mobile text-size adjusted to reduce iOS zoom.
 - Cache-bust bumped to 20260317-c342.
 
+LATEST FIX LOG (2026-03-17, c343)
+- FastFlux MP4 now tries proxy first (even when direct exists) to avoid hotlink failures.
+- Mobile/scroll perf tuned: smaller render chunks, lower warmup limits, slower hydrate concurrency.
+- Card detail prefetch is deferred on mobile and uses tighter viewport margins.
+- Cache-bust bumped to 20260317-c343.
+
 LATEST FIX LOG (2026-03-17, c326)
 - Mobile navbar redesigned as a full-screen streaming menu (premium overlay).
 - Mobile nav now occupies the full viewport with slide-up animation.

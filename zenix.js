@@ -38,9 +38,9 @@ const STARTUP_SPLASH_MAX_MS = 4200;
 const STARTUP_SPLASH_END_ANIM_MS = 640;
 const STARTUP_SPLASH_SOUND_VOLUME = 0.06;
 const STARTUP_SPLASH_SOUND_COOLDOWN_MS = 1100;
-const IMAGE_WARMUP_BATCH = 28;
-const IMAGE_WARMUP_DELAY_MS = 12;
-const INITIAL_IMAGE_WARMUP_LIMIT = 320;
+const IMAGE_WARMUP_BATCH = 22;
+const IMAGE_WARMUP_DELAY_MS = 16;
+const INITIAL_IMAGE_WARMUP_LIMIT = 260;
 const CALENDAR_YEAR_RANGE = 3;
 const CALENDAR_CACHE_KEY = "zenix-calendar-cache-v2";
 const CALENDAR_CACHE_MAX_ENTRIES = 8;
@@ -53,25 +53,25 @@ const CATALOG_MIN_VISIBLE_APPEND = 45;
 const CATALOG_VISIBLE_APPEND_BATCH_PAGES = 1;
 const CATALOG_VISIBLE_APPEND_MAX_STEPS_SCROLL = 6;
 const CATALOG_VISIBLE_APPEND_MAX_STEPS_MANUAL = 6;
-const CATALOG_RENDER_CHUNK_MIN = 40;
-const CATALOG_RENDER_CHUNK_MAX = 140;
+const CATALOG_RENDER_CHUNK_MIN = 36;
+const CATALOG_RENDER_CHUNK_MAX = 120;
 const MOBILE_VIEWPORT_MAX_WIDTH = 740;
-const MOBILE_CATALOG_FIRST_PAINT = 160;
-const MOBILE_CATALOG_CHUNK_MIN = 120;
-const MOBILE_EAGER_IMAGE_LIMIT = 320;
-const MOBILE_HIGH_PRIORITY_IMAGE_LIMIT = 160;
-const DESKTOP_EAGER_IMAGE_LIMIT = 300;
-const DESKTOP_HIGH_PRIORITY_IMAGE_LIMIT = 140;
+const MOBILE_CATALOG_FIRST_PAINT = 120;
+const MOBILE_CATALOG_CHUNK_MIN = 90;
+const MOBILE_EAGER_IMAGE_LIMIT = 220;
+const MOBILE_HIGH_PRIORITY_IMAGE_LIMIT = 120;
+const DESKTOP_EAGER_IMAGE_LIMIT = 260;
+const DESKTOP_HIGH_PRIORITY_IMAGE_LIMIT = 120;
 const CRITICAL_COVER_PRIME_MOBILE = 320;
 const CRITICAL_COVER_PRIME_DESKTOP = 240;
 const CRITICAL_COVER_PRIME_WAIT_MS = 900;
-const DETAIL_COVER_HYDRATE_CONCURRENCY_MOBILE = 10;
-const DETAIL_COVER_HYDRATE_CONCURRENCY_DESKTOP = 14;
-const DETAIL_COVER_HYDRATE_LIMIT_CATEGORY_MOBILE = 420;
-const DETAIL_COVER_HYDRATE_LIMIT_CATEGORY_DESKTOP = 340;
-const DETAIL_COVER_HYDRATE_LIMIT_DEFAULT_MOBILE = 120;
-const DETAIL_COVER_HYDRATE_LIMIT_DEFAULT_DESKTOP = 84;
-const LIVE_RENDER_INTERACTION_GRACE_MS = 1200;
+const DETAIL_COVER_HYDRATE_CONCURRENCY_MOBILE = 6;
+const DETAIL_COVER_HYDRATE_CONCURRENCY_DESKTOP = 12;
+const DETAIL_COVER_HYDRATE_LIMIT_CATEGORY_MOBILE = 220;
+const DETAIL_COVER_HYDRATE_LIMIT_CATEGORY_DESKTOP = 260;
+const DETAIL_COVER_HYDRATE_LIMIT_DEFAULT_MOBILE = 80;
+const DETAIL_COVER_HYDRATE_LIMIT_DEFAULT_DESKTOP = 72;
+const LIVE_RENDER_INTERACTION_GRACE_MS = 1800;
 const SCROLL_SYNC_THRESHOLD_PX = 1800;
 const SCROLL_SYNC_DEBOUNCE_MS = 80;
 const SCROLL_SYNC_MIN_INTERVAL_MS = 220;
@@ -9502,6 +9502,9 @@ function prefetchStreamForItem(item) {
   if (!item || Number(item.id || 0) <= 0) {
     return;
   }
+  if (isLikelyMobileDevice()) {
+    return;
+  }
 
   const now = Date.now();
   const itemId = Number(item.id || 0);
@@ -11744,6 +11747,7 @@ function ensureCardViewportObserver() {
   if (state.cardViewportObserver || typeof IntersectionObserver !== "function") {
     return;
   }
+  const rootMargin = isCompactViewport() ? "640px 0px 640px 0px" : "1000px 0px 1000px 0px";
   state.cardViewportObserver = new IntersectionObserver(
     (entries, observer) => {
       entries.forEach((entry) => {
@@ -11760,21 +11764,32 @@ function ensureCardViewportObserver() {
           return;
         }
         const item = findItemById(mediaId);
-        if (item) {
+        if (item && !isLikelyMobileDevice()) {
           prefetchStreamForItem(item);
         }
-        ensureDetails(mediaId)
-          .then((details) => {
-            updateCardCoverFromDetails(mediaId, details);
-          })
-          .catch(() => {
-            // optional warmup only
-          });
+        const cachedCover = state.coverCacheMap instanceof Map ? state.coverCacheMap.get(mediaId) : null;
+        if (cachedCover) {
+          return;
+        }
+        const scheduleDetails = () => {
+          ensureDetails(mediaId)
+            .then((details) => {
+              updateCardCoverFromDetails(mediaId, details);
+            })
+            .catch(() => {
+              // optional warmup only
+            });
+        };
+        if (typeof window.requestIdleCallback === "function") {
+          window.requestIdleCallback(scheduleDetails, { timeout: 900 });
+        } else {
+          window.setTimeout(scheduleDetails, 0);
+        }
       });
     },
     {
       root: null,
-      rootMargin: "1200px 0px 1200px 0px",
+      rootMargin,
       threshold: 0.01,
     }
   );
@@ -17903,6 +17918,9 @@ function buildPlayableSourceCandidates(source, options = {}) {
   }
 
   if (proxyUrl && looksLikeHls) {
+    candidates.push(proxyUrl);
+  }
+  if (!looksLikeHls && proxyPreferred && proxyUrl) {
     candidates.push(proxyUrl);
   }
   if (!looksLikeHls && requireProxy && proxyUrl) {
