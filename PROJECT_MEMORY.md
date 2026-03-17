@@ -126,6 +126,9 @@ Last update: 2026-03-16
 - Mobile navbar redesigned as a full-screen streaming overlay.
 - Drawer now slides up full height with premium backdrop styling.
 
+## c327 follow-up (2026-03-17)
+- Mobile search input font-size forced to 16px to prevent iOS zoom on focus.
+
 ## Visual system policy (c137)
 - Keep unified visual tokens across the UI:
   - coherent radii/shadows/spacing
