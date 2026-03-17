@@ -1,5 +1,5 @@
 const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260317-c331";
+const ZENIX_BUILD_VERSION = "20260317-c332";
 const STORAGE_KEY = "zenix-progress-v4";
 if (typeof window !== "undefined") {
   window.__zenixBooted = false;
@@ -9630,64 +9630,114 @@ function buildRecommendationCandidates() {
   });
 }
 
-function scoreRecommendationItem(item, answers, index) {
+function resolveRecommendationRuntime(item) {
+  const raw = Number(item?.runtime || 0);
+  if (raw > 0) {
+    return raw;
+  }
+  const typeBucket = getItemTypeBucket(item);
+  if (typeBucket === "tv") {
+    return 45;
+  }
+  if (typeBucket === "anime") {
+    return 24;
+  }
+  return 100;
+}
+
+function getRecommendationMoodHints(key) {
+  const moodMap = {
+    comedie: ["comedie", "comedy", "humour", "sitcom"],
+    horreur: ["horreur", "horror", "epouvante", "gore", "slasher"],
+    emotion: ["drame", "drama", "biopic", "melodrame"],
+    action: ["action", "aventure", "thriller", "combat", "guerre", "superhero", "crime"],
+    romance: ["romance", "romantique", "love", "amour"],
+    sf: ["science fiction", "sci fi", "sf", "space", "fantastique"],
+  };
+  return moodMap[key] || [];
+}
+
+function getRecommendationInterestBoost(item, profile) {
+  if (!profile || !profile.hasSignals) {
+    return 0;
+  }
+  let score = 0;
+  const typeBucket = getItemTypeBucket(item);
+  score += Number(profile.typeWeights?.[typeBucket] || 0) * 8;
+  const tokens = getItemThemeTokens(item);
+  tokens.forEach((token) => {
+    score += Number(profile.themeWeights?.get(token) || 0) * 5.5;
+  });
+  const titleKey = item.titleKey || normalizeTitleKey(item.title || "");
+  profile.searchRows?.forEach((row) => {
+    if (!row?.key) {
+      return;
+    }
+    if (titleKey.includes(row.key)) {
+      score += row.score * 16;
+      return;
+    }
+    if (Array.isArray(row.tokens) && row.tokens.some((token) => token.length >= 3 && titleKey.includes(token))) {
+      score += row.score * 3.2;
+    }
+  });
+  return score;
+}
+
+function scoreRecommendationItem(item, answers, index, profile = null) {
   let score = Math.max(0, 60 - index);
   const typeBucket = getItemTypeBucket(item);
-  const runtime = Number(item?.runtime || 0);
+  const runtime = resolveRecommendationRuntime(item);
   const year = getItemReleaseYear(item);
   const tokens = getItemThemeTokens(item);
 
   if (answers.format && answers.format !== "any") {
     if (answers.format === "movie" && typeBucket === "movie") {
-      score += 34;
+      score += 42;
     } else if (answers.format === "tv" && typeBucket === "tv") {
-      score += 34;
+      score += 42;
     } else if (answers.format === "anime" && typeBucket === "anime") {
-      score += 34;
+      score += 42;
     } else {
-      score -= 22;
+      score -= 36;
     }
   }
 
   if (answers.duration && runtime > 0) {
     if (answers.duration === "short" && runtime <= 30) {
-      score += 12;
+      score += 18;
     } else if (answers.duration === "medium" && runtime > 30 && runtime <= 60) {
-      score += 12;
+      score += 18;
     } else if (answers.duration === "long" && runtime > 60 && runtime <= 120) {
-      score += 12;
+      score += 18;
     } else if (answers.duration === "epic" && runtime > 120) {
-      score += 12;
+      score += 18;
+    } else {
+      score -= 10;
+    }
+  }
+
+  if (answers.mood) {
+    const hints = getRecommendationMoodHints(answers.mood);
+    if (hints.some((hint) => tokens.has(normalizeThemeToken(hint)))) {
+      score += 24;
     } else {
       score -= 6;
     }
   }
 
-  if (answers.mood) {
-    const moodMap = {
-      comedie: ["comedie", "comedy", "humour"],
-      horreur: ["horreur", "horror", "epouvante"],
-      emotion: ["drame", "drama"],
-      action: ["action", "aventure", "thriller", "combat"],
-      romance: ["romance", "romantique", "love"],
-      sf: ["science fiction", "sci fi", "sf"],
-    };
-    const hints = moodMap[answers.mood] || [];
-    if (hints.some((hint) => tokens.has(normalizeThemeToken(hint)))) {
-      score += 18;
-    }
-  }
-
   if (answers.era) {
     if (answers.era === "80s90s" && year >= 1980 && year <= 1999) {
-      score += 12;
+      score += 14;
     } else if (answers.era === "2000s" && year >= 2000 && year <= 2009) {
-      score += 12;
+      score += 14;
     } else if (answers.era === "2010s" && year >= 2010 && year <= 2018) {
-      score += 12;
+      score += 14;
     } else if (answers.era === "recent") {
       if (isRecentlyReleased(item, 90) || year >= 2019) {
-        score += 14;
+        score += 18;
+      } else if (year > 0) {
+        score -= 6;
       }
     }
   }
@@ -9696,28 +9746,107 @@ function scoreRecommendationItem(item, answers, index) {
     const fastHints = ["action", "aventure", "thriller", "combat"];
     const slowHints = ["drame", "romance", "biopic", "documentaire"];
     if (answers.pace === "fast" && fastHints.some((hint) => tokens.has(normalizeThemeToken(hint)))) {
-      score += 10;
+      score += 12;
     } else if (answers.pace === "slow" && slowHints.some((hint) => tokens.has(normalizeThemeToken(hint)))) {
-      score += 10;
+      score += 12;
     } else if (answers.pace === "balanced") {
       score += 4;
     }
   }
 
-  const jitter = seededShuffleValue(Number(item?.id || 0) + 13, state.recommendation.seed) * 10;
+  score += getRecommendationInterestBoost(item, profile);
+
+  const jitter = seededShuffleValue(Number(item?.id || 0) + 13, state.recommendation.seed) * 5;
   score += jitter;
   return score;
 }
 
+function filterRecommendationCandidates(candidates, answers) {
+  if (!Array.isArray(candidates) || candidates.length === 0) {
+    return [];
+  }
+  const format = String(answers?.format || "").trim();
+  const moodHints = answers?.mood ? getRecommendationMoodHints(answers.mood) : [];
+  const era = String(answers?.era || "").trim();
+  const duration = String(answers?.duration || "").trim();
+
+  const applyFilters = (items, mode = "all") =>
+    items.filter((item) => {
+      if (!item) {
+        return false;
+      }
+      const typeBucket = getItemTypeBucket(item);
+      if (format && format !== "any" && mode !== "relaxed") {
+        if (format === "movie" && typeBucket !== "movie") {
+          return false;
+        }
+        if (format === "tv" && typeBucket !== "tv") {
+          return false;
+        }
+        if (format === "anime" && typeBucket !== "anime") {
+          return false;
+        }
+      }
+      if (duration) {
+        const runtime = resolveRecommendationRuntime(item);
+        if (duration === "short" && runtime > 30) {
+          return false;
+        }
+        if (duration === "medium" && (runtime <= 30 || runtime > 60)) {
+          return false;
+        }
+        if (duration === "long" && (runtime <= 60 || runtime > 120)) {
+          return false;
+        }
+        if (duration === "epic" && runtime <= 120) {
+          return false;
+        }
+      }
+      if (moodHints.length > 0) {
+        const tokens = getItemThemeTokens(item);
+        if (!moodHints.some((hint) => tokens.has(normalizeThemeToken(hint)))) {
+          return false;
+        }
+      }
+      if (era) {
+        const year = getItemReleaseYear(item);
+        if (year > 0) {
+          if (era === "80s90s" && (year < 1980 || year > 1999)) {
+            return false;
+          }
+          if (era === "2000s" && (year < 2000 || year > 2009)) {
+            return false;
+          }
+          if (era === "2010s" && (year < 2010 || year > 2018)) {
+            return false;
+          }
+          if (era === "recent" && year < 2019 && !isRecentlyReleased(item, 90)) {
+            return false;
+          }
+        }
+      }
+      return true;
+    });
+
+  let filtered = applyFilters(candidates, "all");
+  if (filtered.length >= RECOMMENDATION_MIN_RESULTS) {
+    return filtered;
+  }
+  filtered = applyFilters(candidates, "relaxed");
+  return filtered.length > 0 ? filtered : candidates;
+}
+
 function pickRecommendationResults() {
   const answers = state.recommendation.answers || {};
-  const candidates = buildRecommendationCandidates();
+  const baseCandidates = buildRecommendationCandidates();
+  const candidates = filterRecommendationCandidates(baseCandidates, answers);
   if (candidates.length === 0) {
     return [];
   }
+  const profile = buildInterestProfile();
   const scored = candidates.map((item, index) => ({
     item,
-    score: scoreRecommendationItem(item, answers, index),
+    score: scoreRecommendationItem(item, answers, index, profile),
   }));
   scored.sort((a, b) => b.score - a.score);
   const top = scored.slice(0, 50).map((entry) => entry.item);

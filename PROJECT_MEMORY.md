@@ -146,6 +146,10 @@ Last update: 2026-03-16
 ## c331 follow-up (2026-03-17)
 - Backup popup now uses session-only gating (no 24h suppression), so it appears after Discord on each new session.
 
+## c332 follow-up (2026-03-17)
+- Recommandation scoring now uses interest signals and stricter filtering for more precise matches.
+- Recommendation option hover animation softened to avoid blinking.
+
 ## Visual system policy (c137)
 - Keep unified visual tokens across the UI:
   - coherent radii/shadows/spacing

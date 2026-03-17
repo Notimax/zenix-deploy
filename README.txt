@@ -50,6 +50,10 @@ LATEST FIX LOG (2026-03-17, c330)
 LATEST FIX LOG (2026-03-17, c331)
 - Backup popup now respects session-only (no 24h suppression), so it appears after Discord on each new session.
 
+LATEST FIX LOG (2026-03-17, c332)
+- Recommandation: scoring now uses interest signals + stricter filters for more precise matches.
+- Recommandation options no longer "blink" (hover animation softened).
+
 LATEST FIX LOG (2026-03-17, c327)
 - Mobile search input font-size forced to 16px to prevent iOS zoom on focus.
 LATEST FIX LOG (2026-03-17, c325)
