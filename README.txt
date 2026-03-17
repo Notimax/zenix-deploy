@@ -63,6 +63,10 @@ LATEST FIX LOG (2026-03-17, c334)
 LATEST FIX LOG (2026-03-17, c335)
 - Recommandation cover cards are now memoized to avoid rerenders/blinking during auto-refresh.
 
+LATEST FIX LOG (2026-03-17, c336)
+- Recommandation: added "Quand veux-tu regarder" (matin/aprem/soir) with smart scoring.
+- Recommandation: cover map stabilizes image selection to prevent blinking.
+
 LATEST FIX LOG (2026-03-17, c327)
 - Mobile search input font-size forced to 16px to prevent iOS zoom on focus.
 LATEST FIX LOG (2026-03-17, c325)

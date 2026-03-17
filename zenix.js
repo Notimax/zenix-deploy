@@ -1,5 +1,5 @@
 const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260317-c335";
+const ZENIX_BUILD_VERSION = "20260317-c336";
 const STORAGE_KEY = "zenix-progress-v4";
 if (typeof window !== "undefined") {
   window.__zenixBooted = false;
@@ -222,6 +222,15 @@ const RECOMMENDATION_QUESTIONS = [
       { value: "action", label: "Action" },
       { value: "romance", label: "Romance" },
       { value: "sf", label: "SF" },
+    ],
+  },
+  {
+    id: "time",
+    label: "Quand veux-tu regarder",
+    options: [
+      { value: "morning", label: "Matin" },
+      { value: "afternoon", label: "Aprem" },
+      { value: "evening", label: "Soir" },
     ],
   },
   {
@@ -9582,6 +9591,8 @@ function resetRecommendationState(options = {}) {
   state.recommendation.step = 0;
   state.recommendation.answers = {};
   state.recommendation.results = [];
+  state.recommendation.lastRenderKey = "";
+  state.recommendation.coverMap = new Map();
   if (options.resetSeed !== false) {
     state.recommendation.seed = Date.now();
   }
@@ -9657,6 +9668,24 @@ function getRecommendationMoodHints(key) {
   return moodMap[key] || [];
 }
 
+function getRecommendationTimeProfile(key) {
+  const map = {
+    morning: {
+      boost: ["comedie", "comedy", "family", "famille", "animation", "anime", "aventure", "fantasy", "musical", "jeunesse", "kids"],
+      avoid: ["horreur", "horror", "thriller", "crime", "gore", "slasher", "epouvante"],
+    },
+    afternoon: {
+      boost: ["action", "aventure", "comedie", "thriller", "mystere", "sf", "fantastique", "hero", "superhero"],
+      avoid: ["gore"],
+    },
+    evening: {
+      boost: ["thriller", "horreur", "drame", "crime", "mystere", "sf", "fantastique", "psychologique"],
+      avoid: ["animation", "family", "famille", "jeunesse", "kids"],
+    },
+  };
+  return map[key] || { boost: [], avoid: [] };
+}
+
 function getRecommendationInterestBoost(item, profile) {
   if (!profile || !profile.hasSignals) {
     return 0;
@@ -9726,6 +9755,33 @@ function scoreRecommendationItem(item, answers, index, profile = null) {
     }
   }
 
+  if (answers.time) {
+    const profile = getRecommendationTimeProfile(answers.time);
+    if (profile.boost.some((hint) => tokens.has(normalizeThemeToken(hint)))) {
+      score += 16;
+    }
+    if (profile.avoid.some((hint) => tokens.has(normalizeThemeToken(hint)))) {
+      score -= 14;
+    }
+    if (answers.time === "morning") {
+      if (runtime > 0 && runtime <= 60) {
+        score += 10;
+      } else if (runtime > 120) {
+        score -= 8;
+      }
+    } else if (answers.time === "afternoon") {
+      if (runtime > 45 && runtime <= 120) {
+        score += 8;
+      }
+    } else if (answers.time === "evening") {
+      if (runtime >= 90) {
+        score += 10;
+      } else if (runtime > 0 && runtime <= 30) {
+        score -= 8;
+      }
+    }
+  }
+
   if (answers.era) {
     if (answers.era === "80s90s" && year >= 1980 && year <= 1999) {
       score += 14;
@@ -9767,6 +9823,8 @@ function filterRecommendationCandidates(candidates, answers) {
   }
   const format = String(answers?.format || "").trim();
   const moodHints = answers?.mood ? getRecommendationMoodHints(answers.mood) : [];
+  const timeKey = String(answers?.time || "").trim();
+  const timeProfile = timeKey ? getRecommendationTimeProfile(timeKey) : { boost: [], avoid: [] };
   const era = String(answers?.era || "").trim();
   const duration = String(answers?.duration || "").trim();
 
@@ -9805,6 +9863,21 @@ function filterRecommendationCandidates(candidates, answers) {
       if (moodHints.length > 0) {
         const tokens = getItemThemeTokens(item);
         if (!moodHints.some((hint) => tokens.has(normalizeThemeToken(hint)))) {
+          return false;
+        }
+      }
+      if (timeKey) {
+        const tokens = getItemThemeTokens(item);
+        const runtime = resolveRecommendationRuntime(item);
+        if (timeProfile.avoid.length > 0 && timeProfile.avoid.some((hint) => tokens.has(normalizeThemeToken(hint)))) {
+          if (mode !== "relaxed") {
+            return false;
+          }
+        }
+        if (timeKey === "morning" && runtime > 120 && mode !== "relaxed") {
+          return false;
+        }
+        if (timeKey === "evening" && runtime > 0 && runtime <= 30 && mode !== "relaxed") {
           return false;
         }
       }
@@ -9896,8 +9969,17 @@ function renderRecommendationResults() {
     state.recommendation.lastRenderKey = "";
     return;
   }
+  const coverMap =
+    state.recommendation.coverMap instanceof Map ? state.recommendation.coverMap : new Map();
+  state.recommendation.coverMap = coverMap;
   const renderKey = results
-    .map((item) => `${item.id || ""}:${resolveCardCover(item) || ""}`)
+    .map((item) => {
+      const key = String(item?.id || "");
+      if (!coverMap.has(key)) {
+        coverMap.set(key, resolveCardCover(item) || "");
+      }
+      return `${key}:${coverMap.get(key) || ""}`;
+    })
     .join("|");
   if (
     state.recommendation.lastRenderKey === renderKey &&
@@ -9911,7 +9993,7 @@ function renderRecommendationResults() {
   results.forEach((item) => {
     const card = document.createElement("article");
     card.className = "recommendation-card";
-    const cover = resolveCardCover(item);
+    const cover = coverMap.get(String(item?.id || "")) || resolveCardCover(item);
     card.innerHTML = `
       <img src="${escapeHtml(cover || "")}" alt="${escapeHtml(item.title)}" loading="lazy" decoding="async" />
       <div class="recommendation-card-body">

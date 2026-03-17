@@ -159,6 +159,10 @@ Last update: 2026-03-16
 ## c335 follow-up (2026-03-17)
 - Recommendation results now reuse the existing render when nothing changed (prevents cover blinking during auto-refresh).
 
+## c336 follow-up (2026-03-17)
+- Added recommendation time-of-day question (matin/aprem/soir) with scoring and filtering.
+- Recommendation covers now use a stable cover map to avoid blinking on refresh.
+
 ## Visual system policy (c137)
 - Keep unified visual tokens across the UI:
   - coherent radii/shadows/spacing
