@@ -153,6 +153,9 @@ Last update: 2026-03-16
 ## c333 follow-up (2026-03-17)
 - Recommendation UI no longer animates choices/cards to prevent blinking on mobile.
 
+## c334 follow-up (2026-03-17)
+- Recommendation result covers now bypass image-loading shimmer/opacity gating to stop blinking.
+
 ## Visual system policy (c137)
 - Keep unified visual tokens across the UI:
   - coherent radii/shadows/spacing

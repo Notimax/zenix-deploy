@@ -1,5 +1,5 @@
 const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260317-c333";
+const ZENIX_BUILD_VERSION = "20260317-c334";
 const STORAGE_KEY = "zenix-progress-v4";
 if (typeof window !== "undefined") {
   window.__zenixBooted = false;
@@ -9910,6 +9910,8 @@ function renderRecommendationResults() {
     `;
     const img = card.querySelector("img");
     if (img) {
+      img.dataset.noLoadingFx = "1";
+      img.dataset.imageReady = "1";
       wireImageFallback(img, item.title, false);
     }
     const playBtn = card.querySelector("[data-reco-play]");
@@ -18002,15 +18004,22 @@ function getImageLoadingTargets(img) {
   return targets;
 }
 
-function setImageLoadingState(img, loading) {
-  if (!(img instanceof HTMLImageElement)) {
-    return;
+  function setImageLoadingState(img, loading) {
+    if (!(img instanceof HTMLImageElement)) {
+      return;
+    }
+    if (img.dataset.noLoadingFx === "1") {
+      img.dataset.imageReady = "1";
+      getImageLoadingTargets(img).forEach((target) => {
+        target.classList.remove("is-loading");
+      });
+      return;
+    }
+    img.dataset.imageReady = loading ? "0" : "1";
+    getImageLoadingTargets(img).forEach((target) => {
+      target.classList.toggle("is-loading", Boolean(loading));
+    });
   }
-  img.dataset.imageReady = loading ? "0" : "1";
-  getImageLoadingTargets(img).forEach((target) => {
-    target.classList.toggle("is-loading", Boolean(loading));
-  });
-}
 
 function onImageLoaded(event) {
   const img = event.currentTarget;

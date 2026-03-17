@@ -57,6 +57,9 @@ LATEST FIX LOG (2026-03-17, c332)
 LATEST FIX LOG (2026-03-17, c333)
 - Recommandation UI: removed animations/transitions that caused blinking on choices and cover cards.
 
+LATEST FIX LOG (2026-03-17, c334)
+- Recommandation cover cards now bypass image loading effects to stop blinking.
+
 LATEST FIX LOG (2026-03-17, c327)
 - Mobile search input font-size forced to 16px to prevent iOS zoom on focus.
 LATEST FIX LOG (2026-03-17, c325)
