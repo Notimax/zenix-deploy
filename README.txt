@@ -37,6 +37,11 @@ LATEST FIX LOG (2026-03-17, c328)
 - Mobile nav overlay now includes a blurred catalogue preview background.
 - Mobile nav items now include category icons + glow on press.
 
+LATEST FIX LOG (2026-03-17, c329)
+- Player auto-validation now triggers auto-repair when no reader validates.
+- After auto-repair, readers are re-validated (2s) and the first valid reader is locked.
+- If still no reader works, player shows: "Aucun lecteur en marche. Mentionner sur Discord \"Astrax\"."
+
 LATEST FIX LOG (2026-03-17, c327)
 - Mobile search input font-size forced to 16px to prevent iOS zoom on focus.
 LATEST FIX LOG (2026-03-17, c325)

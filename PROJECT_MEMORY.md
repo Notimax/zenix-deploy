@@ -133,6 +133,11 @@ Last update: 2026-03-16
 - Mobile nav overlay now shows a blurred catalogue preview background.
 - Mobile nav items now include category icons + glow on press.
 
+## c329 follow-up (2026-03-17)
+- Player auto-validation now triggers an automatic repair if no reader validates.
+- After auto-repair, validation is re-run (2s per reader) and the first valid reader is locked.
+- If no reader works after repair, player shows: "Aucun lecteur en marche. Mentionner sur Discord \"Astrax\"."
+
 ## Visual system policy (c137)
 - Keep unified visual tokens across the UI:
   - coherent radii/shadows/spacing

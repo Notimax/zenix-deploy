@@ -12878,6 +12878,85 @@ async function collectRepairSourcesForItem(item, season = 1, episode = 1) {
   return allSources;
 }
 
+async function autoRepairSourcesForPlayback(options = {}) {
+  const explicitId = Number(options?.itemId || 0);
+  const activeId = explicitId || Number(state.nowPlaying?.id || state.selectedDetailId || 0);
+  if (!activeId) {
+    return { ok: false };
+  }
+  const item = findItemById(activeId) || (await buildItemFromDetails(activeId));
+  if (!item) {
+    return { ok: false };
+  }
+  const season = Math.max(
+    1,
+    Number(
+      options?.season ||
+        refs.playerSeasonSelect?.value ||
+        state.nowPlaying?.season ||
+        1
+    )
+  );
+  const episode = Math.max(
+    1,
+    Number(
+      options?.episode ||
+        refs.playerEpisodeSelect?.value ||
+        state.nowPlaying?.episode ||
+        1
+    )
+  );
+  const key = buildRepairKey(item, season, episode);
+  if (!key) {
+    return { ok: false };
+  }
+  setPlayerLoading(true, "Reparation automatique...");
+  setPlayerStatus("Reparation automatique en cours...");
+  const sources = await collectRepairSourcesForItem(item, season, episode);
+  if (!Array.isArray(sources) || sources.length === 0) {
+    return { ok: false, pending: isLikelyRecentPendingUpload(item) };
+  }
+  const normalizedSources = normalizeRepairSourceList(sources);
+  const existingSources = Array.isArray(state.allEpisodeSources) ? state.allEpisodeSources : [];
+  const existingKeys = new Set(existingSources.map((entry) => getSourceDedupKey(entry)).filter(Boolean));
+  const addedSources = normalizedSources.filter((entry) => {
+    const entryKey = getSourceDedupKey(entry);
+    if (!entryKey) {
+      return true;
+    }
+    if (existingKeys.has(entryKey)) {
+      return false;
+    }
+    existingKeys.add(entryKey);
+    return true;
+  });
+
+  await storeRepairSources(key, normalizedSources);
+  const merged = mergeSourceLists(normalizedSources, existingSources);
+  state.allEpisodeSources = merged;
+  if (item.type === "tv") {
+    const currentLang = String(refs.playerLanguageSelect?.value || state.nowPlaying?.language || "");
+    const nextLang = resolvePreferredLanguage(item.id, currentLang, getAvailableLanguages(merged));
+    state.sourcePool = filterSourcesByLanguage(merged, nextLang);
+    if (state.sourcePool.length === 0) {
+      state.sourcePool = merged.slice();
+    }
+  } else {
+    state.sourcePool = filterMovieSourcesForFrench(merged);
+  }
+  state.sourceRetryAttempts.clear();
+  state.sourceIndex = -1;
+  renderPlayerSourceOptions();
+  scheduleHlsLanguageProbe(state.allEpisodeSources);
+  if (refs.playerRepairStatus) {
+    refs.playerRepairStatus.textContent =
+      addedSources.length > 0
+        ? `Reparation automatique: ${addedSources.length} source(s) ajoutee(s).`
+        : "Aucune nouvelle source. Lecteurs existants conserves.";
+  }
+  return { ok: true, added: addedSources.length };
+}
+
 async function runPlayerRepair() {
   if (!refs.playerRepairBtn) {
     return;
@@ -14926,7 +15005,32 @@ async function playFromSourcePoolWithValidation(resumeTime, token, options = {})
   }
 
   state.sourceValidationActive = false;
-  return playFromSourcePoolWithRescue(resumeTime, token, { ...options, skipValidation: true });
+  if (!options?.autoRepairTried) {
+    const repairResult = await autoRepairSourcesForPlayback({
+      itemId: Number(options?.itemId || 0),
+      season: Number(options?.season || 0),
+      episode: Number(options?.episode || 0),
+    });
+    if (token !== state.playToken) {
+      return;
+    }
+    if (repairResult?.ok && state.sourcePool.length > 0) {
+      return playFromSourcePoolWithValidation(resumeTime, token, {
+        ...options,
+        autoRepairTried: true,
+        skipValidation: false,
+      });
+    }
+    const pending = Boolean(repairResult?.pending);
+    const message = pending
+      ? "Film trop recent, pas encore disponible."
+      : "Aucun lecteur en marche. Mentionner sur Discord \"Astrax\".";
+    setPlayerStatus(message, true);
+    setPlayerLoading(false);
+    return;
+  }
+  setPlayerStatus("Aucun lecteur en marche. Mentionner sur Discord \"Astrax\".", true);
+  setPlayerLoading(false);
 }
 
 function hasSourceSuccess(source) {
