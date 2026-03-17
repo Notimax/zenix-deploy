@@ -1,5 +1,5 @@
 const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260317-c329";
+const ZENIX_BUILD_VERSION = "20260317-c330";
 const STORAGE_KEY = "zenix-progress-v4";
 if (typeof window !== "undefined") {
   window.__zenixBooted = false;
@@ -1326,13 +1326,13 @@ function getMobileNavIcon(view, isSub = false) {
   const name = String(view || "").toLowerCase();
   const base =
     name === "all"
-      ? "M3 5h18v12H3z M9 9l6 4-6 4z"
+      ? "M4 4h16v16H4z M9 8l7 4-7 4z"
       : name === "movie"
-      ? "M4 6h16v12H4z M6 6v12 M10 6v12 M14 6v12 M18 6v12"
+      ? "M3 7h18v12H3z M3 7l4-4h4l-4 4H3z M9 7l4-4h4l-4 4H9z M15 7l4-4h2v4h-2z"
       : name === "tv"
-      ? "M4 7h16v10H4z M9 19h6 M10 5l2 2 2-2"
+      ? "M4 7h16v10H4z M8 19h8 M10 5l2 2 2-2"
       : name === "anime"
-      ? "M12 3l2.2 3.8 4.3.6-3.2 3.1.8 4.4L12 13.2 7.9 15 8.7 10.6 5.5 7.4l4.3-.6z"
+      ? "M12 2l2.5 5 5.5.8-4 3.9 1 5.6-5-2.7-5 2.7 1-5.6-4-3.9 5.5-.8z"
       : name === "calendar"
       ? "M5 6h14v12H5z M7 3v4 M17 3v4 M7 10h10"
       : name === "latest"
@@ -4562,6 +4562,9 @@ function maybeShowBackupGate(options = {}) {
   if (isOverlayLayerOpen()) {
     return;
   }
+  if (hasBackupPromptSession() || hasBackupPromptRecent()) {
+    return;
+  }
   if (!hasDiscordPromptSession()) {
     return;
   }
@@ -6394,20 +6397,24 @@ function renderCalendarSection() {
       wireImageFallback(image, entry.title || "Affiche", false);
     }
 
-    if (hasDetails) {
-      card.classList.add("clickable");
-      card.addEventListener("click", (event) => {
-        const target = event.target;
-        if (target instanceof HTMLElement && target.closest("button, a")) {
-          return;
-        }
-        openDetails(detailId).catch(() => {
-          showToast("Impossible d'ouvrir ce titre.", true);
-        });
-      });
-    }
-    mergedFragment.appendChild(card);
-  });
+      if (hasDetails) {
+        card.classList.add("clickable");
+        bindSafeTap(
+          card,
+          (event) => {
+            const target = event.target;
+            if (target instanceof HTMLElement && target.closest("button, a")) {
+              return;
+            }
+            openDetails(detailId).catch(() => {
+              showToast("Impossible d'ouvrir ce titre.", true);
+            });
+          },
+          { moveThreshold: 12, scrollThreshold: 12, dedupeMs: 420 }
+        );
+      }
+      mergedFragment.appendChild(card);
+    });
   if (mergedRows.length === 0) {
     const providerStatus = state.calendarData?.providerStatus || {};
     let sourceHint =
@@ -6437,14 +6444,18 @@ function renderCalendarSection() {
   }
 
   refs.calendarMergedGrid.querySelectorAll("[data-calendar-open]").forEach((button) => {
-    bindFastPress(button, () => {
-      const id = Number(button.getAttribute("data-calendar-open") || 0);
-      if (id > 0) {
-        openDetails(id).catch(() => {
-          showToast("Impossible d'ouvrir ce titre.", true);
-        });
-      }
-    });
+    bindSafeTap(
+      button,
+      () => {
+        const id = Number(button.getAttribute("data-calendar-open") || 0);
+        if (id > 0) {
+          openDetails(id).catch(() => {
+            showToast("Impossible d'ouvrir ce titre.", true);
+          });
+        }
+      },
+      { moveThreshold: 10, scrollThreshold: 10, dedupeMs: 360 }
+    );
   });
 
   if (refs.calendarMergedMeta) {

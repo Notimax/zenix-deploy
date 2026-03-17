@@ -138,6 +138,11 @@ Last update: 2026-03-16
 - After auto-repair, validation is re-run (2s per reader) and the first valid reader is locked.
 - If no reader works after repair, player shows: "Aucun lecteur en marche. Mentionner sur Discord \"Astrax\"."
 
+## c330 follow-up (2026-03-17)
+- Mobile nav category icons refreshed (Films/Séries/Anime).
+- Calendar taps are now safe-touch (scroll no longer opens titles).
+- Backup popup now shows only once per session (no repeated reopen after refresh).
+
 ## Visual system policy (c137)
 - Keep unified visual tokens across the UI:
   - coherent radii/shadows/spacing

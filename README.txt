@@ -42,6 +42,11 @@ LATEST FIX LOG (2026-03-17, c329)
 - After auto-repair, readers are re-validated (2s) and the first valid reader is locked.
 - If still no reader works, player shows: "Aucun lecteur en marche. Mentionner sur Discord \"Astrax\"."
 
+LATEST FIX LOG (2026-03-17, c330)
+- Mobile nav category icons refreshed (Films/Séries/Anime).
+- Calendar taps are now safe-touch (scroll no longer opens titles).
+- Backup popup now shows only once per session (no repeated reopen after refresh).
+
 LATEST FIX LOG (2026-03-17, c327)
 - Mobile search input font-size forced to 16px to prevent iOS zoom on focus.
 LATEST FIX LOG (2026-03-17, c325)
