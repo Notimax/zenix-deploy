@@ -67,6 +67,11 @@ LATEST FIX LOG (2026-03-17, c336)
 - Recommandation: added "Quand veux-tu regarder" (matin/aprem/soir) with smart scoring.
 - Recommandation: cover map stabilizes image selection to prevent blinking.
 
+LATEST FIX LOG (2026-03-17, c337)
+- Player loading now plays a subtle "Netflix vibe" sting (best-effort, user-gesture gated).
+- Top du jour Zenix is now based on local playback counts with fallback merge.
+- Local cover cache added for visible covers to speed repeat visits.
+
 LATEST FIX LOG (2026-03-17, c327)
 - Mobile search input font-size forced to 16px to prevent iOS zoom on focus.
 LATEST FIX LOG (2026-03-17, c325)

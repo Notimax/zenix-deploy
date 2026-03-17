@@ -1,6 +1,8 @@
 const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260317-c336";
+const ZENIX_BUILD_VERSION = "20260317-c337";
 const STORAGE_KEY = "zenix-progress-v4";
+const COVER_CACHE_KEY = "zenix-cover-cache-v1";
+const LOCAL_PLAY_KEY = "zenix-local-plays-v1";
 if (typeof window !== "undefined") {
   window.__zenixBooted = false;
   window.__zenixBootError = false;
@@ -184,6 +186,12 @@ const ADBLOCK_SOFT_MESSAGE =
   "Bloqueur de pub detecte : l'interface reste visible mais la lecture est bloquee. Desactive-le pour lancer les lecteurs.";
 const QUALITY_BADGE_DEFAULT = "Full HD";
 const QUALITY_BADGE_4K_RECENT_YEARS = 2;
+const COVER_CACHE_MAX = 420;
+const COVER_CACHE_MAX_AGE_MS = 1000 * 60 * 60 * 24 * 12;
+const COVER_CACHE_SAVE_DELAY_MS = 1800;
+const LOCAL_PLAY_MAX_DAYS = 14;
+const LOCAL_PLAY_MAX_ITEMS_PER_DAY = 240;
+const PLAYER_LOADING_STING_COOLDOWN_MS = 18000;
 const SKIP_INTRO_SECONDS = 85;
 const SKIP_RECAP_SECONDS = 45;
 const INTEREST_QUERY_MAX = 40;
@@ -382,6 +390,7 @@ const state = {
   catalog: [],
   topDaily: [],
   topDailyDayKey: "",
+  topDailySource: "catalog",
   activeHeroId: null,
   selectedDetailId: null,
   detailsCache: new Map(),
@@ -390,6 +399,11 @@ const state = {
   trailersCache: new Map(),
   seasonsCache: new Map(),
   progress: loadProgress(),
+  coverCacheMap: loadCoverCache(),
+  coverCacheSaveTimer: 0,
+  localPlayStore: loadLocalPlayStore(),
+  localPlaySaveTimer: 0,
+  lastLocalPlayCountedKey: "",
   favorites: loadFavorites(),
   ratings: loadRatings(),
   searchSignals: loadSearchSignals(),
@@ -476,6 +490,9 @@ const state = {
   startupSplashForceTimer: 0,
   startupAudioContext: null,
   lastStartupSoundAt: 0,
+  loadingAudioContext: null,
+  lastLoadingStingToken: 0,
+  lastLoadingStingAt: 0,
   activeViewSyncTimer: 0,
   modalScrollY: 0,
   modalScrollCaptured: false,
@@ -575,6 +592,7 @@ const refs = {
 
   topSection: document.getElementById("topSection"),
   topGrid: document.getElementById("topGrid"),
+  topDailyHint: document.getElementById("topDailyHint"),
   trendingSection: document.getElementById("trendingSection"),
   trendingTrack: document.getElementById("trendingTrack"),
 
@@ -1666,6 +1684,87 @@ async function playStartupSplashSound() {
     sparkle.stop(baseTime + 0.52);
   } catch {
     // startup sound is best effort only
+  }
+}
+
+async function playLoadingSting() {
+  const nowMs = Date.now();
+  if (state.playToken <= 0) {
+    return;
+  }
+  if (state.lastLoadingStingToken === state.playToken) {
+    return;
+  }
+  if (nowMs - Number(state.lastLoadingStingAt || 0) < PLAYER_LOADING_STING_COOLDOWN_MS) {
+    return;
+  }
+  if (Date.now() > Number(state.userInteractingUntil || 0)) {
+    return;
+  }
+  if (document.hidden) {
+    return;
+  }
+  state.lastLoadingStingAt = nowMs;
+  state.lastLoadingStingToken = state.playToken;
+
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (typeof AudioContextClass !== "function") {
+    return;
+  }
+
+  try {
+    if (!state.loadingAudioContext) {
+      state.loadingAudioContext = new AudioContextClass();
+    }
+    const ctx = state.loadingAudioContext;
+    if (!ctx) {
+      return;
+    }
+    if (ctx.state === "suspended") {
+      await ctx.resume().catch(() => {
+        // autoplay policy can block this; no-op
+      });
+    }
+    if (ctx.state !== "running") {
+      return;
+    }
+
+    const baseTime = ctx.currentTime + 0.02;
+    const master = ctx.createGain();
+    master.gain.setValueAtTime(0.0001, baseTime);
+    master.gain.exponentialRampToValueAtTime(0.06, baseTime + 0.08);
+    master.gain.exponentialRampToValueAtTime(0.0001, baseTime + 0.75);
+    master.connect(ctx.destination);
+
+    const sweep = ctx.createOscillator();
+    sweep.type = "sine";
+    sweep.frequency.setValueAtTime(220, baseTime);
+    sweep.frequency.exponentialRampToValueAtTime(540, baseTime + 0.2);
+    sweep.frequency.exponentialRampToValueAtTime(360, baseTime + 0.7);
+    const sweepGain = ctx.createGain();
+    sweepGain.gain.setValueAtTime(0.0001, baseTime);
+    sweepGain.gain.exponentialRampToValueAtTime(0.4, baseTime + 0.1);
+    sweepGain.gain.exponentialRampToValueAtTime(0.0001, baseTime + 0.7);
+    sweep.connect(sweepGain);
+    sweepGain.connect(master);
+    sweep.start(baseTime);
+    sweep.stop(baseTime + 0.72);
+
+    const shimmer = ctx.createOscillator();
+    shimmer.type = "triangle";
+    shimmer.frequency.setValueAtTime(900, baseTime + 0.05);
+    shimmer.frequency.exponentialRampToValueAtTime(1400, baseTime + 0.2);
+    shimmer.frequency.exponentialRampToValueAtTime(1100, baseTime + 0.6);
+    const shimmerGain = ctx.createGain();
+    shimmerGain.gain.setValueAtTime(0.0001, baseTime);
+    shimmerGain.gain.exponentialRampToValueAtTime(0.2, baseTime + 0.12);
+    shimmerGain.gain.exponentialRampToValueAtTime(0.0001, baseTime + 0.62);
+    shimmer.connect(shimmerGain);
+    shimmerGain.connect(master);
+    shimmer.start(baseTime + 0.03);
+    shimmer.stop(baseTime + 0.64);
+  } catch {
+    // loading sound is best effort only
   }
 }
 
@@ -7247,12 +7346,29 @@ async function loadTopDaily() {
 
   try {
     const dayKey = getTopDailyDateKey();
+    const localTop = buildTopFromLocalPlays(dayKey);
     const computed = buildTopFromCatalog(dayKey);
-    if (computed.length > 0) {
+    if (localTop.length > 0) {
+      const merged = [...localTop];
+      computed.forEach((entry) => {
+        if (merged.length >= TOP_DAILY_LIMIT) {
+          return;
+        }
+        if (merged.some((row) => row.id === entry.id)) {
+          return;
+        }
+        merged.push(entry);
+      });
+      state.topDaily = merged.slice(0, TOP_DAILY_LIMIT);
+      state.topDailySource = "local";
+      state.topDailyDayKey = dayKey;
+    } else if (computed.length > 0) {
       state.topDaily = computed;
+      state.topDailySource = "catalog";
       state.topDailyDayKey = dayKey;
     } else if (state.topDaily.length === 0) {
       state.topDaily = buildTopFromCatalog(dayKey);
+      state.topDailySource = "catalog";
       state.topDailyDayKey = dayKey;
     }
     warmImageCacheFromPool(state.topDaily, 40);
@@ -7834,6 +7950,63 @@ function getTopDailyTypeCap(typeBucket) {
   return TOP_DAILY_TYPE_CAPS.movie;
 }
 
+function buildTopFromLocalPlays(dayKey = getTopDailyDateKey()) {
+  const store = state.localPlayStore || {};
+  const day = store && typeof store === "object" ? store[dayKey] : null;
+  if (!day || typeof day !== "object") {
+    return [];
+  }
+  const entries = Object.entries(day)
+    .map(([id, count]) => ({ id: Number(id || 0), count: Number(count || 0) }))
+    .filter((entry) => entry.id > 0 && entry.count > 0)
+    .sort((a, b) => b.count - a.count);
+  if (entries.length === 0) {
+    return [];
+  }
+
+  const picked = [];
+  const usedIds = new Set();
+  const typeCounts = { movie: 0, tv: 0, anime: 0 };
+
+  for (const entry of entries) {
+    if (picked.length >= TOP_DAILY_LIMIT) {
+      break;
+    }
+    const id = entry.id;
+    if (usedIds.has(id)) {
+      continue;
+    }
+    let item = findItemById(id);
+    if (!item) {
+      const progress = state.progress?.[id];
+      if (progress) {
+        item = {
+          id,
+          type: progress.type,
+          title: progress.title,
+          poster: progress.poster,
+          isAnime: Boolean(progress.isAnime),
+          runtime: progress.duration || null,
+          releaseDate: progress.releaseDate || "",
+        };
+      }
+    }
+    if (!item) {
+      continue;
+    }
+    const typeBucket = getItemTypeBucket(item);
+    const cap = getTopDailyTypeCap(typeBucket);
+    if (Number(typeCounts[typeBucket] || 0) >= cap) {
+      continue;
+    }
+    picked.push(item);
+    usedIds.add(id);
+    typeCounts[typeBucket] = Number(typeCounts[typeBucket] || 0) + 1;
+  }
+
+  return picked.slice(0, TOP_DAILY_LIMIT);
+}
+
 function computeTopDailyScore(item, daySeed, nowMs) {
   if (!item) {
     return Number.NEGATIVE_INFINITY;
@@ -8410,6 +8583,16 @@ function resolvePreferredCover(item, details = null) {
 
 function resolveCardCover(item, details = null) {
   const mediaId = Number(item?.id || 0);
+  const cached = mediaId > 0 && state.coverCacheMap instanceof Map ? state.coverCacheMap.get(mediaId) : null;
+  if (cached && cached.url) {
+    if (Number(cached.ts || 0) && Date.now() - Number(cached.ts || 0) <= COVER_CACHE_MAX_AGE_MS) {
+      return normalizeImageUrl(cached.url);
+    }
+    if (state.coverCacheMap instanceof Map) {
+      state.coverCacheMap.delete(mediaId);
+      scheduleCoverCacheSave();
+    }
+  }
   const fromCache = mediaId > 0 ? state.detailsCache.get(mediaId) : null;
   const resolved = details || fromCache || null;
   return normalizeImageUrl(
@@ -9356,6 +9539,12 @@ function renderHero(item) {
 }
 
 function renderTopDaily() {
+  if (refs.topDailyHint) {
+    refs.topDailyHint.textContent =
+      state.topDailySource === "local"
+        ? "Classement base sur tes lectures locales."
+        : "Classement automatiquement actualise chaque jour.";
+  }
   refs.topGrid.innerHTML = "";
   const fragment = document.createDocumentFragment();
 
@@ -17497,6 +17686,9 @@ function setPlayerLoading(active, message = "") {
     const safe = String(message || "").trim();
     refs.playerLoadingText.textContent = safe || "Chargement du lecteur...";
   }
+  if (canShow) {
+    playLoadingSting().catch(() => {});
+  }
 }
 
 function shouldShowPlayerLoadingFromStatus(message, isError = false) {
@@ -17738,6 +17930,13 @@ function onPlayerProgress() {
     if (currentTime >= 1.2 && errorCode <= 0 && !paused) {
       markCurrentSourceSuccessful(state.sourceIndex, currentSource);
       rememberSourceSuccess(currentSource, state.nowPlaying?.id || 0);
+      if (state.nowPlaying?.id) {
+        const playKey = `${state.playToken}:${state.nowPlaying.id}:${state.nowPlaying.season || 0}:${state.nowPlaying.episode || 0}`;
+        if (state.lastLocalPlayCountedKey !== playKey) {
+          recordLocalPlay(state.nowPlaying.id);
+          state.lastLocalPlayCountedKey = playKey;
+        }
+      }
     }
   }
   saveNowPlayingProgress();
@@ -18121,6 +18320,11 @@ function onImageLoaded(event) {
     return;
   }
   setImageLoadingState(img, false);
+  const coverId = Number(img.dataset.coverId || 0);
+  if (coverId > 0) {
+    const src = normalizeImageUrl(String(img.currentSrc || img.src || "").trim());
+    rememberCoverCache(coverId, src);
+  }
 }
 
 function wireImageFallback(img, title, landscape = false) {
@@ -19804,6 +20008,162 @@ function saveProgress(value) {
   const payload = JSON.stringify(value);
   localStorage.setItem(STORAGE_KEY, payload);
   sessionStorage.setItem(STORAGE_KEY, payload);
+}
+
+function loadCoverCache() {
+  try {
+    const raw = localStorage.getItem(COVER_CACHE_KEY) || sessionStorage.getItem(COVER_CACHE_KEY);
+    if (!raw) {
+      return new Map();
+    }
+    const parsed = JSON.parse(raw);
+    const map = new Map();
+    if (parsed && typeof parsed === "object") {
+      Object.entries(parsed).forEach(([id, entry]) => {
+        const url = String(entry?.url || "").trim();
+        const ts = Number(entry?.ts || 0);
+        if (!url || !Number.isFinite(ts)) {
+          return;
+        }
+        map.set(Number(id || 0), { url, ts });
+      });
+    }
+    pruneCoverCacheMap(map);
+    return map;
+  } catch {
+    return new Map();
+  }
+}
+
+function pruneCoverCacheMap(map) {
+  if (!(map instanceof Map)) {
+    return;
+  }
+  const now = Date.now();
+  const rows = [];
+  map.forEach((value, key) => {
+    const ts = Number(value?.ts || 0);
+    if (!ts || now - ts > COVER_CACHE_MAX_AGE_MS) {
+      return;
+    }
+    rows.push([key, { url: value.url, ts }]);
+  });
+  rows.sort((a, b) => Number(b[1].ts) - Number(a[1].ts));
+  map.clear();
+  rows.slice(0, COVER_CACHE_MAX).forEach(([key, value]) => {
+    map.set(Number(key || 0), value);
+  });
+}
+
+function saveCoverCache(map) {
+  if (!(map instanceof Map)) {
+    return;
+  }
+  pruneCoverCacheMap(map);
+  const payload = {};
+  map.forEach((value, key) => {
+    payload[key] = value;
+  });
+  const encoded = JSON.stringify(payload);
+  localStorage.setItem(COVER_CACHE_KEY, encoded);
+  sessionStorage.setItem(COVER_CACHE_KEY, encoded);
+}
+
+function scheduleCoverCacheSave() {
+  if (state.coverCacheSaveTimer) {
+    clearTimeout(state.coverCacheSaveTimer);
+  }
+  state.coverCacheSaveTimer = window.setTimeout(() => {
+    state.coverCacheSaveTimer = 0;
+    saveCoverCache(state.coverCacheMap);
+  }, COVER_CACHE_SAVE_DELAY_MS);
+}
+
+function rememberCoverCache(id, url) {
+  const mediaId = Number(id || 0);
+  const safeUrl = String(url || "").trim();
+  if (!mediaId || !safeUrl || safeUrl.startsWith("data:")) {
+    return;
+  }
+  const normalized = normalizeImageUrl(safeUrl);
+  if (!normalized || normalized.startsWith("data:")) {
+    return;
+  }
+  const map = state.coverCacheMap instanceof Map ? state.coverCacheMap : new Map();
+  state.coverCacheMap = map;
+  const current = map.get(mediaId);
+  if (current && current.url === normalized) {
+    current.ts = Date.now();
+    map.set(mediaId, current);
+  } else {
+    map.set(mediaId, { url: normalized, ts: Date.now() });
+  }
+  scheduleCoverCacheSave();
+}
+
+function loadLocalPlayStore() {
+  try {
+    const raw = localStorage.getItem(LOCAL_PLAY_KEY) || sessionStorage.getItem(LOCAL_PLAY_KEY);
+    if (!raw) {
+      return {};
+    }
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function pruneLocalPlayStore(store) {
+  if (!store || typeof store !== "object") {
+    return;
+  }
+  const keys = Object.keys(store)
+    .filter((key) => /^\d{4}-\d{2}-\d{2}$/.test(key))
+    .sort((a, b) => (a < b ? 1 : -1));
+  keys.slice(LOCAL_PLAY_MAX_DAYS).forEach((key) => {
+    delete store[key];
+  });
+}
+
+function saveLocalPlayStore(store) {
+  pruneLocalPlayStore(store);
+  const encoded = JSON.stringify(store || {});
+  localStorage.setItem(LOCAL_PLAY_KEY, encoded);
+  sessionStorage.setItem(LOCAL_PLAY_KEY, encoded);
+}
+
+function scheduleLocalPlaySave() {
+  if (state.localPlaySaveTimer) {
+    clearTimeout(state.localPlaySaveTimer);
+  }
+  state.localPlaySaveTimer = window.setTimeout(() => {
+    state.localPlaySaveTimer = 0;
+    saveLocalPlayStore(state.localPlayStore);
+  }, 1600);
+}
+
+function recordLocalPlay(itemId) {
+  const id = Number(itemId || 0);
+  if (!id) {
+    return;
+  }
+  const dayKey = getTopDailyDateKey();
+  const store = state.localPlayStore || {};
+  const day = store[dayKey] && typeof store[dayKey] === "object" ? store[dayKey] : {};
+  day[id] = Math.min(999, Number(day[id] || 0) + 1);
+  const dayIds = Object.keys(day);
+  if (dayIds.length > LOCAL_PLAY_MAX_ITEMS_PER_DAY) {
+    dayIds
+      .sort((a, b) => Number(day[b] || 0) - Number(day[a] || 0))
+      .slice(LOCAL_PLAY_MAX_ITEMS_PER_DAY)
+      .forEach((key) => {
+        delete day[key];
+      });
+  }
+  store[dayKey] = day;
+  state.localPlayStore = store;
+  scheduleLocalPlaySave();
 }
 
 function loadCatalogSnapshot() {

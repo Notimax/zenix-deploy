@@ -163,6 +163,11 @@ Last update: 2026-03-16
 - Added recommendation time-of-day question (matin/aprem/soir) with scoring and filtering.
 - Recommendation covers now use a stable cover map to avoid blinking on refresh.
 
+## c337 follow-up (2026-03-17)
+- Added player loading sting (Netflix vibe) gated by user interaction.
+- Top du jour now uses local playback counts (Zenix local) with fallback merge.
+- Local cover cache stores visible covers for faster repeat rendering.
+
 ## Visual system policy (c137)
 - Keep unified visual tokens across the UI:
   - coherent radii/shadows/spacing
