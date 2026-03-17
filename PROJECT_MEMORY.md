@@ -87,6 +87,13 @@ Last update: 2026-03-16
 - HLS proxy is no longer gate-protected to avoid playback failures when gate tokens expire.
 - Cache-bust updated to `20260317-c341`.
 
+## c342 follow-up (2026-03-17)
+- FastFlux sources now allow direct fallback for MP4 while keeping proxy preferred.
+- Client respects `allowDirect`/`proxyPreferred` so FastFlux can recover if proxy fails.
+- TV Directs FR feed now filters to TNT channels 1-26 and preserves channel order.
+- TV Directs mobile text-size adjusted to reduce iOS zoom.
+- Cache-bust updated to `20260317-c342`.
+
 ## c316 follow-up (2026-03-16)
 - HLS proxy now preserves referer across redirects; playlist rewrites use the final URL (FastFlux CDN fix).
 - External FastFlux items no longer swap to internal duplicates (FastFlux stays preferred).

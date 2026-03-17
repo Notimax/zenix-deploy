@@ -45,6 +45,13 @@ LATEST FIX LOG (2026-03-17, c341)
 - HLS proxy is no longer gate-protected to prevent playback failures when gate tokens expire.
 - Cache-bust bumped to 20260317-c341.
 
+LATEST FIX LOG (2026-03-17, c342)
+- FastFlux sources now allow direct fallback for MP4 while keeping proxy preferred.
+- Client respects `allowDirect`/`proxyPreferred` so FastFlux can recover if proxy fails.
+- TV Directs FR feed now filters to TNT channels 1-26 and preserves channel order.
+- TV Directs mobile text-size adjusted to reduce iOS zoom.
+- Cache-bust bumped to 20260317-c342.
+
 LATEST FIX LOG (2026-03-17, c326)
 - Mobile navbar redesigned as a full-screen streaming menu (premium overlay).
 - Mobile nav now occupies the full viewport with slide-up animation.

@@ -16202,8 +16202,11 @@ function normalizeSourceEntry(entry, index) {
   );
   const proxyPath = getHlsProxyBasePath(url);
   const avoidProxyHost = shouldAvoidProxyForHost(streamHost);
+  const allowDirect = Boolean(entry?.allowDirect);
+  const proxyPreferred = Boolean(entry?.proxyPreferred);
   const forceProxyHost =
     !avoidProxyHost &&
+    !allowDirect &&
     (shouldForceProxyForHost(streamHost) ||
       /(?:^|\\.)fastflux\\.xyz$/.test(streamHost) ||
       /xalaflix|fsvid/i.test(streamHost));
@@ -16238,6 +16241,7 @@ function normalizeSourceEntry(entry, index) {
     debug,
     proxyOnly,
     proxyPath,
+    proxyPreferred,
     score,
     premiumHint,
     origin,
@@ -17849,6 +17853,7 @@ function buildPlayableSourceCandidates(source, options = {}) {
   const requireProxy = Boolean(
     source?.proxyOnly || source?.mobileOnly || (source?.debug && isLikelyMobileDevice()) || forceProxyHost
   );
+  const proxyPreferred = Boolean(source?.proxyPreferred);
 
   if (looksLikeHls && forceProxyHls) {
     if (isProxied) {
@@ -17906,7 +17911,7 @@ function buildPlayableSourceCandidates(source, options = {}) {
   if (!requireProxy) {
     candidates.push(absolute);
   }
-  if (!looksLikeHls && proxyUrl) {
+  if (!looksLikeHls && proxyUrl && !proxyPreferred) {
     // Non-HLS URLs usually play faster direct.
     candidates.unshift(absolute);
   }

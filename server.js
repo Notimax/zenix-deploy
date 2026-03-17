@@ -976,6 +976,89 @@ function normalizeLivewatchCountry(value) {
   return cleaned;
 }
 
+function getTntChannelOrder(name) {
+  const key = normalizeTitleKey(String(name || ""));
+  if (!key) {
+    return 0;
+  }
+  if (key.includes("tf1seriesfilms") || key.includes("tf1seriesfilm") || key.includes("tf1sf")) {
+    return 19;
+  }
+  if (key.includes("franceinfo") || key.includes("franceinfotv")) {
+    return 26;
+  }
+  if (key.includes("cherie25") || key.includes("cherie")) {
+    return 24;
+  }
+  if (key.includes("rmcdecouverte") || key.includes("rmcdecouverte")) {
+    return 23;
+  }
+  if (key.includes("rmcstory") || key.includes("rmcstory")) {
+    return 22;
+  }
+  if (key.includes("6ter") || key.includes("sixter")) {
+    return 21;
+  }
+  if (key.includes("lequipe") || key.includes("equipe21")) {
+    return 20;
+  }
+  if (key.includes("gulli")) {
+    return 18;
+  }
+  if (key.includes("cstar") || key.includes("d17")) {
+    return 17;
+  }
+  if (key.includes("cnews") || key.includes("itele")) {
+    return 16;
+  }
+  if (key.includes("bfm")) {
+    return 15;
+  }
+  if (key.includes("france4")) {
+    return 14;
+  }
+  if (key.includes("lcp") || key.includes("publicsenat") || key.includes("publicsenat")) {
+    return 13;
+  }
+  if (key.includes("nrj12") || key === "nrj12") {
+    return 12;
+  }
+  if (key.includes("tfx")) {
+    return 11;
+  }
+  if (key.includes("tmc")) {
+    return 10;
+  }
+  if (key.includes("w9")) {
+    return 9;
+  }
+  if (key.includes("c8")) {
+    return 8;
+  }
+  if (key.includes("arte")) {
+    return 7;
+  }
+  if (key.includes("m6")) {
+    return 6;
+  }
+  if (key.includes("france5")) {
+    return 5;
+  }
+  if (key.includes("canalplus") || (key.includes("canal") && key.includes("plus"))) {
+    return 4;
+  }
+  if (key.includes("france3")) {
+    return 3;
+  }
+  if (key.includes("france2")) {
+    return 2;
+  }
+  if (key.includes("tf1")) {
+    return 1;
+  }
+  return 0;
+}
+
 function normalizeLivewatchChannel(entry) {
   if (!entry || typeof entry !== "object") {
     return null;
@@ -998,6 +1081,7 @@ function normalizeLivewatchChannel(entry) {
   const logo = sanitizeHttpUrl(entry.logo || entry.tvg_logo, 420);
   const group = sanitizeSuggestionText(entry.group || entry.genre || entry.category, 60);
   const country = sanitizeSuggestionText(entry.country, 60);
+  const order = toInt(entry.order, 0, 0, 9999);
   return {
     id: `lw_${id}`,
     name,
@@ -1006,7 +1090,7 @@ function normalizeLivewatchChannel(entry) {
     logo,
     group,
     country,
-    order: 0,
+    order,
     updatedAt: new Date().toISOString(),
   };
 }
@@ -1078,6 +1162,31 @@ async function getLivewatchChannels(options = {}) {
         .join(" ");
       return haystack.includes(queryKey);
     });
+  }
+
+  const countryKey = normalizeTitleKey(targetCountry || "");
+  const tntOnly = countryKey === "france" || countryKey === "fr";
+  if (tntOnly) {
+    const seen = new Set();
+    list = list
+      .map((entry) => {
+        const name =
+          entry?.cleanName ||
+          entry?.clean_name ||
+          entry?.name ||
+          entry?.title ||
+          entry?.tvg_name ||
+          entry?.stream_name ||
+          entry?.channel ||
+          "";
+        const order = getTntChannelOrder(name);
+        if (!order || seen.has(order)) {
+          return null;
+        }
+        seen.add(order);
+        return { ...entry, order };
+      })
+      .filter(Boolean);
   }
 
   const limit = toInt(options.limit, 0, 0, 2000);
@@ -8096,8 +8205,15 @@ function buildFastfluxSourceEntry(sourceRow, index = 0) {
   const formatHint = String(sourceRow?.type || sourceRow?.format || "").trim();
   const format = inferOwnedSourceFormat(streamUrl, formatHint || "mp4");
   const isAlreadyProxied = /\/api\/hls-proxy(?:-mobile)?\?url=/i.test(streamUrl);
-  let needsProxy = format === "m3u8" || /\.m3u8($|[?#])/i.test(streamUrl) || /hls/i.test(formatHint);
-  if (!needsProxy) {
+  const isEmbed = format === "embed";
+  const looksHls = format === "hls" || /\.m3u8($|[?#])/i.test(streamUrl) || /hls/i.test(formatHint);
+  const looksDirect =
+    format === "mp4" ||
+    format === "webm" ||
+    format === "dash" ||
+    /\.(mp4|webm|mpd)(?:$|[?#])/i.test(streamUrl);
+  let needsProxy = looksHls;
+  if (!needsProxy && !looksDirect && !isEmbed) {
     try {
       const host = new URL(streamUrl).hostname.toLowerCase();
       if (host.endsWith("fastflux.xyz") || host.endsWith("cdn.fastflux.xyz")) {
@@ -8107,9 +8223,11 @@ function buildFastfluxSourceEntry(sourceRow, index = 0) {
       // ignore URL parse errors, keep default proxy decision
     }
   }
-  if (format === "embed") {
+  if (isEmbed) {
     needsProxy = false;
   }
+  const allowDirect = Boolean(looksDirect);
+  const proxyPreferred = allowDirect;
   const finalUrl = isAlreadyProxied ? streamUrl : needsProxy ? buildHlsProxyPath(streamUrl) : streamUrl;
   return {
     stream_url: finalUrl,
@@ -8118,7 +8236,9 @@ function buildFastfluxSourceEntry(sourceRow, index = 0) {
     quality,
     language,
     format,
-    proxyOnly: needsProxy,
+    proxyOnly: needsProxy && !allowDirect,
+    allowDirect,
+    proxyPreferred,
     priority:
       (language === "VF" ? 392 : language === "MULTI" ? 372 : language === "VOSTFR" ? 360 : 330) -
       Math.min(40, index * 4),
