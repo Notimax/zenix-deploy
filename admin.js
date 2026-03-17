@@ -73,6 +73,7 @@ const refs = {
   selectedStatus: document.getElementById("adminSelectedStatus"),
   customStatus: document.getElementById("customStatus"),
   analyticsLive: document.getElementById("adminAnalyticsLive"),
+  analyticsWatching: document.getElementById("adminAnalyticsWatching"),
   analytics24h: document.getElementById("adminAnalytics24h"),
   analytics48h: document.getElementById("adminAnalytics48h"),
   analyticsTotal: document.getElementById("adminAnalyticsTotal"),
@@ -836,6 +837,7 @@ async function deleteTvChannel(id) {
 function renderAnalyticsCounters(payload) {
   if (!payload) return;
   if (refs.analyticsLive) refs.analyticsLive.textContent = String(payload.activeNow ?? 0);
+  if (refs.analyticsWatching) refs.analyticsWatching.textContent = String(payload.watchingNow ?? 0);
   if (refs.analytics24h) refs.analytics24h.textContent = String(payload.unique24h ?? 0);
   if (refs.analytics48h) refs.analytics48h.textContent = String(payload.unique48h ?? 0);
   if (refs.analyticsTotal) refs.analyticsTotal.textContent = String(payload.totalSeen ?? 0);

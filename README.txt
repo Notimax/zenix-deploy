@@ -71,6 +71,12 @@ LATEST FIX LOG (2026-03-18, c345)
 - Source format detection now treats /e/ and /player URLs as embeds to avoid broken video loads.
 - Cache-bust bumped to 20260318-c345.
 
+LATEST FIX LOG (2026-03-18, c346)
+- Added live "En lecture" counter in admin (watching now).
+- Heartbeat now reports playback state to analytics.
+- Admin analytics payload includes watchingNow.
+- Cache-bust bumped to 20260318-c346.
+
 LATEST FIX LOG (2026-03-17, c326)
 - Mobile navbar redesigned as a full-screen streaming menu (premium overlay).
 - Mobile nav now occupies the full viewport with slide-up animation.

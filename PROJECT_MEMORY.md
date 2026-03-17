@@ -113,6 +113,12 @@ Last update: 2026-03-16
 - Source format detection now treats /e/ and /player URLs as embeds to prevent broken video loads.
 - Cache-bust updated to `20260318-c345`.
 
+## c346 follow-up (2026-03-18)
+- Added admin live "En lecture" counter (watching now).
+- Heartbeat now reports playback state to analytics.
+- Admin analytics payload now returns `watchingNow`.
+- Cache-bust updated to `20260318-c346`.
+
 ## c316 follow-up (2026-03-16)
 - HLS proxy now preserves referer across redirects; playlist rewrites use the final URL (FastFlux CDN fix).
 - External FastFlux items no longer swap to internal duplicates (FastFlux stays preferred).

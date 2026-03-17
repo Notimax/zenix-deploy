@@ -3211,6 +3211,7 @@ function markAnalyticsHeartbeat(req, payload) {
       lastEventAt: 0,
       page: "",
       view: "",
+      playing: false,
       userAgent: "",
       deviceClass: "Autre",
       platform: "Inconnu",
@@ -3232,6 +3233,13 @@ function markAnalyticsHeartbeat(req, payload) {
   if (view) {
     row.view = view;
   }
+  const playingRaw = payload?.playing;
+  const playing =
+    playingRaw === true ||
+    playingRaw === 1 ||
+    playingRaw === "1" ||
+    String(playingRaw || "").toLowerCase() === "true";
+  row.playing = Boolean(playing);
   row.userAgent = uaProfile.userAgent;
   row.deviceClass = uaProfile.deviceClass;
   row.platform = uaProfile.platform;
@@ -3309,6 +3317,7 @@ function buildAnalyticsSnapshot() {
   const rows24h = rowsAll.filter((row) => Number(row?.lastSeen || 0) >= threshold24h);
   const rows48h = rowsAll.filter((row) => Number(row?.lastSeen || 0) >= threshold48h);
   const activeRows = rowsAll.filter((row) => Number(row?.lastSeen || 0) >= activeThreshold);
+  const playingNowCount = activeRows.filter((row) => Boolean(row?.playing)).length;
 
   const devicesActive = new Map();
   const platformsActive = new Map();
@@ -3446,6 +3455,7 @@ function buildAnalyticsSnapshot() {
   return {
     generatedAt: new Date(now).toISOString(),
     activeNow: activeRows.length,
+    playingNow: playingNowCount,
     unique24h: rows24h.length,
     unique48h: rows48h.length,
     heartbeats24h,
@@ -14111,6 +14121,7 @@ async function handleAdminAnalytics(req, res, requestUrl) {
     data: {
       generatedAt: stats.generatedAt,
       activeNow: Number(stats.activeNow || 0),
+      watchingNow: Number(stats.playingNow || 0),
       unique24h: Number(stats.unique24h || 0),
       unique48h: Number(stats.unique48h || 0),
       totalSeen: Number(stats.totalSeen || 0),

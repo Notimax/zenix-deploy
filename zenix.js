@@ -20649,6 +20649,7 @@ function sendAnalyticsHeartbeat(useBeacon = false) {
     clientId,
     page: window.location.pathname,
     view: state.view,
+    playing: Boolean(refs.playerOverlay && !refs.playerOverlay.hidden),
     ts: Date.now(),
   };
   const endpoint = `${API_BASE}/analytics/heartbeat`;
