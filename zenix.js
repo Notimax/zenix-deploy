@@ -1,5 +1,5 @@
 const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260317-c334";
+const ZENIX_BUILD_VERSION = "20260317-c335";
 const STORAGE_KEY = "zenix-progress-v4";
 if (typeof window !== "undefined") {
   window.__zenixBooted = false;
@@ -9891,10 +9891,22 @@ function renderRecommendationResults() {
     return;
   }
   const results = state.recommendation.results;
-  refs.recommendationGrid.innerHTML = "";
   if (!Array.isArray(results) || results.length === 0) {
+    refs.recommendationGrid.innerHTML = "";
+    state.recommendation.lastRenderKey = "";
     return;
   }
+  const renderKey = results
+    .map((item) => `${item.id || ""}:${resolveCardCover(item) || ""}`)
+    .join("|");
+  if (
+    state.recommendation.lastRenderKey === renderKey &&
+    refs.recommendationGrid.childElementCount > 0
+  ) {
+    return;
+  }
+  state.recommendation.lastRenderKey = renderKey;
+  refs.recommendationGrid.innerHTML = "";
   const fragment = document.createDocumentFragment();
   results.forEach((item) => {
     const card = document.createElement("article");

@@ -156,6 +156,9 @@ Last update: 2026-03-16
 ## c334 follow-up (2026-03-17)
 - Recommendation result covers now bypass image-loading shimmer/opacity gating to stop blinking.
 
+## c335 follow-up (2026-03-17)
+- Recommendation results now reuse the existing render when nothing changed (prevents cover blinking during auto-refresh).
+
 ## Visual system policy (c137)
 - Keep unified visual tokens across the UI:
   - coherent radii/shadows/spacing
