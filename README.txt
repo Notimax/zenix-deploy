@@ -47,6 +47,9 @@ LATEST FIX LOG (2026-03-17, c330)
 - Calendar taps are now safe-touch (scroll no longer opens titles).
 - Backup popup now shows only once per session (no repeated reopen after refresh).
 
+LATEST FIX LOG (2026-03-17, c331)
+- Backup popup now respects session-only (no 24h suppression), so it appears after Discord on each new session.
+
 LATEST FIX LOG (2026-03-17, c327)
 - Mobile search input font-size forced to 16px to prevent iOS zoom on focus.
 LATEST FIX LOG (2026-03-17, c325)

@@ -1,5 +1,5 @@
 const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260317-c330";
+const ZENIX_BUILD_VERSION = "20260317-c331";
 const STORAGE_KEY = "zenix-progress-v4";
 if (typeof window !== "undefined") {
   window.__zenixBooted = false;
@@ -4562,9 +4562,9 @@ function maybeShowBackupGate(options = {}) {
   if (isOverlayLayerOpen()) {
     return;
   }
-  if (hasBackupPromptSession() || hasBackupPromptRecent()) {
-    return;
-  }
+    if (hasBackupPromptSession()) {
+      return;
+    }
   if (!hasDiscordPromptSession()) {
     return;
   }

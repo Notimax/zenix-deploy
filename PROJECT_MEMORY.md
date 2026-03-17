@@ -143,6 +143,9 @@ Last update: 2026-03-16
 - Calendar taps are now safe-touch (scroll no longer opens titles).
 - Backup popup now shows only once per session (no repeated reopen after refresh).
 
+## c331 follow-up (2026-03-17)
+- Backup popup now uses session-only gating (no 24h suppression), so it appears after Discord on each new session.
+
 ## Visual system policy (c137)
 - Keep unified visual tokens across the UI:
   - coherent radii/shadows/spacing
