@@ -122,6 +122,10 @@ Last update: 2026-03-16
 - Topbar now accounts for iOS safe-area (prevents cut-off at top before scroll).
 - VisualViewport events refresh topbar height on mobile address bar changes.
 
+## c326 follow-up (2026-03-17)
+- Mobile navbar redesigned as a full-screen streaming overlay.
+- Drawer now slides up full height with premium backdrop styling.
+
 ## Visual system policy (c137)
 - Keep unified visual tokens across the UI:
   - coherent radii/shadows/spacing

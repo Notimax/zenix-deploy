@@ -448,8 +448,11 @@ body.startup-lock {
 .mobile-nav-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(6, 8, 12, 0.6);
-  backdrop-filter: blur(4px);
+  background:
+    radial-gradient(circle at 20% 20%, rgba(241, 20, 36, 0.22), transparent 45%),
+    radial-gradient(circle at 80% 70%, rgba(88, 101, 242, 0.18), transparent 45%),
+    rgba(5, 6, 10, 0.82);
+  backdrop-filter: blur(10px);
   opacity: 0;
   pointer-events: none;
   transition: opacity 220ms ease;
@@ -458,92 +461,98 @@ body.startup-lock {
 
 .mobile-nav-drawer {
   position: fixed;
-  top: 0;
-  left: 0;
+  inset: 0;
   height: 100dvh;
   max-height: 100dvh;
-  width: min(82vw, 320px);
+  width: 100vw;
   display: grid;
   grid-template-rows: auto 1fr;
-  gap: 8px;
-  padding: calc(16px + env(safe-area-inset-top, 0px)) 14px 16px;
-  border-right: 1px solid rgba(255, 255, 255, 0.16);
+  gap: 14px;
+  padding: calc(18px + env(safe-area-inset-top, 0px)) 18px 24px;
+  border: 0;
   background:
-    linear-gradient(160deg, rgba(18, 22, 34, 0.98), rgba(8, 10, 16, 0.98));
+    radial-gradient(circle at 15% 12%, rgba(255, 64, 72, 0.28), transparent 48%),
+    radial-gradient(circle at 80% 20%, rgba(88, 101, 242, 0.2), transparent 52%),
+    linear-gradient(160deg, rgba(10, 12, 19, 0.98), rgba(6, 7, 12, 0.98));
   backdrop-filter: blur(16px);
-  box-shadow: 0 28px 64px rgba(0, 0, 0, 0.6);
-  transform: translateX(-110%);
-  transition: transform 240ms ease;
+  box-shadow: 0 28px 64px rgba(0, 0, 0, 0.65);
+  transform: translateY(100%);
+  transition: transform 260ms cubic-bezier(0.2, 0.7, 0.2, 1);
   z-index: 130;
 }
 
 .mobile-nav-drawer::before {
   content: "";
   position: absolute;
-  top: 0;
-  left: 0;
-  width: 3px;
-  height: 100%;
-  background: linear-gradient(180deg, rgba(241, 20, 36, 0.9), rgba(255, 168, 76, 0.2));
-  opacity: 0.65;
+  top: 16px;
+  left: 18px;
+  width: 42px;
+  height: 42px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(241, 20, 36, 0.95), rgba(255, 168, 76, 0.8));
+  opacity: 0.22;
+  filter: blur(10px);
 }
 
 .mobile-nav-drawer-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
+  gap: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.88);
 }
 
 .mobile-nav-close {
   border: 1px solid rgba(255, 255, 255, 0.18);
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.1);
   color: #f4f7ff;
-  border-radius: 999px;
-  padding: 6px 10px;
+  border-radius: 12px;
+  padding: 8px 12px;
   font: inherit;
-  font-size: 0.75rem;
+  font-size: 0.78rem;
   cursor: pointer;
 }
 
 .mobile-nav-list {
   display: grid;
-  gap: 8px;
+  gap: 12px;
   overflow-y: auto;
-  padding-right: 4px;
+  padding-right: 6px;
 }
 
 .mobile-nav-group-title {
-  margin: 6px 6px 0;
-  font-size: 0.72rem;
-  letter-spacing: 0.12em;
+  margin: 8px 8px 0;
+  font-size: 0.76rem;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.5);
+  color: rgba(255, 255, 255, 0.55);
 }
 
 .mobile-nav-item,
 .mobile-nav-subitem {
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.08);
   color: #e7ecfa;
   font: inherit;
   text-align: left;
-  padding: 11px 14px;
+  padding: 14px 16px;
   cursor: pointer;
+  box-shadow: 0 12px 26px rgba(0, 0, 0, 0.38);
 }
 
 .mobile-nav-subitem {
-  margin-left: 8px;
-  font-size: 0.92rem;
+  margin-left: 0;
+  font-size: 0.95rem;
 }
 
 .mobile-nav-item:hover,
 .mobile-nav-subitem:hover {
-  border-color: rgba(255, 255, 255, 0.22);
-  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.26);
+  background: rgba(255, 255, 255, 0.14);
 }
 
 .mobile-nav-item.active,
@@ -559,7 +568,11 @@ body.mobile-nav-open .mobile-nav-backdrop {
 }
 
 body.mobile-nav-open .mobile-nav-drawer {
-  transform: translateX(0);
+  transform: translateY(0);
+}
+
+body.mobile-nav-open {
+  overflow: hidden;
 }
 
 @media (min-width: 1001px) {
