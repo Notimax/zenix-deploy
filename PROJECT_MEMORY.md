@@ -112,6 +112,12 @@ Last update: 2026-03-16
 - Playback now silently refreshes the gate token on each “Démarrer”.
 - If the refresh succeeds, adblock false-positives are cleared.
 
+## c324 follow-up (2026-03-17)
+- Player opening force-closes Discord/Backup gates and clears lingering lock classes.
+- Discord/Backup gates never show while player/detail overlays are open.
+- Mobile nav drawer height uses dynamic viewport units (fixes top-of-page cut-off).
+- Mobile cover warmup refreshed after closing player/detail for smoother scrolling.
+
 ## Visual system policy (c137)
 - Keep unified visual tokens across the UI:
   - coherent radii/shadows/spacing

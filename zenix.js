@@ -4342,6 +4342,9 @@ function maybeShowDiscordGate(options = {}) {
   if (!refs.discordGate || !state.discordPromptReady) {
     return;
   }
+  if (isOverlayLayerOpen()) {
+    return;
+  }
   if (state.adblockDetected || !refs.adblockGate?.hidden) {
     return;
   }
@@ -4428,6 +4431,18 @@ function setBackupGateVisible(visible) {
   }
 }
 
+function clearGateLocksIfHidden() {
+  if (refs.discordGate?.hidden) {
+    document.body.classList.remove("discord-locked");
+  }
+  if (refs.backupGate?.hidden) {
+    document.body.classList.remove("backup-locked");
+  }
+  if (refs.adblockGate?.hidden) {
+    document.body.classList.remove("access-locked");
+  }
+}
+
 function setBackupGateStatus(message = "") {
   if (!refs.backupGateStatus) {
     return;
@@ -4444,6 +4459,9 @@ function setBackupGateStatus(message = "") {
 
 function maybeShowBackupGate(options = {}) {
   if (!refs.backupGate || !state.backupPromptReady) {
+    return;
+  }
+  if (isOverlayLayerOpen()) {
     return;
   }
   if (!hasDiscordPromptSession()) {
@@ -4471,6 +4489,10 @@ function maybeShowBackupGate(options = {}) {
 function scheduleBackupAfterDiscord(delayMs = BACKUP_PROMPT_DELAY_MS) {
   const waitMs = Math.max(0, Number(delayMs || 0));
   window.setTimeout(() => {
+    if (isOverlayLayerOpen()) {
+      scheduleBackupAfterDiscord(700);
+      return;
+    }
     if (state.discordGateVisible) {
       scheduleBackupAfterDiscord(700);
       return;
@@ -6496,6 +6518,20 @@ function pumpWarmImageQueue() {
   };
 
   pump();
+}
+
+function refreshMobileCoverWarmup(reason = "") {
+  if (!isCompactViewport()) {
+    return;
+  }
+  const visible = getVisibleCatalog();
+  if (!Array.isArray(visible) || visible.length === 0) {
+    return;
+  }
+  const boosted = shouldBoostCoverLoading();
+  const warmLimit = boosted ? 420 : 260;
+  warmImageCacheFromPool(visible, warmLimit);
+  pumpWarmImageQueue();
 }
 
 function animateHeroSwap() {
@@ -11492,9 +11528,11 @@ function closeDetails(options = {}) {
   }
   updateBodyScrollLock();
   applyNativeAdPlacement();
+  clearGateLocksIfHidden();
   if (refs.playerOverlay.hidden && refs.detailModal.hidden) {
     restoreModalScrollPosition();
   }
+  refreshMobileCoverWarmup("detail-close");
   flushDeferredDesktopMainNavFit(30);
 }
 
@@ -11532,6 +11570,14 @@ async function openPlayer(id, options = {}) {
     state.lastPlayerOpenId = numericId;
     state.lastPlayerOpenAt = nowOpenAt;
   }
+
+  if (state.discordGateVisible) {
+    setDiscordGateVisible(false);
+  }
+  if (state.backupGateVisible) {
+    setBackupGateVisible(false);
+  }
+  clearGateLocksIfHidden();
 
   captureModalScrollPosition();
   const item = findItemById(id) || (await buildItemFromDetails(id));
@@ -17098,9 +17144,11 @@ function closePlayer(options = {}) {
   updateBodyScrollLock();
   applyNativeAdPlacement();
   renderContinue();
+  clearGateLocksIfHidden();
   if (refs.playerOverlay.hidden && refs.detailModal.hidden) {
     restoreModalScrollPosition();
   }
+  refreshMobileCoverWarmup("player-close");
   flushDeferredDesktopMainNavFit(30);
 }
 
