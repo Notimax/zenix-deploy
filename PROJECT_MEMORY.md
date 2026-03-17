@@ -150,6 +150,9 @@ Last update: 2026-03-16
 - Recommandation scoring now uses interest signals and stricter filtering for more precise matches.
 - Recommendation option hover animation softened to avoid blinking.
 
+## c333 follow-up (2026-03-17)
+- Recommendation UI no longer animates choices/cards to prevent blinking on mobile.
+
 ## Visual system policy (c137)
 - Keep unified visual tokens across the UI:
   - coherent radii/shadows/spacing

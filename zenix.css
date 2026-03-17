@@ -7008,6 +7008,7 @@ body.backup-locked .back-to-top {
   text-align: left;
   cursor: pointer;
   transition: border-color 0.18s ease, background 0.18s ease;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .recommendation-option:hover {
@@ -7018,6 +7019,18 @@ body.backup-locked .back-to-top {
 .recommendation-option:active {
   border-color: rgba(255, 255, 255, 0.35);
   background: rgba(255, 255, 255, 0.14);
+}
+
+.recommendation-option,
+.recommendation-card,
+.recommendation-card img {
+  animation: none !important;
+  transition: none !important;
+  transform: none !important;
+}
+
+.recommendation-card img {
+  opacity: 1 !important;
 }
 
 .recommendation-actions {

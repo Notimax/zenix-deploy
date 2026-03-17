@@ -54,6 +54,9 @@ LATEST FIX LOG (2026-03-17, c332)
 - Recommandation: scoring now uses interest signals + stricter filters for more precise matches.
 - Recommandation options no longer "blink" (hover animation softened).
 
+LATEST FIX LOG (2026-03-17, c333)
+- Recommandation UI: removed animations/transitions that caused blinking on choices and cover cards.
+
 LATEST FIX LOG (2026-03-17, c327)
 - Mobile search input font-size forced to 16px to prevent iOS zoom on focus.
 LATEST FIX LOG (2026-03-17, c325)
