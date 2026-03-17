@@ -11588,6 +11588,14 @@ async function openPlayer(id, options = {}) {
   await primePlaybackGate().catch(() => {
     // handled later if still blocked
   });
+
+  if (window.visualViewport) {
+    const handleViewportChange = () => {
+      syncTopbarHeightVar();
+    };
+    window.visualViewport.addEventListener("resize", handleViewportChange, { passive: true });
+    window.visualViewport.addEventListener("scroll", handleViewportChange, { passive: true });
+  }
   ensureDetails(id).catch(() => null);
 
   const token = ++state.playToken;

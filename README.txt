@@ -29,12 +29,15 @@ CURRENT PRODUCT RULES
   VF > VOSTFR > MULTI > VO.
 - External generic embed fallback sources were removed.
 
+LATEST FIX LOG (2026-03-17, c325)
+- Topbar now accounts for iOS safe-area (prevents cut-off at top before scroll).
+- VisualViewport events refresh topbar height on mobile address bar changes.
+
 LATEST FIX LOG (2026-03-17, c324)
 - Player opening now force-closes Discord/Backup gates and clears any lingering lock classes.
 - Discord/Backup gates will not appear while a player/detail overlay is open.
 - Mobile nav drawer height now uses dynamic viewport units (fixes top-of-page cut-off).
 - Mobile cover warmup is refreshed after closing player/detail for smoother scrolling.
-
 LATEST FIX LOG (2026-03-17, c323)
 - Playback now silently refreshes the gate token on every “Démarrer”.
 - If the token refresh succeeds, adblock false-positives are cleared.

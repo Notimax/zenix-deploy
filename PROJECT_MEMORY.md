@@ -118,6 +118,10 @@ Last update: 2026-03-16
 - Mobile nav drawer height uses dynamic viewport units (fixes top-of-page cut-off).
 - Mobile cover warmup refreshed after closing player/detail for smoother scrolling.
 
+## c325 follow-up (2026-03-17)
+- Topbar now accounts for iOS safe-area (prevents cut-off at top before scroll).
+- VisualViewport events refresh topbar height on mobile address bar changes.
+
 ## Visual system policy (c137)
 - Keep unified visual tokens across the UI:
   - coherent radii/shadows/spacing
