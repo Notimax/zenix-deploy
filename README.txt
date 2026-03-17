@@ -29,6 +29,14 @@ CURRENT PRODUCT RULES
   VF > VOSTFR > MULTI > VO.
 - External generic embed fallback sources were removed.
 
+LATEST FIX LOG (2026-03-17, c340)
+- Removed the Top du jour Zenix block from home; top view now uses the main catalog grid.
+- Fixed Discover view crash (request/tv views) and added the Aleatoire view.
+- TV Directs now pulls Livewatch API with country + search filters (admin list still merges).
+- Mobile hero is forced hidden to avoid the blank top poster on phone.
+- Added TV Directs controls (country + search).
+- Cache-bust bumped to 20260317-c340.
+
 LATEST FIX LOG (2026-03-17, c326)
 - Mobile navbar redesigned as a full-screen streaming menu (premium overlay).
 - Mobile nav now occupies the full viewport with slide-up animation.

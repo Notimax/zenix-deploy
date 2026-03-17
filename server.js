@@ -17,6 +17,8 @@ const FASTFLUX_API_BASE = `${FASTFLUX_BASE}/api/v1/index.php`;
 const FASTFLUX_API_KEY = String(process.env.FASTFLUX_API_KEY || "").trim();
 const FASTFLUX_ENABLED = Boolean(FASTFLUX_API_KEY);
 const USE_FASTFLUX = FASTFLUX_ENABLED;
+const LIVEWATCH_API_URL = "https://v2.livewatch.sbs/?action=api";
+const LIVEWATCH_CACHE_MS = Math.max(2 * 60 * 1000, Number(process.env.LIVEWATCH_CACHE_MS || 12 * 60 * 1000));
 const NAKIOS_BASE = "https://nakios.site";
 const NAKIOS_HOST = "nakios.site";
 const NAKIOS_API_BASE = "https://api.nakios.site";
@@ -349,6 +351,7 @@ const adminLoginAttempts = new Map();
 const adminSessions = new Map();
 const adminDataCache = { loadedAt: 0, value: null };
 const backupConfigCache = { loadedAt: 0, value: null };
+const livewatchCache = { loadedAt: 0, payload: null, inFlight: null };
 const HARD_HIDDEN_MEDIA_IDS = new Set([1507947720]);
 const NAKIOS_PINNED_TITLES = [
   { title: "Go Karts", mediaType: "movie", year: 2020 },
@@ -935,6 +938,7 @@ function normalizeTvChannelEntry(raw) {
   const type = sanitizeToken(raw.type, 24).toLowerCase();
   const logo = sanitizeHttpUrl(raw.logo, 420);
   const group = sanitizeSuggestionText(raw.group, 60);
+  const country = sanitizeSuggestionText(raw.country, 60);
   const id = sanitizeToken(raw.id, 80) || `tv_${crypto.randomBytes(5).toString("hex")}`;
   const order = toInt(raw.order, 0, 0, 9999);
   return {
@@ -944,9 +948,157 @@ function normalizeTvChannelEntry(raw) {
     type,
     logo,
     group,
+    country,
     order,
     updatedAt: new Date().toISOString(),
   };
+}
+
+function normalizeLivewatchQuery(value) {
+  const cleaned = sanitizeSuggestionText(value, 120);
+  return cleaned ? normalizeTitleKey(cleaned) : "";
+}
+
+function normalizeLivewatchCountry(value) {
+  const cleaned = sanitizeSuggestionText(value, 80);
+  if (!cleaned) {
+    return "";
+  }
+  const lower = cleaned.toLowerCase();
+  if (lower === "all" || lower === "tous" || lower === "tous les pays") {
+    return "all";
+  }
+  return cleaned;
+}
+
+function normalizeLivewatchChannel(entry) {
+  if (!entry || typeof entry !== "object") {
+    return null;
+  }
+  const name = sanitizeSuggestionText(entry.cleanName || entry.name, 120);
+  const url = sanitizeHttpUrl(entry.embed_url, 520);
+  if (!name || !url) {
+    return null;
+  }
+  const id = sanitizeToken(entry.id, 80) || `lw_${crypto.randomBytes(5).toString("hex")}`;
+  const logo = sanitizeHttpUrl(entry.logo, 420);
+  const group = sanitizeSuggestionText(entry.group || entry.genre, 60);
+  const country = sanitizeSuggestionText(entry.country, 60);
+  return {
+    id: `lw_${id}`,
+    name,
+    url,
+    type: "embed",
+    logo,
+    group,
+    country,
+    order: 0,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+async function fetchLivewatchPayload() {
+  const now = Date.now();
+  if (livewatchCache.payload && now - livewatchCache.loadedAt < LIVEWATCH_CACHE_MS) {
+    return livewatchCache.payload;
+  }
+  if (livewatchCache.inFlight) {
+    return livewatchCache.inFlight;
+  }
+  const task = (async () => {
+    const response = await fetchRemote(LIVEWATCH_API_URL, {
+      "Accept-Language": DEFAULT_ACCEPT_LANGUAGE,
+      Accept: "application/json",
+    });
+    if (response.status < 200 || response.status >= 300) {
+      throw new Error(`Livewatch HTTP ${response.status}`);
+    }
+    const payload = parseJsonSafe(response.body) || {};
+    livewatchCache.payload = payload;
+    livewatchCache.loadedAt = Date.now();
+    return payload;
+  })();
+  livewatchCache.inFlight = task;
+  try {
+    return await task;
+  } catch (error) {
+    if (livewatchCache.payload) {
+      return livewatchCache.payload;
+    }
+    throw error;
+  } finally {
+    livewatchCache.inFlight = null;
+  }
+}
+
+async function getLivewatchChannels(options = {}) {
+  const payload = await fetchLivewatchPayload();
+  const rows = Array.isArray(payload?.channels) ? payload.channels : [];
+  const countries = new Set();
+  rows.forEach((entry) => {
+    const country = String(entry?.country || "").trim();
+    if (country) {
+      countries.add(country);
+    }
+  });
+
+  let list = rows.slice();
+  const targetCountry = normalizeLivewatchCountry(options.country) || "France";
+  if (targetCountry && targetCountry !== "all") {
+    const key = normalizeTitleKey(targetCountry);
+    list = list.filter((entry) => normalizeTitleKey(entry?.country || "") === key);
+  }
+
+  const queryKey = normalizeLivewatchQuery(options.query);
+  if (queryKey && queryKey.length > 1) {
+    list = list.filter((entry) => {
+      const haystack = [
+        entry?.cleanName,
+        entry?.name,
+        entry?.group,
+        entry?.genre,
+        entry?.country,
+      ]
+        .map((val) => normalizeTitleKey(val || ""))
+        .filter(Boolean)
+        .join(" ");
+      return haystack.includes(queryKey);
+    });
+  }
+
+  const limit = toInt(options.limit, 0, 0, 2000);
+  if (limit > 0 && list.length > limit) {
+    list = list.slice(0, limit);
+  }
+
+  const normalized = list.map(normalizeLivewatchChannel).filter(Boolean);
+  const sortedCountries = Array.from(countries).sort((a, b) => a.localeCompare(b, "fr", { sensitivity: "base" }));
+  return {
+    list: normalized,
+    countries: sortedCountries,
+    total: rows.length,
+  };
+}
+
+function mergeTvChannelLists(primary, secondary) {
+  const out = [];
+  const seen = new Set();
+  const add = (entry) => {
+    if (!entry) {
+      return;
+    }
+    const key = `${normalizeTitleKey(entry.name || "")}|${normalizeTitleKey(entry.country || "")}|${normalizeTitleKey(
+      entry.url || ""
+    )}`;
+    if (!key || seen.has(key)) {
+      return;
+    }
+    seen.add(key);
+    out.push(entry);
+  };
+  (Array.isArray(primary) ? primary : []).forEach(add);
+  (Array.isArray(secondary) ? secondary : []).forEach(add);
+  return out;
 }
 
 function parseJsonSafe(value) {
@@ -13188,14 +13340,44 @@ async function handleTvChannelsPublic(req, res, requestUrl) {
     sendJson(res, 405, { error: "Method Not Allowed" });
     return true;
   }
+  const source = String(requestUrl.searchParams.get("source") || "auto").trim().toLowerCase();
+  const country = String(requestUrl.searchParams.get("country") || "France").trim() || "France";
+  const query = String(requestUrl.searchParams.get("q") || "").trim();
+  const limit = toInt(requestUrl.searchParams.get("limit"), 260, 0, 2000);
+
+  const includeAdmin = source !== "livewatch";
+  const includeLivewatch = source !== "admin";
   const data = loadAdminData(true);
-  const list = Array.isArray(data.tvChannels) ? data.tvChannels.slice() : [];
-  list.sort((left, right) => {
+  const adminList = Array.isArray(data.tvChannels) ? data.tvChannels.slice() : [];
+  adminList.sort((left, right) => {
     const orderDiff = Number(left?.order || 0) - Number(right?.order || 0);
     if (orderDiff !== 0) return orderDiff;
     return String(left?.name || "").localeCompare(String(right?.name || ""), "fr", { sensitivity: "base" });
   });
-  sendJson(res, 200, { type: "success", data: list });
+
+  let livewatchMeta = null;
+  let livewatchList = [];
+  if (includeLivewatch) {
+    try {
+      const livewatch = await getLivewatchChannels({ country, query, limit });
+      livewatchList = livewatch.list || [];
+      livewatchMeta = { countries: livewatch.countries || [], total: livewatch.total || 0 };
+    } catch {
+      // keep admin list if livewatch fails
+    }
+  }
+
+  const merged = mergeTvChannelLists(includeAdmin ? adminList : [], livewatchList);
+  sendJson(res, 200, {
+    type: "success",
+    data: merged,
+    meta: {
+      source,
+      country,
+      count: merged.length,
+      ...(livewatchMeta || {}),
+    },
+  });
   return true;
 }
 

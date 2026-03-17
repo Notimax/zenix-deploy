@@ -71,6 +71,14 @@ Last update: 2026-03-16
 - Gate now protects playback endpoints only; catalog/calendar/search/media/seasons are exempt so UI always loads.
 - Cache-bust updated to `20260316-c315`.
 
+## c340 follow-up (2026-03-17)
+- Removed the Top du jour Zenix block from home; top view now uses the main catalog grid.
+- Fixed Discover view crash (request/tv views) and added the Aleatoire view.
+- TV Directs now pulls Livewatch API with country + search filters (admin list still merges).
+- Mobile hero forced hidden to avoid the blank top poster on phone.
+- Added TV Directs controls (country + search).
+- Cache-bust updated to `20260317-c340`.
+
 ## c316 follow-up (2026-03-16)
 - HLS proxy now preserves referer across redirects; playlist rewrites use the final URL (FastFlux CDN fix).
 - External FastFlux items no longer swap to internal duplicates (FastFlux stays preferred).

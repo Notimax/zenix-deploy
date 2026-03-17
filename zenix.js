@@ -1,5 +1,5 @@
 const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260317-c339";
+const ZENIX_BUILD_VERSION = "20260317-c340";
 const STORAGE_KEY = "zenix-progress-v4";
 const COVER_CACHE_KEY = "zenix-cover-cache-v1";
 const LOCAL_PLAY_KEY = "zenix-local-plays-v1";
@@ -27,6 +27,7 @@ const SEARCH_DEBOUNCE_MS = 180;
 const REQUEST_SEARCH_DEBOUNCE_MS = 260;
 const REQUEST_PUBLIC_REFRESH_MS = 45 * 1000;
 const TV_REFRESH_MS = 60 * 1000;
+const TV_SEARCH_DEBOUNCE_MS = 240;
 const API_CACHE_TTL_MS = 45 * 1000;
 const STREAM_CACHE_TTL_MS = 2 * 60 * 1000;
 const STREAM_PREFETCH_COOLDOWN_MS = 15 * 1000;
@@ -563,6 +564,12 @@ themeFilters: {
     playToken: 0,
     hls: null,
     refreshTimer: 0,
+    source: "auto",
+    country: "France",
+    query: "",
+    limit: 260,
+    countries: [],
+    searchTimer: 0,
   },
   repairCache: new Map(),
   repairInFlight: new Map(),
@@ -609,6 +616,8 @@ const refs = {
   tvPlayerEmbed: document.getElementById("tvPlayerEmbed"),
   tvChannelList: document.getElementById("tvChannelList"),
   tvChannelEmpty: document.getElementById("tvChannelEmpty"),
+  tvSearchInput: document.getElementById("tvSearchInput"),
+  tvCountrySelect: document.getElementById("tvCountrySelect"),
   suggestionForm: document.getElementById("suggestionForm"),
   suggestionType: document.getElementById("suggestionType"),
   suggestionTitle: document.getElementById("suggestionTitle"),
@@ -885,6 +894,8 @@ function rehydrateCoreRefs() {
   refs.tvPlayerEmbed = refs.tvPlayerEmbed || document.getElementById("tvPlayerEmbed");
   refs.tvChannelList = refs.tvChannelList || document.getElementById("tvChannelList");
   refs.tvChannelEmpty = refs.tvChannelEmpty || document.getElementById("tvChannelEmpty");
+  refs.tvSearchInput = refs.tvSearchInput || document.getElementById("tvSearchInput");
+  refs.tvCountrySelect = refs.tvCountrySelect || document.getElementById("tvCountrySelect");
 
   refs.detailModal = refs.detailModal || document.getElementById("detailModal");
   refs.detailPanel = refs.detailPanel || document.getElementById("detailPanel");
@@ -1219,6 +1230,7 @@ function getNavGroupFallbackItems(group) {
     { view: "top", label: "Top du jour" },
     { view: "list", label: "Ma liste" },
     { view: "recommendation", label: "Recommandation" },
+    { view: "random", label: "Aleatoire" },
     { view: "request", label: "Demander Contenu" },
     { view: "tv-live", label: "TV Directs" },
   ];
@@ -1433,6 +1445,8 @@ function getMobileNavIcon(view, isSub = false) {
       ? "M7 8h10 M7 12h10 M7 16h10"
       : name === "recommendation"
       ? "M4 12h16 M12 4l2 4 4 2-4 2-2 4-2-4-4-2 4-2z"
+      : name === "random"
+      ? "M6 4h12v16H6z M9 7h2v2H9z M13 7h2v2h-2z M9 11h2v2H9z M13 11h2v2h-2z M11 15h2v2h-2z"
       : name === "request"
       ? "M4 6h16v12H4z M7 9h10 M7 12h6 M7 15h4"
       : name === "tv-live"
@@ -2909,6 +2923,28 @@ function bindEvents() {
     });
   }
 
+  if (refs.tvSearchInput) {
+    refs.tvSearchInput.addEventListener("input", (event) => {
+      const value = String(event.target.value || "");
+      scheduleTvSearch(value);
+    });
+    refs.tvSearchInput.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        refs.tvSearchInput.blur();
+      }
+    });
+  }
+
+  if (refs.tvCountrySelect) {
+    refs.tvCountrySelect.addEventListener("change", (event) => {
+      const value = String(event.target.value || "France").trim() || "France";
+      state.tv.country = value;
+      ensureTvChannels({ force: true }).catch(() => {
+        // best effort
+      });
+    });
+  }
+
   if (refs.searchInput) {
     refs.searchInput.addEventListener("input", (event) => {
     const nextQuery = String(event.target.value || "").trim();
@@ -3970,6 +4006,13 @@ function handleViewSelection(view) {
   if (normalizedView === "recommendation") {
     state.query = "";
   }
+  if (normalizedView === "random") {
+    state.sortBy = "random";
+    state.randomSortSeed = Date.now();
+    if (refs.sortSelect) {
+      refs.sortSelect.value = state.sortBy;
+    }
+  }
   if (isCatalogCategoryView(normalizedView)) {
     state.chip = normalizedView;
   } else {
@@ -4022,7 +4065,17 @@ function handleViewSelection(view) {
 
 function setActiveNav(view) {
   const normalizedView = view === "catalog" || view === "search" || view === "interest" ? "all" : view;
-  const groupedViews = new Set(["calendar", "latest", "popular", "top", "list", "recommendation", "request", "tv-live"]);
+  const groupedViews = new Set([
+    "calendar",
+    "latest",
+    "popular",
+    "top",
+    "list",
+    "recommendation",
+    "request",
+    "tv-live",
+    "random",
+  ]);
   const group = normalizedView === "info" ? "info" : groupedViews.has(normalizedView) ? "discover" : "";
   const hasMatch = refs.navPills.some((entry) => (entry.dataset.view || "") === normalizedView);
   const targetView = hasMatch ? normalizedView : "all";
@@ -4058,7 +4111,7 @@ function isCatalogCategoryView(view) {
 }
 
 function isCatalogBrowseView(view) {
-  return view === "all" || view === "latest" || view === "popular" || isCatalogCategoryView(view);
+  return view === "all" || view === "latest" || view === "popular" || view === "random" || isCatalogCategoryView(view);
 }
 
 function getCatalogSyncProfile(view = resolveCatalogViewForSearch()) {
@@ -4105,7 +4158,7 @@ function getLoadedCatalogPage() {
 function resolveCatalogViewForSearch() {
   const query = String(state.query || "").trim();
   if (query.length === 0) {
-    return ["recommendation", "request", "tv-live"].includes(state.view) ? "all" : state.view;
+    return ["recommendation", "request", "tv-live", "random"].includes(state.view) ? "all" : state.view;
   }
   if (state.view === "all" || isCatalogCategoryView(state.view)) {
     return state.view;
@@ -8352,7 +8405,11 @@ function renderAll() {
   const isListView = !hasQuery && state.view === "list";
   const isTopView = !hasQuery && state.view === "top";
   const isRecommendationView = !hasQuery && state.view === "recommendation";
-  const showBrowseView = !isInfoView && !isCalendarView && !isTopView && !isListView && !isRecommendationView;
+  const isRequestView = !hasQuery && state.view === "request";
+  const isTvView = !hasQuery && state.view === "tv-live";
+  const isRandomView = !hasQuery && state.view === "random";
+  const showBrowseView =
+    !isInfoView && !isCalendarView && !isListView && !isRecommendationView && !isRequestView && !isTvView;
 
   const showHero = showBrowseView && !isCompactViewport();
 
@@ -8391,9 +8448,6 @@ function renderAll() {
     warmImageCacheFromPool(visible, warmLimit);
   }
 
-  if (isTopView) {
-    renderTopDaily();
-  }
   if (isListView) {
     renderMyList();
   }
@@ -8433,7 +8487,7 @@ function renderAll() {
   setHidden(refs.requestSection, !isRequestView);
   setHidden(refs.tvSection, !isTvView);
 
-  setHidden(refs.topSection, !isTopView);
+  setHidden(refs.topSection, true);
   setHidden(refs.trendingSection, true);
   setHidden(refs.featureRailSection, true);
 
@@ -8668,6 +8722,8 @@ function updateCatalogHeading(hasQuery, resultCount) {
     anime: "Anime",
     latest: "Nouveautes",
     popular: "Populaires",
+    top: "Top du jour",
+    random: "Aleatoire",
   };
   if (hasQuery) {
     refs.catalogTitle.textContent = "Recherche";
@@ -8684,6 +8740,10 @@ function updateCatalogHeading(hasQuery, resultCount) {
   }
   if (state.view === "popular") {
     refs.catalogSubtitle.textContent = appendActiveFilterSummary("Titres les plus regardes par la communaute.");
+    return;
+  }
+  if (state.view === "top") {
+    refs.catalogSubtitle.textContent = appendActiveFilterSummary("Classement base sur tes lectures recentes.");
     return;
   }
   refs.catalogSubtitle.textContent = appendActiveFilterSummary("Catalogue fusionne films, series et anime.");
@@ -9732,6 +9792,9 @@ function renderHero(item) {
 }
 
 function renderTopDaily() {
+  if (!refs.topGrid) {
+    return;
+  }
   if (refs.topDailyHint) {
     refs.topDailyHint.textContent =
       state.topDailySource === "local"
@@ -10901,8 +10964,64 @@ function normalizeTvChannel(entry) {
     type,
     logo: String(entry.logo || "").trim(),
     group: String(entry.group || "").trim(),
+    country: String(entry.country || "").trim(),
     order: Number(entry.order || 0) || 0,
   };
+}
+
+function syncTvControls() {
+  if (refs.tvSearchInput && refs.tvSearchInput.value !== state.tv.query) {
+    refs.tvSearchInput.value = state.tv.query || "";
+  }
+  if (refs.tvCountrySelect) {
+    const countries = Array.isArray(state.tv.countries) ? state.tv.countries : [];
+    const current = state.tv.country || "France";
+    const baseOptions = [
+      { value: "France", label: "France" },
+      { value: "all", label: "Tous les pays" },
+    ];
+    const options = baseOptions.slice();
+    countries.forEach((country) => {
+      const value = String(country || "").trim();
+      if (!value || value.toLowerCase() === "all" || value.toLowerCase() === "tous") {
+        return;
+      }
+      if (options.some((opt) => opt.value.toLowerCase() === value.toLowerCase())) {
+        return;
+      }
+      options.push({ value, label: value });
+    });
+    const currentOptions = Array.from(refs.tvCountrySelect.options).map((opt) => opt.value);
+    const nextValues = options.map((opt) => opt.value);
+    const shouldRebuild =
+      currentOptions.length !== nextValues.length ||
+      currentOptions.some((value, index) => value !== nextValues[index]);
+    if (shouldRebuild) {
+      refs.tvCountrySelect.innerHTML = "";
+      options.forEach((opt) => {
+        const option = document.createElement("option");
+        option.value = opt.value;
+        option.textContent = opt.label;
+        refs.tvCountrySelect.appendChild(option);
+      });
+    }
+    if (refs.tvCountrySelect.value !== current) {
+      refs.tvCountrySelect.value = current;
+    }
+  }
+}
+
+function scheduleTvSearch(value) {
+  state.tv.query = String(value || "").trim();
+  if (state.tv.searchTimer) {
+    clearTimeout(state.tv.searchTimer);
+  }
+  state.tv.searchTimer = window.setTimeout(() => {
+    state.tv.searchTimer = 0;
+    ensureTvChannels({ force: true }).catch(() => {
+      // best effort
+    });
+  }, TV_SEARCH_DEBOUNCE_MS);
 }
 
 function teardownTvPlayback() {
@@ -11015,6 +11134,7 @@ function renderTvView() {
   if (!refs.tvSection || !refs.tvChannelList) {
     return;
   }
+  syncTvControls();
   const list = Array.isArray(state.tv.list) ? state.tv.list : [];
   const sorted = list.slice().sort((a, b) => {
     const orderDiff = Number(a.order || 0) - Number(b.order || 0);
@@ -11038,7 +11158,8 @@ function renderTvView() {
       card.classList.add("active");
     }
     const logo = channel.logo ? `<img src="${escapeHtml(channel.logo)}" alt="" loading="lazy" />` : "";
-    const meta = channel.group ? `<span class="tv-channel-meta">${escapeHtml(channel.group)}</span>` : "";
+    const metaText = channel.group || channel.country;
+    const meta = metaText ? `<span class="tv-channel-meta">${escapeHtml(metaText)}</span>` : "";
     card.innerHTML = `
       <span class="tv-channel-logo">${logo}</span>
       <span class="tv-channel-info">
@@ -11075,9 +11196,26 @@ async function ensureTvChannels(options = {}) {
   }
   state.tv.loading = true;
   try {
-    const payload = await fetchJson(`${API_BASE}/tv-channels`, { timeoutMs: 7000, noCache: true });
+    const params = new URLSearchParams();
+    if (state.tv.source) {
+      params.set("source", state.tv.source);
+    }
+    if (state.tv.country) {
+      params.set("country", state.tv.country);
+    }
+    if (state.tv.query) {
+      params.set("q", state.tv.query);
+    }
+    if (state.tv.limit) {
+      params.set("limit", String(state.tv.limit));
+    }
+    const endpoint = `${API_BASE}/tv-channels${params.toString() ? `?${params.toString()}` : ""}`;
+    const payload = await fetchJson(endpoint, { timeoutMs: 9000, noCache: true });
     const list = Array.isArray(payload?.data) ? payload.data : Array.isArray(payload?.channels) ? payload.channels : [];
     state.tv.list = list.map(normalizeTvChannel).filter(Boolean);
+    if (Array.isArray(payload?.meta?.countries)) {
+      state.tv.countries = payload.meta.countries.map((entry) => String(entry || "").trim()).filter(Boolean);
+    }
     state.tv.lastUpdatedAt = Date.now();
     if (state.view === "tv-live") {
       renderTvView();
@@ -19949,6 +20087,7 @@ function applySavedBrowseState() {
     "recommendation",
     "request",
     "tv-live",
+    "random",
   ]);
   const allowedChips = new Set(["all", "recent", "movie", "tv", "anime"]);
   const allowedSort = new Set([
@@ -20019,6 +20158,9 @@ function applyBrowseStateFromRoute() {
     "list",
     "info",
     "recommendation",
+    "request",
+    "tv-live",
+    "random",
   ]);
   const allowedChips = new Set(["all", "recent", "movie", "tv", "anime"]);
   const allowedSort = new Set([

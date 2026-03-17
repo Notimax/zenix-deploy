@@ -7347,6 +7347,26 @@ body.backup-locked .back-to-top {
   gap: 16px;
 }
 
+.tv-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+}
+
+.tv-controls .field {
+  flex: 1 1 160px;
+  min-width: 160px;
+}
+
+.tv-controls .tv-search {
+  flex: 2 1 260px;
+}
+
+.tv-controls input[type="search"] {
+  font-size: 16px;
+}
+
 .tv-shell {
   display: grid;
   grid-template-columns: minmax(0, 1.4fr) minmax(0, 0.6fr);
@@ -7473,6 +7493,18 @@ body.backup-locked .back-to-top {
 
   .request-card {
     grid-template-columns: 90px 1fr;
+  }
+}
+
+@media (max-width: 740px) {
+  .hero {
+    display: none !important;
+  }
+  .tv-controls {
+    gap: 10px;
+  }
+  .tv-controls .field {
+    width: 100%;
   }
 }
 
