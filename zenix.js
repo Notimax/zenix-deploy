@@ -1,5 +1,5 @@
 const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260317-c337";
+const ZENIX_BUILD_VERSION = "20260317-c338";
 const STORAGE_KEY = "zenix-progress-v4";
 const COVER_CACHE_KEY = "zenix-cover-cache-v1";
 const LOCAL_PLAY_KEY = "zenix-local-plays-v1";
@@ -15415,15 +15415,28 @@ async function playFromSourcePoolWithValidation(resumeTime, token, options = {})
       if (token !== state.playToken) {
         return;
       }
-      source.validated = true;
       state.lastAutoSwitchAt = Date.now();
       state.lastAutoSwitchReason = "validated";
-      state.manualSourceLock = true;
-      state.manualSourceLockedIndex = sourceIndex;
+      state.manualSourceLock = false;
+      state.manualSourceLockedIndex = -1;
       state.sourceValidationActive = false;
-      rememberSourceSuccess(source, Number(options?.itemId || 0));
       renderPlayerSourceOptions();
-      return;
+      try {
+        await playFromSourcePool(resumeTime, token, sourceIndex, { strictIndex: true });
+        if (token !== state.playToken) {
+          return;
+        }
+        source.validated = true;
+        rememberSourceSuccess(source, Number(options?.itemId || 0));
+        renderPlayerSourceOptions();
+        return;
+      } catch {
+        source.validated = false;
+        if (token !== state.playToken) {
+          return;
+        }
+        state.sourceValidationActive = true;
+      }
     } catch {
       // continue to next candidate
     }

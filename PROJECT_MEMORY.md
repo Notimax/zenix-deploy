@@ -168,6 +168,10 @@ Last update: 2026-03-16
 - Top du jour now uses local playback counts (Zenix local) with fallback merge.
 - Local cover cache stores visible covers for faster repeat rendering.
 
+## c338 follow-up (2026-03-17)
+- Background validation now probes then starts the chosen reader for real playback.
+- If the validated reader fails to play, we continue to the next reader (no dead-end).
+
 ## Visual system policy (c137)
 - Keep unified visual tokens across the UI:
   - coherent radii/shadows/spacing

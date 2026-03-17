@@ -72,6 +72,10 @@ LATEST FIX LOG (2026-03-17, c337)
 - Top du jour Zenix is now based on local playback counts with fallback merge.
 - Local cover cache added for visible covers to speed repeat visits.
 
+LATEST FIX LOG (2026-03-17, c338)
+- Auto-validation now probes in background then starts the fastest reader for real playback.
+- If the chosen reader fails to play, we continue to the next one instead of getting stuck.
+
 LATEST FIX LOG (2026-03-17, c327)
 - Mobile search input font-size forced to 16px to prevent iOS zoom on focus.
 LATEST FIX LOG (2026-03-17, c325)
