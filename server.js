@@ -102,7 +102,7 @@ const NAKIOS_LOOKUP_CACHE_MS = Math.max(
 );
 const FASTFLUX_CATALOG_CACHE_MS = Math.max(
   60 * 1000,
-  Number(process.env.FASTFLUX_CATALOG_CACHE_MS || 20 * 60 * 1000)
+  Number(process.env.FASTFLUX_CATALOG_CACHE_MS || 8 * 60 * 1000)
 );
 const FASTFLUX_SEARCH_CACHE_MS = Math.max(
   30 * 1000,
@@ -15726,33 +15726,58 @@ async function handleZenixSource(req, res, requestUrl) {
   const externalKeyParam = String(requestUrl.searchParams.get("externalKey") || "").trim();
   const mediaId = toInt(requestUrl.searchParams.get("mediaId"), 0, 0, 999999999);
   let tmdbId = toInt(requestUrl.searchParams.get("tmdbId"), 0, 0, 999999999);
-  if (mediaType === "movie" && isScream7Target(title, tmdbId, mediaId) && NOCTA_SCREAM7_DEBUG_URL) {
-    const proxiedUrl = buildHlsProxyPath(NOCTA_SCREAM7_DEBUG_URL);
-    sendJson(res, 200, {
-      apiVersion: "zenix-source-v1",
-      type: "success",
-      data: {
-        title: String(title || "Scream 7").trim(),
-        mediaType,
-        year,
-        season: 1,
-        episode: 1,
-        tmdbId: tmdbId > 0 ? tmdbId : 0,
-        count: 1,
-        sources: [
-          {
-            stream_url: proxiedUrl,
-            source_name: "Scream 7 Debug",
-            debug: true,
-            quality: "Full HD",
-            language: "VF",
-            format: "mp4",
-            priority: 420,
-          },
-        ],
-      },
-    });
-    return true;
+  const isScream7 = mediaType === "movie" && isScream7Target(title, tmdbId, mediaId);
+  if (isScream7) {
+    const screamTmdbId = tmdbId > 0 ? tmdbId : 1159559;
+    let fastfluxSources = [];
+    if (USE_FASTFLUX) {
+      try {
+        fastfluxSources = await resolveFastfluxSourcesByTmdbId("movie", screamTmdbId, 1, 1, {
+          title,
+          year,
+        });
+        if (fastfluxSources.length === 0) {
+          fastfluxSources = await resolveFastfluxSourcesByTmdbId("tv", screamTmdbId, 1, 1, {
+            title,
+            year,
+          });
+        }
+      } catch {
+        fastfluxSources = [];
+      }
+    }
+    const debugSource = NOCTA_SCREAM7_DEBUG_URL
+      ? {
+          stream_url: buildHlsProxyPath(NOCTA_SCREAM7_DEBUG_URL),
+          source_name: "Scream 7 Debug",
+          debug: true,
+          quality: "Full HD",
+          language: "VF",
+          format: "mp4",
+          priority: 120,
+        }
+      : null;
+    if (fastfluxSources.length > 0 || debugSource) {
+      const sources = fastfluxSources.slice();
+      if (debugSource) {
+        sources.push(debugSource);
+      }
+      sendJson(res, 200, {
+        apiVersion: "zenix-source-v1",
+        type: "success",
+        data: {
+          title: String(title || "Scream 7").trim(),
+          mediaType,
+          year,
+          season: 1,
+          episode: 1,
+          tmdbId: screamTmdbId > 0 ? screamTmdbId : 0,
+          count: sources.length,
+          sources,
+        },
+      });
+      return true;
+    }
   }
   if (mediaType === "movie" && isBanlieusards3Target(title) && NOCTA_BANLIEUSARDS3_DEBUG_URL) {
     const proxiedUrl = buildHlsProxyPath(NOCTA_BANLIEUSARDS3_DEBUG_URL);

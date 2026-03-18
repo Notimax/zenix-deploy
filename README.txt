@@ -1597,3 +1597,10 @@ FASTFLUX PER-FILM POPUP (2026-03-18, c367)
 - FastFlux smartlink now reappears for each new content (per-film/session map).
 - Cancel now shows a clear message to reselect FastFlux.
 - Cache-bust bumped to 20260318-c367.
+
+FASTFLUX MOBILE/PRIORITY FIX (2026-03-18, c368)
+- Mobile hotlink hosts (Purstream/FastFlux/etc) now prefer proxy-first playback to fix iPhone URL stalls.
+- FastFlux sources are prioritized globally in source sorting (desktop + mobile).
+- Scream 7 now includes FastFlux sources (debug fallback kept).
+- FastFlux catalog cache default lowered to 8 min for faster updates.
+- Cache-bust bumped to 20260318-c368.

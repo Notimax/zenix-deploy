@@ -1,5 +1,5 @@
 const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260318-c367";
+const ZENIX_BUILD_VERSION = "20260318-c368";
 const STORAGE_KEY = "zenix-progress-v4";
 const COVER_CACHE_KEY = "zenix-cover-cache-v1";
 const LOCAL_PLAY_KEY = "zenix-local-plays-v1";
@@ -13356,6 +13356,10 @@ function filterMovieSourcesForFrench(sources) {
         ]
   );
   ranked.sort((left, right) => {
+    const fastfluxDelta = Number(Boolean(right.entry?.isFastflux)) - Number(Boolean(left.entry?.isFastflux));
+    if (fastfluxDelta !== 0) {
+      return fastfluxDelta;
+    }
     if (isLikelyMobileDevice()) {
       const zenixDelta = Number(Boolean(right.entry?.isZenix)) - Number(Boolean(left.entry?.isZenix));
       if (zenixDelta !== 0) {
@@ -15838,6 +15842,10 @@ function preferAnimeSamaSources(item, sources) {
 function sortSourcesByScore(sources) {
   const rows = Array.isArray(sources) ? sources.slice() : [];
   rows.sort((left, right) => {
+    const fastfluxDelta = Number(Boolean(right?.isFastflux)) - Number(Boolean(left?.isFastflux));
+    if (fastfluxDelta !== 0) {
+      return fastfluxDelta;
+    }
     if (isLikelyMobileDevice()) {
       const zenixDelta = Number(Boolean(right?.isZenix)) - Number(Boolean(left?.isZenix));
       if (zenixDelta !== 0) {
@@ -16762,7 +16770,12 @@ function normalizeSourceEntry(entry, index) {
   const proxyPath = getHlsProxyBasePath(url);
   const avoidProxyHost = shouldAvoidProxyForHost(streamHost);
   const allowDirect = Boolean(entry?.allowDirect);
-  const proxyPreferred = Boolean(entry?.proxyPreferred);
+  let proxyPreferred = Boolean(entry?.proxyPreferred);
+  const hotlinkHost =
+    /purstream|fastflux|xalaflix|fsvid|fsvideo|fembed|dood|uqload|uptostream|vidoza|netu|sibnet/i.test(streamHost);
+  if (!proxyPreferred && isLikelyMobileDevice() && !avoidProxyHost && hotlinkHost) {
+    proxyPreferred = true;
+  }
   const forceProxyHost =
     !avoidProxyHost &&
     !allowDirect &&
@@ -18599,7 +18612,9 @@ function shouldPreferProxyFirstForHls(video, source) {
       if (shouldForceProxyForHost(targetHost)) {
         return true;
       }
-      if (/xalaflix|fastflux|fsvid|fsvideo|fembed|dood|uqload|uptostream|vidoza|netu|sibnet/.test(targetHost)) {
+      if (
+        /purstream|xalaflix|fastflux|fsvid|fsvideo|fembed|dood|uqload|uptostream|vidoza|netu|sibnet/.test(targetHost)
+      ) {
         return true;
       }
     } catch {
