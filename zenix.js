@@ -1,5 +1,5 @@
 const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260318-c363";
+const ZENIX_BUILD_VERSION = "20260318-c364";
 const STORAGE_KEY = "zenix-progress-v4";
 const COVER_CACHE_KEY = "zenix-cover-cache-v1";
 const LOCAL_PLAY_KEY = "zenix-local-plays-v1";
@@ -290,6 +290,7 @@ const NATIVE_AD_FRAME_CLASS = "native-banner-frame";
 const NATIVE_AD_FRAME_SANDBOX = "allow-scripts allow-same-origin";
 const FASTFLUX_SMARTLINK_URL = "https://walkeralacrityfavorite.com/k1kzat14?key=276c268eafa6cbd5fab61659f983a7b6";
 const FASTFLUX_SMARTLINK_SESSION_KEY = "zenix-fastflux-smartlink-v1";
+const FASTFLUX_SMARTLINK_TTL_MS = 2 * 60 * 60 * 1000;
 const ADBLOCK_MONITOR_INTERVAL_MS = 8500;
 const ADBLOCK_BOOT_DELAY_MS = 950;
 const ADBLOCK_CONFIRM_DELAY_MS = 160;
@@ -552,6 +553,7 @@ themeFilters: {
   fastfluxGateVisible: false,
   fastfluxGatePromise: null,
   fastfluxGateResolver: null,
+  fastfluxSmartlinkGranted: false,
   recommendation: {
     step: 0,
     answers: {},
@@ -5540,16 +5542,34 @@ async function refreshGateToken(options = {}) {
 }
 
 function hasFastfluxPromptSession() {
+  if (state.fastfluxSmartlinkGranted) {
+    return true;
+  }
   try {
     return sessionStorage.getItem(FASTFLUX_SMARTLINK_SESSION_KEY) === "1";
   } catch {
-    return false;
+    // fall through
   }
+  try {
+    const stored = Number(localStorage.getItem(`${FASTFLUX_SMARTLINK_SESSION_KEY}:ts`) || 0);
+    if (Number.isFinite(stored) && stored > 0 && Date.now() - stored < FASTFLUX_SMARTLINK_TTL_MS) {
+      return true;
+    }
+  } catch {
+    // ignore
+  }
+  return false;
 }
 
 function markFastfluxPromptSession() {
+  state.fastfluxSmartlinkGranted = true;
   try {
     sessionStorage.setItem(FASTFLUX_SMARTLINK_SESSION_KEY, "1");
+  } catch {
+    // ignore
+  }
+  try {
+    localStorage.setItem(`${FASTFLUX_SMARTLINK_SESSION_KEY}:ts`, String(Date.now()));
   } catch {
     // ignore
   }

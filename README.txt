@@ -1580,3 +1580,7 @@ FASTFLUX SMARTLINK GATE (2026-03-18, c362)
 FASTFLUX SMARTLINK PASS-THROUGH (2026-03-18, c363)
 - Continue now always unblocks playback even if the popup is blocked; shows a note but resolves the gate.
 - Cache-bust bumped to 20260318-c363.
+
+FASTFLUX SMARTLINK SESSION FIX (2026-03-18, c364)
+- FastFlux smartlink now persists per session using in-memory + sessionStorage, with localStorage TTL fallback (2h) for browsers that block sessionStorage.
+- Cache-bust bumped to 20260318-c364.
