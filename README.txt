@@ -1653,3 +1653,10 @@ REPAIR CACHE FALLBACK (2026-03-18, c379)
 GLOBAL REPAIR TRIGGER (2026-03-18, c380)
 - Repair button now triggers a global cache reset (/api/repair-global) for all users.
 - FastFlux caches + probe cache cleared, and all requests force fresh lookup for a few minutes.
+
+VF LABEL EXPANSION (2026-03-18, c381)
+- Language detection now recognizes TRUEFRENCH/VFF/VFI/VFB/VFQ so VF sources don't disappear.
+
+VF VISIBILITY FIX (2026-03-18, c382)
+- Language filter now keeps VF sources visible alongside the selected language (avoids VF-only loss).
+- Cache-bust bumped to 20260318-c382.

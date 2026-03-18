@@ -1,5 +1,5 @@
 const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260318-c380";
+const ZENIX_BUILD_VERSION = "20260318-c382";
 const STORAGE_KEY = "zenix-progress-v4";
 const COVER_CACHE_KEY = "zenix-cover-cache-v1";
 const LOCAL_PLAY_KEY = "zenix-local-plays-v1";
@@ -13302,9 +13302,10 @@ function filterSourcesByLanguage(sources, language) {
   }
 
   const multi = rows.filter((entry) => entry.language === "MULTI");
+  const vf = selected === "VF" ? [] : rows.filter((entry) => entry.language === "VF");
   const merged = [];
   const seen = new Set();
-  for (const entry of direct.concat(multi)) {
+  for (const entry of direct.concat(multi, vf)) {
     const key = String(entry?.url || "").trim();
     if (!key || seen.has(key)) {
       continue;
@@ -17697,6 +17698,12 @@ function collectLanguageSignals(value) {
     raw: probe,
     hasVf:
       /\bVF\b/.test(probe) ||
+      /\bVFF\b/.test(probe) ||
+      /\bVFI\b/.test(probe) ||
+      /\bVFB\b/.test(probe) ||
+      /\bVFQ\b/.test(probe) ||
+      /\bTRUEFRENCH\b/.test(probe) ||
+      /\bTRUE FRENCH\b/.test(probe) ||
       /\bFRENCH\b/.test(probe) ||
       /\bFRANCAIS\b/.test(probe) ||
       /\bFRANÇAIS\b/.test(probe),
@@ -22509,5 +22516,11 @@ async function cleanupLegacyServiceWorker() {
     await Promise.all(keys.map((key) => caches.delete(key)));
   }
 }
+
+
+
+
+
+
 
 
