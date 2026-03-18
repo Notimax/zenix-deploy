@@ -1635,3 +1635,6 @@ FASTFLUX NO-EMBED + REDIRECT COOKIES (2026-03-18, c374)
 REPAIR BUTTON HARDEN + FORCE REFRESH (2026-03-18, c375)
 - Repair button label fixed ("APPUYER ICI POUR REPARER").
 - Repair now forces a fresh FastFlux lookup via /api/zenix-source?force=1 and refreshes gate token.
+
+FASTFLUX PROBE BYPASS (2026-03-18, c376)
+- Server probe no longer drops FastFlux sources (keeps playback even if HEAD/GET probe fails).

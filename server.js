@@ -8442,6 +8442,17 @@ async function filterSourcesWithProbe(sources = []) {
     if (!url) {
       continue;
     }
+    const probeTarget = extractProxyTargetUrl(url) || url;
+    let probeHost = "";
+    try {
+      probeHost = new URL(probeTarget).hostname.toLowerCase();
+    } catch {
+      probeHost = "";
+    }
+    if (probeHost.endsWith("fastflux.xyz") || probeHost.endsWith("cdn.fastflux.xyz")) {
+      results.push(source);
+      continue;
+    }
     const format = inferOwnedSourceFormat(url, source?.format || "");
     if (format === "embed") {
       results.push(source);
