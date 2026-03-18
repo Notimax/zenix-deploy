@@ -1627,3 +1627,7 @@ FASTFLUX CDN REWRITE (2026-03-18, c372)
 FASTFLUX EMBED FALLBACK (2026-03-18, c373)
 - FastFlux sources now include an embedded player fallback (API /player) when direct MP4 blocks.
 - Keeps playback alive even if CDN hotlinking fails.
+
+FASTFLUX NO-EMBED + REDIRECT COOKIES (2026-03-18, c374)
+- Removed FastFlux embed fallback per request (FastFlux now uses direct MP4 only).
+- HLS proxy now preserves cookies across redirects to keep FastFlux CDN sessions alive.

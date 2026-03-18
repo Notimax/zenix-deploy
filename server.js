@@ -8519,35 +8519,6 @@ function buildFastfluxSourceEntry(sourceRow, index = 0) {
   };
 }
 
-function buildFastfluxPlayerEmbedSource(tmdbId, mediaType = "movie", season = 1, episode = 1) {
-  if (!USE_FASTFLUX || !FASTFLUX_API_KEY) {
-    return null;
-  }
-  const safeId = toInt(tmdbId, 0, 0, 999999999);
-  if (!safeId) {
-    return null;
-  }
-  const normalizedType = mediaType === "tv" ? "series" : "movies";
-  const params = new URLSearchParams({
-    route: `${normalizedType}/${safeId}/player`,
-    api_key: FASTFLUX_API_KEY,
-  });
-  if (mediaType === "tv") {
-    params.set("season", String(Math.max(1, Number(season || 1))));
-    params.set("episode", String(Math.max(1, Number(episode || 1))));
-  }
-  const embedUrl = `${FASTFLUX_API_BASE}?${params.toString()}`;
-  return {
-    stream_url: embedUrl,
-    source_name: "FastFlux",
-    origin: "fastflux",
-    quality: "HD",
-    language: "VF",
-    format: "embed",
-    priority: 240,
-  };
-}
-
 function toFastfluxCatalogDetailUrl(mediaType, tmdbId) {
   const safeId = toInt(tmdbId, 0, 0, 999999999);
   if (!safeId) {
@@ -9055,17 +9026,7 @@ async function resolveFastfluxSourcesByTmdbId(mediaType, tmdbId, season = 1, epi
       return [];
     }
     const source = buildFastfluxSourceEntry(entry.source, 0);
-    const embed = buildFastfluxPlayerEmbedSource(entryTmdb || safeTmdbId, "movie", 1, 1);
-    if (source && embed) {
-      return [source, embed];
-    }
-    if (source) {
-      return [source];
-    }
-    if (embed) {
-      return [embed];
-    }
-    return [];
+    return source ? [source] : [];
   }
 
   if (safeTmdbId > 0) {
@@ -9099,17 +9060,7 @@ async function resolveFastfluxSourcesByTmdbId(mediaType, tmdbId, season = 1, epi
     return [];
   }
   const source = buildFastfluxSourceEntry(fallback, 0);
-  const embed = buildFastfluxPlayerEmbedSource(entryTmdb || safeTmdbId, "tv", safeSeason, safeEpisode);
-  if (source && embed) {
-    return [source, embed];
-  }
-  if (source) {
-    return [source];
-  }
-  if (embed) {
-    return [embed];
-  }
-  return [];
+  return source ? [source] : [];
 }
 
 
@@ -13057,8 +13008,43 @@ async function fetchWithManualRedirect(targetUrl, options, maxRedirects = 3) {
   let currentUrl = String(targetUrl || "");
   let response = null;
   let redirects = 0;
+  let cookieJar = "";
+  const baseHeaders = { ...(options?.headers || {}) };
+  const updateCookieJar = (setCookieHeader) => {
+    const raw = String(setCookieHeader || "").trim();
+    if (!raw) {
+      return;
+    }
+    const cookies = raw
+      .split(/,(?=[^;]+?=)/)
+      .map((chunk) => String(chunk || "").split(";")[0].trim())
+      .filter(Boolean);
+    if (cookies.length === 0) {
+      return;
+    }
+    const existing = cookieJar ? cookieJar.split(/;\s*/).filter(Boolean) : [];
+    const map = new Map();
+    existing.forEach((entry) => {
+      const [key] = entry.split("=");
+      if (key) {
+        map.set(key.trim(), entry);
+      }
+    });
+    cookies.forEach((entry) => {
+      const [key] = entry.split("=");
+      if (key) {
+        map.set(key.trim(), entry);
+      }
+    });
+    cookieJar = Array.from(map.values()).join("; ");
+  };
   while (currentUrl) {
-    response = await fetch(currentUrl, { ...(options || {}), redirect: "manual" });
+    const headers = { ...baseHeaders };
+    if (cookieJar) {
+      headers.Cookie = cookieJar;
+    }
+    response = await fetch(currentUrl, { ...(options || {}), headers, redirect: "manual" });
+    updateCookieJar(response.headers.get("set-cookie"));
     const status = Number(response.status || 0);
     if (![301, 302, 303, 307, 308].includes(status) || redirects >= maxRedirects) {
       try {
