@@ -1631,3 +1631,7 @@ FASTFLUX EMBED FALLBACK (2026-03-18, c373)
 FASTFLUX NO-EMBED + REDIRECT COOKIES (2026-03-18, c374)
 - Removed FastFlux embed fallback per request (FastFlux now uses direct MP4 only).
 - HLS proxy now preserves cookies across redirects to keep FastFlux CDN sessions alive.
+
+REPAIR BUTTON HARDEN + FORCE REFRESH (2026-03-18, c375)
+- Repair button label fixed ("APPUYER ICI POUR REPARER").
+- Repair now forces a fresh FastFlux lookup via /api/zenix-source?force=1 and refreshes gate token.

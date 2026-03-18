@@ -9001,9 +9001,13 @@ async function resolveFastfluxSourcesByTmdbId(mediaType, tmdbId, season = 1, epi
   const safeEpisode = toInt(episode, 1, 1, 50000);
   const strictTitle = String(options?.title || "").trim();
   const strictYear = toInt(options?.year, 0, 0, 2099);
+  const forceRefresh = Boolean(options?.forceRefresh);
   const allowTitleFallback = safeTmdbId <= 0 && strictTitle.length >= 2;
   let entry = null;
   if (normalizedType === "movie") {
+    if (forceRefresh) {
+      await loadFastfluxMovies(true, { minPages: FASTFLUX_MOVIES_PAGES_PER_FEED });
+    }
     if (safeTmdbId > 0) {
       entry = fastfluxMovieCache.map.get(safeTmdbId);
       if (!entry) {
@@ -9029,6 +9033,9 @@ async function resolveFastfluxSourcesByTmdbId(mediaType, tmdbId, season = 1, epi
     return source ? [source] : [];
   }
 
+  if (forceRefresh) {
+    await loadFastfluxSeries(true, { minPages: FASTFLUX_SERIES_PAGES_PER_FEED });
+  }
   if (safeTmdbId > 0) {
     entry = fastfluxSeriesCache.map.get(safeTmdbId);
     if (!entry) {
@@ -15787,6 +15794,7 @@ async function handleZenixSource(req, res, requestUrl) {
   const year = toInt(requestUrl.searchParams.get("year"), 0, 0, 2099);
   const season = toInt(requestUrl.searchParams.get("season"), 1, 1, 500);
   const episode = toInt(requestUrl.searchParams.get("episode"), 1, 1, 50000);
+  const forceRefresh = requestUrl.searchParams.get("force") === "1";
   const externalKeyParam = String(requestUrl.searchParams.get("externalKey") || "").trim();
   const mediaId = toInt(requestUrl.searchParams.get("mediaId"), 0, 0, 999999999);
   let tmdbId = toInt(requestUrl.searchParams.get("tmdbId"), 0, 0, 999999999);
@@ -15799,11 +15807,13 @@ async function handleZenixSource(req, res, requestUrl) {
         fastfluxSources = await resolveFastfluxSourcesByTmdbId("movie", screamTmdbId, 1, 1, {
           title,
           year,
+          forceRefresh,
         });
         if (fastfluxSources.length === 0) {
           fastfluxSources = await resolveFastfluxSourcesByTmdbId("tv", screamTmdbId, 1, 1, {
             title,
             year,
+            forceRefresh,
           });
         }
       } catch {
@@ -15880,11 +15890,13 @@ async function handleZenixSource(req, res, requestUrl) {
         fastfluxSources = await resolveFastfluxSourcesByTmdbId("movie", carsTmdbId, 1, 1, {
           title,
           year,
+          forceRefresh,
         });
         if (fastfluxSources.length === 0) {
           fastfluxSources = await resolveFastfluxSourcesByTmdbId("tv", carsTmdbId, 1, 1, {
             title,
             year,
+            forceRefresh,
           });
         }
       } catch {
@@ -15983,11 +15995,13 @@ async function handleZenixSource(req, res, requestUrl) {
       sources = await resolveFastfluxSourcesByTmdbId(mediaType, tmdbId, season, episode, {
         title,
         year,
+        forceRefresh,
       });
       if (sources.length === 0 && cleanedTitle && cleanedTitle !== title) {
         sources = await resolveFastfluxSourcesByTmdbId(mediaType, tmdbId, season, episode, {
           title: cleanedTitle,
           year,
+          forceRefresh,
         });
       }
       if (sources.length === 0 && tmdbId <= 0 && title.length >= 2) {
@@ -16008,11 +16022,13 @@ async function handleZenixSource(req, res, requestUrl) {
           sources = await resolveFastfluxSourcesByTmdbId(altType, altTmdbId, season, episode, {
             title,
             year,
+            forceRefresh,
           });
           if (sources.length === 0 && cleanedTitle && cleanedTitle !== title) {
             sources = await resolveFastfluxSourcesByTmdbId(altType, altTmdbId, season, episode, {
               title: cleanedTitle,
               year,
+              forceRefresh,
             });
           }
           if (sources.length > 0) {

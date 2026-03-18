@@ -1,5 +1,5 @@
 const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260318-c372";
+const ZENIX_BUILD_VERSION = "20260318-c375";
 const STORAGE_KEY = "zenix-progress-v4";
 const COVER_CACHE_KEY = "zenix-cover-cache-v1";
 const LOCAL_PLAY_KEY = "zenix-local-plays-v1";
@@ -14875,12 +14875,13 @@ async function loadEpisodeStream(
 }
 
 
-async function collectRepairSourcesForItem(item, season = 1, episode = 1) {
+async function collectRepairSourcesForItem(item, season = 1, episode = 1, options = {}) {
   if (!item) {
     return [];
   }
   const safeSeason = Math.max(1, Number(season || 1));
   const safeEpisode = Math.max(1, Number(episode || 1));
+  const forceExternal = Boolean(options?.forceExternal);
 
   if (item.type !== "tv") {
     if (item.isExternal) {
@@ -14896,7 +14897,7 @@ async function collectRepairSourcesForItem(item, season = 1, episode = 1) {
     const baseSources = extractSources(payload);
     const autoMergedSources = appendAutoZenixRelaySources(baseSources);
     const ownedMergedSources = await appendZenixOwnedSources(item, 1, 1, autoMergedSources);
-    const nakiosMerged = await appendNakiosSources(item, 1, 1, ownedMergedSources);
+    const nakiosMerged = await appendNakiosSources(item, 1, 1, ownedMergedSources, { force: forceExternal });
     const filmer2Merged = await appendFilmer2Sources(item, 1, 1, nakiosMerged);
     return filterMovieSourcesForFrench(filmer2Merged);
   }
@@ -14970,7 +14971,7 @@ async function autoRepairSourcesForPlayback(options = {}) {
   }
   setPlayerLoading(true, "Reparation automatique...");
   setPlayerStatus("Reparation automatique en cours...");
-  const sources = await collectRepairSourcesForItem(item, season, episode);
+  const sources = await collectRepairSourcesForItem(item, season, episode, { forceExternal: true });
   if (!Array.isArray(sources) || sources.length === 0) {
     return { ok: false, pending: isLikelyRecentPendingUpload(item) };
   }
@@ -15040,7 +15041,8 @@ async function runPlayerRepair() {
   if (refs.playerRepairStatus) {
     refs.playerRepairStatus.textContent = "Reparation en cours... ajout de lecteurs";
   }
-  const sources = await collectRepairSourcesForItem(item, season, episode);
+  await refreshGateToken({ force: true }).catch(() => {});
+  const sources = await collectRepairSourcesForItem(item, season, episode, { forceExternal: true });
   if (!Array.isArray(sources) || sources.length === 0) {
     const pending = isLikelyRecentPendingUpload(item);
     const message = pending
@@ -15516,7 +15518,7 @@ function isFastfluxSourceEntry(entry) {
   return url.includes("fastflux.xyz") || url.includes("cdn.fastflux.xyz");
 }
 
-async function appendNakiosSources(item, season, episode, sources) {
+async function appendNakiosSources(item, season, episode, sources, options = {}) {
   const base = Array.isArray(sources) ? sources.slice() : [];
   if (!item) {
     return base;
@@ -15538,6 +15540,9 @@ async function appendNakiosSources(item, season, episode, sources) {
     season: String(safeSeason),
     episode: String(safeEpisode),
   });
+  if (options.force === true) {
+    params.set("force", "1");
+  }
   if (externalKey) {
     params.set("externalKey", externalKey);
   }
