@@ -1,5 +1,5 @@
 const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260318-c349";
+const ZENIX_BUILD_VERSION = "20260318-c350";
 const STORAGE_KEY = "zenix-progress-v4";
 const COVER_CACHE_KEY = "zenix-cover-cache-v1";
 const LOCAL_PLAY_KEY = "zenix-local-plays-v1";
@@ -568,7 +568,7 @@ themeFilters: {
     source: "auto",
     country: "France",
     query: "",
-    limit: 26,
+    limit: 0,
     countries: [],
     searchTimer: 0,
     panelOpen: false,
@@ -11533,11 +11533,7 @@ async function ensureTvChannels(options = {}) {
     const payload = await fetchJson(endpoint, { timeoutMs: 9000, noCache: true });
     const list = Array.isArray(payload?.data) ? payload.data : Array.isArray(payload?.channels) ? payload.channels : [];
     const normalized = list.map(normalizeTvChannel).filter(Boolean);
-    const tntOnly = normalized.filter((entry) => {
-      const order = Number(entry?.order || 0);
-      return order > 0 && order <= 26;
-    });
-    state.tv.list = tntOnly.length > 0 ? tntOnly : normalized;
+    state.tv.list = normalized;
     if (Array.isArray(payload?.meta?.countries)) {
       state.tv.countries = payload.meta.countries.map((entry) => String(entry || "").trim()).filter(Boolean);
     }

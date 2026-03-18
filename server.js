@@ -1371,34 +1371,35 @@ async function getIptvOrgFrChannels(options = {}) {
 
   const queryKey = normalizeTitleKey(options.query || "");
   const results = [];
+  const tntSlots = IPTV_TNT_CHANNELS.slice();
 
-  IPTV_TNT_CHANNELS.forEach((slot) => {
-    const match = frChannels.find((entry) => matchesChannelNames(entry, slot.names));
-    if (!match) {
+  frChannels.forEach((channel, index) => {
+    const channelId = String(channel?.id || "").trim();
+    if (!channelId) {
       return;
     }
-    const channelId = String(match?.id || "").trim();
     const stream = pickBestStream(streamsByChannel.get(channelId) || []);
     if (!stream || !stream.url) {
       return;
     }
     const url = String(stream.url || "").trim();
-    const metaName = String(match.name || "").trim();
+    const metaName = String(channel.name || "").trim();
     if (queryKey) {
-      const haystack = `${metaName} ${match.alt_names ? match.alt_names.join(" ") : ""}`;
+      const haystack = `${metaName} ${channel.alt_names ? channel.alt_names.join(" ") : ""}`;
       if (!normalizeTitleKey(haystack).includes(queryKey)) {
         return;
       }
     }
+    const tntMatch = tntSlots.find((slot) => matchesChannelNames(channel, slot.names));
     const entry = normalizeTvChannelEntry({
       id: `iptv_${channelId}`,
-      name: metaName || slot.names[0],
+      name: metaName || channelId,
       url,
       type: /\.m3u8($|[?#])/i.test(url) ? "hls" : /youtube|embed|player/i.test(url) ? "embed" : "mp4",
-      logo: String(match.logo || "").trim(),
-      group: "TNT",
+      logo: String(channel.logo || "").trim(),
+      group: tntMatch ? "TNT" : String(channel.categories?.[0] || "France").trim(),
       country: "France",
-      order: slot.order,
+      order: tntMatch ? tntMatch.order : 1000 + index,
     });
     if (entry) {
       results.push(entry);

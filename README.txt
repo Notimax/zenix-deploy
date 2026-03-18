@@ -95,6 +95,12 @@ LATEST FIX LOG (2026-03-18, c349)
 - Aleatoire now has a dedicated Nakios-style view (pick Film/Serie/Anime + animation + result card).
 - Cache-bust bumped to 20260318-c349.
 
+LATEST FIX LOG (2026-03-18, c350)
+- TV Directs now returns all FR channels (not just TNT 1-26); TNT order stays on top.
+- Mobile TV Direct controls are forced to full width (no overflow on search/inputs).
+- Client no longer caps TV Direct channels to 26.
+- Cache-bust bumped to 20260318-c350.
+
 LATEST FIX LOG (2026-03-17, c326)
 - Mobile navbar redesigned as a full-screen streaming menu (premium overlay).
 - Mobile nav now occupies the full viewport with slide-up animation.

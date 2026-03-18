@@ -7396,6 +7396,18 @@ body.backup-locked .back-to-top {
   font-size: 16px;
 }
 
+.tv-controls select,
+.tv-controls input[type="search"] {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.tv-controls .field,
+.tv-controls .tv-search {
+  min-width: 0;
+}
+
 .tv-panel-toggle {
   display: none;
   align-self: flex-start;
@@ -7720,9 +7732,12 @@ body.backup-locked .back-to-top {
     overflow-x: hidden;
   }
   .tv-controls {
+    display: grid;
+    grid-template-columns: 1fr;
     gap: 10px;
   }
-  .tv-controls .field {
+  .tv-controls .field,
+  .tv-controls .tv-search {
     width: 100%;
   }
   .tv-panel-toggle {
