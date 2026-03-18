@@ -1619,3 +1619,7 @@ FASTFLUX VALIDATION + TV VIEWPORT (2026-03-18, c370)
 SOURCE GATE RELAX (2026-03-18, c371)
 - /api/zenix-source and /api/zenix-anime-source are now gate-exempt to prevent “adblock_required” stalls.
 - Fixes “chargement infini” when gate token fails on mobile/desktop.
+
+FASTFLUX CDN REWRITE (2026-03-18, c372)
+- FastFlux CDN URLs (cdn.fastflux.xyz) are rewritten to fastflux.xyz/api/video_proxy.php?file=...
+- Prevents CDN 403 hotlink blocks that caused “chargement infini”.

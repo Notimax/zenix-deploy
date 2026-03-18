@@ -8469,10 +8469,13 @@ function buildFastfluxSourceEntry(sourceRow, index = 0) {
   if (!sourceRow || typeof sourceRow !== "object") {
     return null;
   }
-  const streamUrl = String(sourceRow?.url || sourceRow?.stream_url || "").trim();
-  if (!streamUrl) {
+  const rawStreamUrl = String(sourceRow?.url || sourceRow?.stream_url || "").trim();
+  if (!rawStreamUrl) {
     return null;
   }
+  const formatHint = String(sourceRow?.type || sourceRow?.format || "").trim();
+  const originalFormat = inferOwnedSourceFormat(rawStreamUrl, formatHint || "mp4");
+  const streamUrl = rewriteFastfluxCdnUrl(rawStreamUrl);
   let fastfluxHost = "";
   try {
     fastfluxHost = new URL(streamUrl).hostname.toLowerCase();
@@ -8483,8 +8486,7 @@ function buildFastfluxSourceEntry(sourceRow, index = 0) {
     fastfluxHost.endsWith("fastflux.xyz") || fastfluxHost.endsWith("cdn.fastflux.xyz");
   const language = normalizePidoovLanguage(sourceRow?.language || sourceRow?.lang || "") || "VF";
   const quality = normalizeFastfluxQuality(sourceRow?.quality || sourceRow?.qlt || "");
-  const formatHint = String(sourceRow?.type || sourceRow?.format || "").trim();
-  const format = inferOwnedSourceFormat(streamUrl, formatHint || "mp4");
+  const format = originalFormat === "unknown" ? inferOwnedSourceFormat(streamUrl, formatHint || "mp4") : originalFormat;
   const isAlreadyProxied = /\/api\/hls-proxy(?:-mobile)?\?url=/i.test(streamUrl);
   const isEmbed = format === "embed";
   const looksHls = format === "hls" || /\.m3u8($|[?#])/i.test(streamUrl) || /hls/i.test(formatHint);
@@ -11426,6 +11428,27 @@ function normalizeProviderName(value) {
     .trim()
     .toLowerCase()
     .replace(/[\s-]+/g, "_");
+}
+
+function rewriteFastfluxCdnUrl(rawUrl) {
+  const input = String(rawUrl || "").trim();
+  if (!input) {
+    return "";
+  }
+  let parsed;
+  try {
+    parsed = new URL(input);
+  } catch {
+    return input;
+  }
+  const host = String(parsed.hostname || "").toLowerCase();
+  if (host.endsWith("cdn.fastflux.xyz")) {
+    const file = parsed.pathname || "";
+    if (file) {
+      return `${FASTFLUX_BASE}/api/video_proxy.php?file=${encodeURIComponent(file)}`;
+    }
+  }
+  return input;
 }
 
 function sanitizeDomainLike(value) {
