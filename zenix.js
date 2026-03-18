@@ -1,5 +1,5 @@
 const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260318-c357";
+const ZENIX_BUILD_VERSION = "20260318-c358";
 const STORAGE_KEY = "zenix-progress-v4";
 const COVER_CACHE_KEY = "zenix-cover-cache-v1";
 const LOCAL_PLAY_KEY = "zenix-local-plays-v1";
@@ -18310,8 +18310,13 @@ async function startPlayerSource(source, resumeTime, token, options = {}) {
     }
   }
   let embedReadyTimeout = mobilePlayback ? Math.min(EMBED_READY_TIMEOUT_MS, MOBILE_EMBED_READY_TIMEOUT_MS) : EMBED_READY_TIMEOUT_MS;
+  const isFastfluxSource = Boolean(source?.isFastflux) || /fastflux/i.test(String(source?.source_name || ""));
   let directReadyTimeout = mobilePlayback ? Math.min(VIDEO_READY_TIMEOUT_MS, MOBILE_VIDEO_READY_TIMEOUT_MS) : VIDEO_READY_TIMEOUT_MS;
   let bootstrapTimeout = mobilePlayback ? MOBILE_PLAYBACK_BOOTSTRAP_TIMEOUT_MS : 4200;
+  if (mobilePlayback && isFastfluxSource && !isEmbedSource(source)) {
+    directReadyTimeout = Math.max(directReadyTimeout, 12000);
+    bootstrapTimeout = Math.max(bootstrapTimeout, 7000);
+  }
   if (probeTimeoutMs > 0) {
     embedReadyTimeout = Math.min(embedReadyTimeout, probeTimeoutMs);
     directReadyTimeout = Math.min(directReadyTimeout, probeTimeoutMs);
@@ -18368,7 +18373,15 @@ async function startPlayerSource(source, resumeTime, token, options = {}) {
           }
           video.src = streamUrl;
           video.load();
-          await waitVideoReady(video, directReadyTimeout);
+          let readyError = null;
+          try {
+            await waitVideoReady(video, directReadyTimeout);
+          } catch (err) {
+            readyError = err;
+          }
+          if (readyError && !(mobilePlayback && !probeOnly)) {
+            throw readyError;
+          }
         }
 
         if (token !== state.playToken) {

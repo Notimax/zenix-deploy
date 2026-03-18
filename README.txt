@@ -135,6 +135,11 @@ LATEST FIX LOG (2026-03-18, c357)
 - Debug-only titles (Scream 7 / Banlieusards 3 / Cars) now fall back to normal sources if debug sources are missing.
 - Cache-bust bumped to 20260318-c357.
 
+LATEST FIX LOG (2026-03-18, c358)
+- Mobile FastFlux playback now waits longer before failing, and tolerates slow metadata on MP4.
+- Prevents “URL not read” on iPhone when the file responds slowly.
+- Cache-bust bumped to 20260318-c358.
+
 LATEST FIX LOG (2026-03-17, c326)
 - Mobile navbar redesigned as a full-screen streaming menu (premium overlay).
 - Mobile nav now occupies the full viewport with slide-up animation.
