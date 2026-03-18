@@ -1,5 +1,5 @@
 const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260318-c366";
+const ZENIX_BUILD_VERSION = "20260318-c367";
 const STORAGE_KEY = "zenix-progress-v4";
 const COVER_CACHE_KEY = "zenix-cover-cache-v1";
 const LOCAL_PLAY_KEY = "zenix-local-plays-v1";
@@ -292,6 +292,8 @@ const FASTFLUX_SMARTLINK_URL = "https://walkeralacrityfavorite.com/k1kzat14?key=
 const FASTFLUX_SMARTLINK_SESSION_KEY = "zenix-fastflux-smartlink-v1";
 const FASTFLUX_SMARTLINK_TTL_MS = 2 * 60 * 60 * 1000;
 const FASTFLUX_SMARTLINK_COOKIE = "zenix_fastflux=1";
+const FASTFLUX_SMARTLINK_PER_CONTENT = true;
+const FASTFLUX_SMARTLINK_CONTENT_KEY = "zenix-fastflux-content";
 const ADBLOCK_MONITOR_INTERVAL_MS = 8500;
 const ADBLOCK_BOOT_DELAY_MS = 950;
 const ADBLOCK_CONFIRM_DELAY_MS = 160;
@@ -5542,7 +5544,29 @@ async function refreshGateToken(options = {}) {
   }
 }
 
-function hasFastfluxPromptSession() {
+function hasFastfluxPromptSession(contextKey = "") {
+  if (FASTFLUX_SMARTLINK_PER_CONTENT) {
+    if (!contextKey) {
+      return false;
+    }
+    try {
+      const cache = JSON.parse(sessionStorage.getItem(FASTFLUX_SMARTLINK_CONTENT_KEY) || "{}");
+      if (cache && cache[contextKey]) {
+        return true;
+      }
+    } catch {
+      // ignore
+    }
+    try {
+      const cache = JSON.parse(localStorage.getItem(FASTFLUX_SMARTLINK_CONTENT_KEY) || "{}");
+      if (cache && cache[contextKey]) {
+        return true;
+      }
+    } catch {
+      // ignore
+    }
+    return false;
+  }
   if (state.fastfluxSmartlinkGranted) {
     return true;
   }
@@ -5585,7 +5609,24 @@ function hasFastfluxPromptSession() {
   return false;
 }
 
-function markFastfluxPromptSession() {
+function markFastfluxPromptSession(contextKey = "") {
+  if (FASTFLUX_SMARTLINK_PER_CONTENT && contextKey) {
+    try {
+      const cache = JSON.parse(sessionStorage.getItem(FASTFLUX_SMARTLINK_CONTENT_KEY) || "{}");
+      cache[contextKey] = Date.now();
+      sessionStorage.setItem(FASTFLUX_SMARTLINK_CONTENT_KEY, JSON.stringify(cache));
+    } catch {
+      // ignore
+    }
+    try {
+      const cache = JSON.parse(localStorage.getItem(FASTFLUX_SMARTLINK_CONTENT_KEY) || "{}");
+      cache[contextKey] = Date.now();
+      localStorage.setItem(FASTFLUX_SMARTLINK_CONTENT_KEY, JSON.stringify(cache));
+    } catch {
+      // ignore
+    }
+    return;
+  }
   state.fastfluxSmartlinkGranted = true;
   if (typeof window !== "undefined") {
     window.__zenixFastfluxGranted = true;
@@ -5660,8 +5701,8 @@ function resolveFastfluxGate(result) {
   }
 }
 
-function requestFastfluxSmartlink() {
-  if (hasFastfluxPromptSession()) {
+function requestFastfluxSmartlink(contextKey = "") {
+  if (hasFastfluxPromptSession(contextKey)) {
     return Promise.resolve(true);
   }
   if (!refs.fastfluxGate) {
@@ -5704,7 +5745,9 @@ function initFastfluxGate() {
       if (!opened) {
         setFastfluxGateStatus("Popup bloque. Lecture demarre quand meme.");
       }
-      markFastfluxPromptSession();
+      if (!FASTFLUX_SMARTLINK_PER_CONTENT) {
+        markFastfluxPromptSession();
+      }
       setFastfluxGateVisible(false);
       window.setTimeout(() => {
         resolveFastfluxGate(true);
@@ -14301,6 +14344,7 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
         allowPremiumRescue,
         probeTimeoutMs: isLikelyMobileDevice() ? MOBILE_SOURCE_VALIDATION_TIMEOUT_MS : SOURCE_VALIDATION_TIMEOUT_MS,
         itemId: selectedItem.id,
+        mediaType: "movie",
       };
       try {
         if (isLikelyMobileDevice()) {
@@ -14527,6 +14571,7 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
       skipPremiumFallback: true,
       allowPremiumRescue,
       itemId: selectedItem.id,
+      mediaType: "movie",
     });
   } catch (firstError) {
     if (token !== state.playToken) {
@@ -14543,6 +14588,7 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
       skipPremiumFallback: true,
       allowPremiumRescue,
       itemId: selectedItem.id,
+      mediaType: "movie",
     });
     showToast("Source film actualisee automatiquement.");
   }
@@ -14701,6 +14747,9 @@ async function loadEpisodeStream(
         skipPremiumFallback: true,
         allowPremiumRescue: true,
         itemId: selectedItem.id,
+        mediaType: "tv",
+        season: safeSeason,
+        episode: safeEpisode,
       });
     } catch (error) {
       if (state.allEpisodeSources.length <= state.sourcePool.length) {
@@ -14716,6 +14765,9 @@ async function loadEpisodeStream(
         skipPremiumFallback: true,
         allowPremiumRescue: true,
         itemId: selectedItem.id,
+        mediaType: "tv",
+        season: safeSeason,
+        episode: safeEpisode,
       });
       showToast("Bascule auto vers une source plus compatible.");
     }
@@ -16977,6 +17029,8 @@ function rememberSourceSuccess(source, itemId = 0) {
 async function playFromSourcePoolWithValidation(resumeTime, token, options = {}) {
   const shouldValidate = SOURCE_VALIDATION_ENABLED && options?.skipValidation !== true;
   const mobileGuard = isLikelyMobileDevice();
+  const fastfluxContextKey = buildFastfluxContextKey(options);
+  const enrichedOptions = fastfluxContextKey ? { ...options, fastfluxContextKey } : options;
   if (mobileGuard && shouldValidate) {
     state.sourceValidationActive = false;
     try {
@@ -16985,6 +17039,7 @@ async function playFromSourcePoolWithValidation(resumeTime, token, options = {})
         strictIndex: options?.strictIndex,
         skipPremiumFallback: options?.skipPremiumFallback,
         allowPremiumRescue: options?.allowPremiumRescue,
+        fastfluxContextKey,
       });
     } catch (firstError) {
       if (options?.autoRepairTried) {
@@ -17005,6 +17060,7 @@ async function playFromSourcePoolWithValidation(resumeTime, token, options = {})
           skipPremiumFallback: options?.skipPremiumFallback,
           allowPremiumRescue: options?.allowPremiumRescue,
           autoRepairTried: true,
+          fastfluxContextKey,
         });
       }
       const pending = Boolean(repairResult?.pending);
@@ -17017,7 +17073,7 @@ async function playFromSourcePoolWithValidation(resumeTime, token, options = {})
     }
   }
   if (!shouldValidate || state.sourcePool.length <= 1) {
-    return playFromSourcePoolWithRescue(resumeTime, token, options);
+    return playFromSourcePoolWithRescue(resumeTime, token, enrichedOptions);
   }
   const defaultProbeTimeout = isLikelyMobileDevice()
     ? MOBILE_SOURCE_VALIDATION_TIMEOUT_MS
@@ -17050,6 +17106,7 @@ async function playFromSourcePoolWithValidation(resumeTime, token, options = {})
         probeTimeoutMs,
         probeOnly: true,
         skipEmbeds: SOURCE_VALIDATION_SKIP_EMBEDS,
+        fastfluxContextKey,
       });
       if (token !== state.playToken) {
         return;
@@ -17061,7 +17118,10 @@ async function playFromSourcePoolWithValidation(resumeTime, token, options = {})
       state.sourceValidationActive = false;
       renderPlayerSourceOptions();
       try {
-        await playFromSourcePool(resumeTime, token, sourceIndex, { strictIndex: true });
+        await playFromSourcePool(resumeTime, token, sourceIndex, {
+          strictIndex: true,
+          fastfluxContextKey,
+        });
         if (token !== state.playToken) {
           return;
         }
@@ -17089,6 +17149,7 @@ async function playFromSourcePoolWithValidation(resumeTime, token, options = {})
         startIndex: 0,
         strictIndex: false,
         skipPremiumFallback: false,
+        fastfluxContextKey,
       });
       return;
     } catch {
@@ -17563,7 +17624,7 @@ async function switchPlayerSource(index) {
     state.sourceIndex = safeIndex;
     renderPlayerSourceOptions();
     if (error && error.code === "FASTFLUX_CANCELLED") {
-      setPlayerStatus("Lecteur FastFlux annule. Choisis la source FastFlux pour relancer.", true);
+      setPlayerStatus("Lecteur FastFlux annule. Pour relancer, re-selectionne la source FastFlux.", true);
       showToast("Lecteur FastFlux annule.");
       return;
     }
@@ -17651,6 +17712,26 @@ function resolveLanguageFromSignals(signals) {
     return "VO";
   }
   return "";
+}
+
+function buildFastfluxContextKey(options = {}) {
+  const id = Number(options?.itemId || state.nowPlaying?.id || state.selectedDetailId || 0);
+  if (!id) {
+    return "";
+  }
+  const mediaType = String(options?.mediaType || state.nowPlaying?.type || "").toLowerCase();
+  if (mediaType === "tv") {
+    const season = Math.max(
+      1,
+      Number(options?.season || refs.playerSeasonSelect?.value || state.nowPlaying?.season || 1)
+    );
+    const episode = Math.max(
+      1,
+      Number(options?.episode || refs.playerEpisodeSelect?.value || state.nowPlaying?.episode || 1)
+    );
+    return `tv:${id}:${season}:${episode}`;
+  }
+  return `movie:${id}`;
 }
 
 function parseLanguageFromSourceName(value) {
@@ -18629,15 +18710,19 @@ async function startPlayerSource(source, resumeTime, token, options = {}) {
   let embedReadyTimeout = mobilePlayback ? Math.min(EMBED_READY_TIMEOUT_MS, MOBILE_EMBED_READY_TIMEOUT_MS) : EMBED_READY_TIMEOUT_MS;
   const isFastfluxSource = Boolean(source?.isFastflux) || /fastflux/i.test(String(source?.source_name || ""));
   if (isFastfluxSource && !probeOnly && !state.sourceValidationActive) {
+    const fastfluxContextKey = options?.fastfluxContextKey || buildFastfluxContextKey(options);
     setPlayerStatus("Validation FastFlux...");
-    const approved = await requestFastfluxSmartlink();
+    const approved = await requestFastfluxSmartlink(fastfluxContextKey);
     if (!approved) {
       setPlayerLoading(false);
       const err = new Error("Fastflux smartlink cancelled");
       err.code = "FASTFLUX_CANCELLED";
-      setPlayerStatus("Lecteur FastFlux annule. Choisis la source FastFlux pour relancer.", true);
+      setPlayerStatus("Lecteur FastFlux annule. Pour relancer, re-selectionne la source FastFlux.", true);
       showToast("Lecteur FastFlux annule.");
       throw err;
+    }
+    if (FASTFLUX_SMARTLINK_PER_CONTENT && fastfluxContextKey) {
+      markFastfluxPromptSession(fastfluxContextKey);
     }
   }
   let directReadyTimeout = mobilePlayback ? Math.min(VIDEO_READY_TIMEOUT_MS, MOBILE_VIDEO_READY_TIMEOUT_MS) : VIDEO_READY_TIMEOUT_MS;

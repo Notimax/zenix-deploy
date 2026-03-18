@@ -1592,3 +1592,8 @@ FASTFLUX SMARTLINK PERSISTENCE (2026-03-18, c365)
 FASTFLUX CANCEL FEEDBACK (2026-03-18, c366)
 - Cancelling the FastFlux gate now shows a clear message and stops fallback playback; user can reselect FastFlux to retry.
 - Cache-bust bumped to 20260318-c366.
+
+FASTFLUX PER-FILM POPUP (2026-03-18, c367)
+- FastFlux smartlink now reappears for each new content (per-film/session map).
+- Cancel now shows a clear message to reselect FastFlux.
+- Cache-bust bumped to 20260318-c367.
