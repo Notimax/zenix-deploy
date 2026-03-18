@@ -125,6 +125,12 @@ Last update: 2026-03-16
 - Catalog render budgets reduced for smoother scroll on mobile/low-end devices.
 - Cache-bust updated to `20260318-c347`.
 
+## c348 follow-up (2026-03-18)
+- Mobile validation now uses a longer probe timeout (6.5s) to avoid false negatives on slow starts.
+- Mobile playback bootstrap window increased (4.2s) for iPhone/Safari stability.
+- Probe-only validation no longer calls `video.play()` (avoids iOS autoplay blocks during validation).
+- Cache-bust updated to `20260318-c348`.
+
 ## c316 follow-up (2026-03-16)
 - HLS proxy now preserves referer across redirects; playlist rewrites use the final URL (FastFlux CDN fix).
 - External FastFlux items no longer swap to internal duplicates (FastFlux stays preferred).

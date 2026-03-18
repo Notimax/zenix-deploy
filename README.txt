@@ -83,6 +83,12 @@ LATEST FIX LOG (2026-03-18, c347)
 - Catalog rendering tuned for smoother scroll (smaller chunks + lower warmup budgets).
 - Cache-bust bumped to 20260318-c347.
 
+LATEST FIX LOG (2026-03-18, c348)
+- Mobile validation now uses a longer probe timeout (6.5s) to avoid false negatives on slow starts.
+- Mobile playback bootstrap window increased (4.2s) for iPhone/Safari stability.
+- Probe-only validation no longer calls `video.play()` (avoids iOS autoplay blocks during validation).
+- Cache-bust bumped to 20260318-c348.
+
 LATEST FIX LOG (2026-03-17, c326)
 - Mobile navbar redesigned as a full-screen streaming menu (premium overlay).
 - Mobile nav now occupies the full viewport with slide-up animation.

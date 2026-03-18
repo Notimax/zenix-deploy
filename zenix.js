@@ -1,5 +1,5 @@
 const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260318-c347";
+const ZENIX_BUILD_VERSION = "20260318-c348";
 const STORAGE_KEY = "zenix-progress-v4";
 const COVER_CACHE_KEY = "zenix-cover-cache-v1";
 const LOCAL_PLAY_KEY = "zenix-local-plays-v1";
@@ -164,7 +164,7 @@ const PLAYBACK_STARTUP_STALL_MS = 2200;
 const PLAYBACK_STATUS_RECOVERY_MS = 1500;
 const PLAYBACK_HEALTH_FIRST_DELAY_MS = 1300;
 const PLAYBACK_HEALTH_REPEAT_DELAY_MS = 1800;
-const MOBILE_PLAYBACK_BOOTSTRAP_TIMEOUT_MS = 2300;
+const MOBILE_PLAYBACK_BOOTSTRAP_TIMEOUT_MS = 4200;
 const MOBILE_VIDEO_READY_TIMEOUT_MS = 7000;
 const MOBILE_EMBED_READY_TIMEOUT_MS = 6000;
 const EMBED_STALL_SWITCH_MS = 7000;
@@ -177,6 +177,7 @@ const MOBILE_FALLBACK_LOCK_MS = 120000;
 const MOBILE_HARD_FREEZE_AFTER_STABLE_MS = 9500;
 const SOURCE_VALIDATION_ENABLED = true;
 const SOURCE_VALIDATION_TIMEOUT_MS = 3600;
+const MOBILE_SOURCE_VALIDATION_TIMEOUT_MS = 6500;
 const SOURCE_VALIDATION_MAX_TRIES = 8;
 const SOURCE_VALIDATION_SKIP_EMBEDS = true;
 const PREVIEW_ENABLED = true;
@@ -13827,7 +13828,7 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
       startIndex: 0,
       skipPremiumFallback: true,
       allowPremiumRescue,
-      probeTimeoutMs: isLikelyMobileDevice() ? 6000 : SOURCE_VALIDATION_TIMEOUT_MS,
+      probeTimeoutMs: isLikelyMobileDevice() ? MOBILE_SOURCE_VALIDATION_TIMEOUT_MS : SOURCE_VALIDATION_TIMEOUT_MS,
       itemId: selectedItem.id,
     };
     try {
@@ -16492,7 +16493,10 @@ async function playFromSourcePoolWithValidation(resumeTime, token, options = {})
   if (!shouldValidate || state.sourcePool.length <= 1) {
     return playFromSourcePoolWithRescue(resumeTime, token, options);
   }
-  const probeTimeoutMs = Math.max(0, Number(options?.probeTimeoutMs || SOURCE_VALIDATION_TIMEOUT_MS));
+  const defaultProbeTimeout = isLikelyMobileDevice()
+    ? MOBILE_SOURCE_VALIDATION_TIMEOUT_MS
+    : SOURCE_VALIDATION_TIMEOUT_MS;
+  const probeTimeoutMs = Math.max(0, Number(options?.probeTimeoutMs ?? defaultProbeTimeout));
 
   const sourceIndexes = state.sourcePool.map((_entry, index) => index);
   const primary = SOURCE_VALIDATION_SKIP_EMBEDS
@@ -18108,6 +18112,13 @@ async function startPlayerSource(source, resumeTime, token, options = {}) {
 
         if (!useEmbed && resumeTime > 5 && Number.isFinite(video.duration) && resumeTime < video.duration - 8) {
           video.currentTime = resumeTime;
+        }
+
+        if (!useEmbed && probeOnly) {
+          sourceStarted = true;
+          state.ignoreVideoErrorUntil = 0;
+          markSourceHostResult(source?.host, true);
+          return;
         }
 
         if (!useEmbed) {
