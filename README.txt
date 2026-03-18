@@ -1645,3 +1645,7 @@ FASTFLUX GATE LOCK (2026-03-18, c377)
 
 REPAIR HARD RESET (2026-03-18, c378)
 - Repair now clears local playback locks/caches and bypasses FastFlux priority to test all sources.
+
+REPAIR CACHE FALLBACK (2026-03-18, c379)
+- /api/zenix-source now falls back to stored repair sources when FastFlux API returns empty.
+- Repair is more reliable after leaving/returning to a title.

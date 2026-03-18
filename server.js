@@ -2094,6 +2094,22 @@ function normalizeRepairSources(list) {
   return out.slice(0, REPAIR_STORE_MAX_SOURCES);
 }
 
+function getRepairSourcesFallback(mediaType, mediaId, season = 1, episode = 1) {
+  const safeId = toInt(mediaId, 0, 0, 999999999);
+  if (!safeId) {
+    return [];
+  }
+  const type = mediaType === "tv" ? "tv" : "movie";
+  const key =
+    type === "tv"
+      ? `tv:${safeId}:s${Math.max(1, Number(season || 1))}e${Math.max(1, Number(episode || 1))}`
+      : `movie:${safeId}`;
+  const data = loadRepairStore();
+  const entry = data.repairs && typeof data.repairs === "object" ? data.repairs[key] : null;
+  const fallback = normalizeRepairSources(entry?.sources || []);
+  return Array.isArray(fallback) ? fallback : [];
+}
+
 function loadRepairStore() {
   const data = loadAdminData(true);
   if (!data.repairs || typeof data.repairs !== "object") {
@@ -16060,7 +16076,14 @@ async function handleZenixSource(req, res, requestUrl) {
     }
   }
 
-  const warning = !USE_FASTFLUX ? "FastFlux indisponible." : "";
+  let warning = !USE_FASTFLUX ? "FastFlux indisponible." : "";
+  if (sources.length === 0 && mediaId > 0) {
+    const fallback = getRepairSourcesFallback(mediaType, mediaId, season, episode);
+    if (fallback.length > 0) {
+      sources = fallback;
+      warning = warning ? `${warning} Sources recuperees du cache local.` : "Sources recuperees du cache local.";
+    }
+  }
   sendJson(res, 200, {
     apiVersion: "zenix-source-v1",
     type: "success",

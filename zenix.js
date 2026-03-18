@@ -1,5 +1,5 @@
 const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260318-c378";
+const ZENIX_BUILD_VERSION = "20260318-c379";
 const STORAGE_KEY = "zenix-progress-v4";
 const COVER_CACHE_KEY = "zenix-cover-cache-v1";
 const LOCAL_PLAY_KEY = "zenix-local-plays-v1";
@@ -15538,6 +15538,10 @@ async function appendNakiosSources(item, season, episode, sources, options = {})
     season: String(safeSeason),
     episode: String(safeEpisode),
   });
+  const mediaId = Number(item?.id || 0);
+  if (Number.isFinite(mediaId) && mediaId > 0) {
+    params.set("mediaId", String(mediaId));
+  }
   if (options.force === true) {
     params.set("force", "1");
   }
