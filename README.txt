@@ -1638,3 +1638,7 @@ REPAIR BUTTON HARDEN + FORCE REFRESH (2026-03-18, c375)
 
 FASTFLUX PROBE BYPASS (2026-03-18, c376)
 - Server probe no longer drops FastFlux sources (keeps playback even if HEAD/GET probe fails).
+
+FASTFLUX GATE LOCK (2026-03-18, c377)
+- FastFlux popup can no longer be dismissed via "Annuler" or backdrop click.
+- Only the "OUI, OUVRIR" button continues.

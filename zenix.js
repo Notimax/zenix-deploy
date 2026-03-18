@@ -1,5 +1,5 @@
 const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260318-c375";
+const ZENIX_BUILD_VERSION = "20260318-c377";
 const STORAGE_KEY = "zenix-progress-v4";
 const COVER_CACHE_KEY = "zenix-cover-cache-v1";
 const LOCAL_PLAY_KEY = "zenix-local-plays-v1";
@@ -5734,10 +5734,10 @@ function initFastfluxGate() {
     resolveFastfluxGate(false);
   };
   if (refs.fastfluxGateCloseBtn) {
-    bindFastPress(refs.fastfluxGateCloseBtn, handleCancel);
+    // close disabled: gate can only be dismissed by "Continuer"
   }
   if (refs.fastfluxGateCancelBtn) {
-    bindFastPress(refs.fastfluxGateCancelBtn, handleCancel);
+    // cancel disabled: gate can only be dismissed by "Continuer"
   }
   if (refs.fastfluxGateContinueBtn) {
     bindFastPress(refs.fastfluxGateContinueBtn, () => {
@@ -5754,11 +5754,7 @@ function initFastfluxGate() {
       }, 120);
     });
   }
-  refs.fastfluxGate.addEventListener("click", (event) => {
-    if (event.target === refs.fastfluxGate) {
-      handleCancel();
-    }
-  });
+  // backdrop click disabled to enforce explicit "Continuer"
 }
 
 async function primePlaybackGate(options = {}) {
