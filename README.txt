@@ -140,6 +140,13 @@ LATEST FIX LOG (2026-03-18, c358)
 - Prevents “URL not read” on iPhone when the file responds slowly.
 - Cache-bust bumped to 20260318-c358.
 
+LATEST FIX LOG (2026-03-18, c359)
+- iOS/mobile playback unlock added (pre-warms the video element on user gesture).
+- Mobile validation now skips probe-only and goes straight to real playback with auto-repair fallback.
+- Mobile auto-switch guard relaxed to avoid rapid source bouncing.
+- Cache-bust bumped to 20260318-c359.
+
+
 LATEST FIX LOG (2026-03-17, c326)
 - Mobile navbar redesigned as a full-screen streaming menu (premium overlay).
 - Mobile nav now occupies the full viewport with slide-up animation.

@@ -1,5 +1,5 @@
 const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260318-c358";
+const ZENIX_BUILD_VERSION = "20260318-c359";
 const STORAGE_KEY = "zenix-progress-v4";
 const COVER_CACHE_KEY = "zenix-cover-cache-v1";
 const LOCAL_PLAY_KEY = "zenix-local-plays-v1";
@@ -471,6 +471,8 @@ const state = {
   awaitingUserPlayUntil: 0,
   lastAutoSwitchAt: 0,
   lastAutoSwitchReason: "",
+  mobilePlaybackUnlocked: false,
+  mobileUnlockInFlight: false,
   mobileStablePlaybackAt: 0,
   lastSyncAt: null,
   refreshFeedTimer: null,
@@ -5531,6 +5533,44 @@ function isLikelyMobileDevice() {
 
 function isIOSDevice() {
   return /(iphone|ipod|ipad)/i.test(String(navigator.userAgent || ""));
+}
+
+async function unlockMobilePlayback(video = refs.playerVideo) {
+  if (!isLikelyMobileDevice() || !video) {
+    state.mobilePlaybackUnlocked = true;
+    return true;
+  }
+  if (state.mobilePlaybackUnlocked) {
+    return true;
+  }
+  if (state.mobileUnlockInFlight) {
+    return false;
+  }
+  state.mobileUnlockInFlight = true;
+  try {
+    const previousMuted = Boolean(video.muted);
+    const previousVolume = Number.isFinite(video.volume) ? video.volume : 1;
+    video.muted = true;
+    video.volume = 0;
+    video.playsInline = true;
+    video.setAttribute("playsinline", "");
+    video.setAttribute("webkit-playsinline", "");
+    try {
+      const playPromise = video.play();
+      if (playPromise && typeof playPromise.then === "function") {
+        await playPromise;
+      }
+    } catch {
+      // Ignore autoplay restrictions; we'll retry after user gesture.
+    }
+    video.pause();
+    video.muted = previousMuted;
+    video.volume = previousVolume;
+    state.mobilePlaybackUnlocked = true;
+    return true;
+  } finally {
+    state.mobileUnlockInFlight = false;
+  }
 }
 
 function getBackupBookmarkHint() {
@@ -13429,6 +13469,9 @@ async function openPlayer(id, options = {}) {
     showMessage("Lecture indisponible pour ce titre.", true);
     throw new Error("Item not found");
   }
+  await unlockMobilePlayback(refs.playerVideo).catch(() => {
+    // best effort; player will retry on user gesture
+  });
   await primePlaybackGate().catch(() => {
     // handled later if still blocked
   });
@@ -15761,14 +15804,14 @@ function startPlaybackGuard() {
   clearPlaybackGuard();
   const mobileGuard = isLikelyMobileDevice();
   const guardIntervalMs = mobileGuard ? Math.max(700, PLAYBACK_GUARD_INTERVAL_MS - 500) : PLAYBACK_GUARD_INTERVAL_MS;
-  const startupStallMs = mobileGuard ? Math.max(1300, PLAYBACK_STARTUP_STALL_MS - 1100) : PLAYBACK_STARTUP_STALL_MS;
+  const startupStallMs = mobileGuard ? Math.max(2200, PLAYBACK_STARTUP_STALL_MS) : PLAYBACK_STARTUP_STALL_MS;
   const statusRecoveryMs = mobileGuard
-    ? Math.max(900, PLAYBACK_STATUS_RECOVERY_MS - 800)
+    ? Math.max(2000, PLAYBACK_STATUS_RECOVERY_MS + 600)
     : PLAYBACK_STATUS_RECOVERY_MS;
-  const hardStallMs = mobileGuard ? Math.max(3200, PLAYBACK_STALL_HARD_MS - 1600) : PLAYBACK_STALL_HARD_MS;
-  const pausedStallMs = mobileGuard ? Math.max(3800, PLAYBACK_STALL_PAUSED_MS - 1800) : PLAYBACK_STALL_PAUSED_MS;
+  const hardStallMs = mobileGuard ? Math.max(5600, PLAYBACK_STALL_HARD_MS + 1300) : PLAYBACK_STALL_HARD_MS;
+  const pausedStallMs = mobileGuard ? Math.max(8200, PLAYBACK_STALL_PAUSED_MS + 2000) : PLAYBACK_STALL_PAUSED_MS;
   const fallbackStallMs = mobileGuard
-    ? Math.max(3000, startupStallMs + 700)
+    ? Math.max(5200, startupStallMs + 1800)
     : Math.max(4200, PLAYBACK_STARTUP_STALL_MS + 1800);
   const startupLoadingStatusPattern = /connexion source|chargement du flux|chargement de la source|fallback ios actif/;
   let trackedPlayToken = Number(state.playToken || 0);
@@ -15796,7 +15839,9 @@ function startPlaybackGuard() {
       return;
     }
     const autoSwitchCooldownActive =
-      mobileGuard && Date.now() - Number(state.lastAutoSwitchAt || 0) < MOBILE_AUTO_SWITCH_COOLDOWN_MS;
+      mobileGuard &&
+      state.lastAutoSwitchAt > 0 &&
+      Date.now() - Number(state.lastAutoSwitchAt || 0) < MOBILE_AUTO_SWITCH_COOLDOWN_MS;
     const hasNextCandidate = state.sourceIndex + 1 < state.sourcePool.length;
     const loadingTooLong =
       state.sourceLoading &&
@@ -15962,6 +16007,9 @@ function startPlaybackGuard() {
       startupLoadingStallWithAlternative ||
       statusDrivenRecovery ||
       prolongedFallbackStall;
+    if (mobileGuard && state.lastAutoSwitchAt > 0 && Date.now() - state.lastAutoSwitchAt < MOBILE_AUTO_SWITCH_COOLDOWN_MS) {
+      return;
+    }
     if (stableLockActive) {
       const hardFreezeAfterStable =
         stalledForMs > MOBILE_HARD_FREEZE_AFTER_STABLE_MS &&
@@ -16046,7 +16094,9 @@ function schedulePlaybackHealthMonitor(token, step = 0) {
     const awaitingUser = isAwaitingUserPlay();
     const statusText = String(refs.playerStatus?.textContent || "").toLowerCase();
     const autoSwitchCooldownActive =
-      mobileGuard && Date.now() - Number(state.lastAutoSwitchAt || 0) < MOBILE_AUTO_SWITCH_COOLDOWN_MS;
+      mobileGuard &&
+      state.lastAutoSwitchAt > 0 &&
+      Date.now() - Number(state.lastAutoSwitchAt || 0) < MOBILE_AUTO_SWITCH_COOLDOWN_MS;
     const stablePlayback =
       mobileGuard && !video.paused && errorCode <= 0 && currentTime > MOBILE_STABLE_PLAYBACK_MIN_SEC && readyState >= 2;
     if (stablePlayback && !awaitingUser) {
@@ -16059,6 +16109,9 @@ function schedulePlaybackHealthMonitor(token, step = 0) {
     const stableLockWindow = state.mobileStableLockOverride || MOBILE_STABLE_LOCK_MS;
     const stableLockActive =
       mobileGuard && state.mobileStablePlaybackAt > 0 && Date.now() - state.mobileStablePlaybackAt < stableLockWindow;
+    if (mobileGuard && state.lastAutoSwitchAt > 0 && Date.now() - state.lastAutoSwitchAt < MOBILE_AUTO_SWITCH_COOLDOWN_MS) {
+      return;
+    }
     const canAutoRecoverWhileAwaiting =
       awaitingUser &&
       step >= 2 &&
@@ -16704,6 +16757,46 @@ function rememberSourceSuccess(source, itemId = 0) {
 
 async function playFromSourcePoolWithValidation(resumeTime, token, options = {}) {
   const shouldValidate = SOURCE_VALIDATION_ENABLED && options?.skipValidation !== true;
+  const mobileGuard = isLikelyMobileDevice();
+  if (mobileGuard && shouldValidate) {
+    state.sourceValidationActive = false;
+    try {
+      return await playFromSourcePoolWithRescue(resumeTime, token, {
+        startIndex: options?.startIndex ?? 0,
+        strictIndex: options?.strictIndex,
+        skipPremiumFallback: options?.skipPremiumFallback,
+        allowPremiumRescue: options?.allowPremiumRescue,
+      });
+    } catch (firstError) {
+      if (options?.autoRepairTried) {
+        throw firstError;
+      }
+      const repairResult = await autoRepairSourcesForPlayback({
+        itemId: Number(options?.itemId || 0),
+        season: Number(options?.season || 0),
+        episode: Number(options?.episode || 0),
+      });
+      if (token !== state.playToken) {
+        return;
+      }
+      if (repairResult?.ok && state.sourcePool.length > 0) {
+        return playFromSourcePoolWithRescue(resumeTime, token, {
+          startIndex: options?.startIndex ?? 0,
+          strictIndex: options?.strictIndex,
+          skipPremiumFallback: options?.skipPremiumFallback,
+          allowPremiumRescue: options?.allowPremiumRescue,
+          autoRepairTried: true,
+        });
+      }
+      const pending = Boolean(repairResult?.pending);
+      const message = pending
+        ? "Film trop recent, pas encore disponible."
+        : "Aucun lecteur en marche. Mentionner sur Discord \"Astrax\".";
+      setPlayerStatus(message, true);
+      setPlayerLoading(false);
+      throw firstError;
+    }
+  }
   if (!shouldValidate || state.sourcePool.length <= 1) {
     return playFromSourcePoolWithRescue(resumeTime, token, options);
   }
@@ -18405,6 +18498,7 @@ async function startPlayerSource(source, resumeTime, token, options = {}) {
 
         if (!useEmbed) {
           try {
+            await unlockMobilePlayback(video);
             await video.play();
             clearAwaitingUserPlay();
             const forcedFrenchAudio = preferFrenchAudioTrack(video);
@@ -18418,6 +18512,7 @@ async function startPlayerSource(source, resumeTime, token, options = {}) {
             if (!video.muted) {
               try {
                 video.muted = true;
+                await unlockMobilePlayback(video);
                 await video.play();
                 mutedRecovery = true;
                 preferFrenchAudioTrack(video);
