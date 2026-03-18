@@ -1,5 +1,5 @@
 const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260318-c354";
+const ZENIX_BUILD_VERSION = "20260318-c355";
 const STORAGE_KEY = "zenix-progress-v4";
 const COVER_CACHE_KEY = "zenix-cover-cache-v1";
 const LOCAL_PLAY_KEY = "zenix-local-plays-v1";
@@ -11270,6 +11270,12 @@ async function playTvChannel(channel) {
         teardownTvPlayback();
         if (token !== state.tv.playToken) {
           return;
+        }
+        if (refs.tvPlayerVideo) {
+          refs.tvPlayerVideo.hidden = false;
+        }
+        if (refs.tvPlayerEmpty) {
+          refs.tvPlayerEmpty.hidden = true;
         }
         if (isHls) {
           if (shouldUseNativeHls(refs.tvPlayerVideo)) {

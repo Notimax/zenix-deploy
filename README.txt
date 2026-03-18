@@ -123,6 +123,11 @@ LATEST FIX LOG (2026-03-18, c354)
 - If validation fails, player does a real playback attempt before auto-repair (prevents 0-lecteur stalls).
 - Cache-bust bumped to 20260318-c354.
 
+LATEST FIX LOG (2026-03-18, c355)
+- FastFlux source resolution now trusts TMDB id match even if the title label differs (fixes Scream 7 / Banlieusards 3).
+- TV Direct video now re-shows the player after candidate fallback (fixes audio-only with hidden video).
+- Cache-bust bumped to 20260318-c355.
+
 LATEST FIX LOG (2026-03-17, c326)
 - Mobile navbar redesigned as a full-screen streaming menu (premium overlay).
 - Mobile nav now occupies the full viewport with slide-up animation.

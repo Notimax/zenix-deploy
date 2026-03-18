@@ -9018,7 +9018,9 @@ async function resolveFastfluxSourcesByTmdbId(mediaType, tmdbId, season = 1, epi
     if (!entry || !entry.source) {
       return [];
     }
-    if (strictTitle && !isFastfluxTitleMatch(entry, strictTitle, strictYear)) {
+    const entryTmdb = toInt(entry?.tmdb_id || entry?.tmdbId, 0, 0, 999999999);
+    const shouldCheckTitle = !(safeTmdbId > 0 && entryTmdb === safeTmdbId);
+    if (strictTitle && shouldCheckTitle && !isFastfluxTitleMatch(entry, strictTitle, strictYear)) {
       return [];
     }
     const source = buildFastfluxSourceEntry(entry.source, 0);
@@ -9041,7 +9043,9 @@ async function resolveFastfluxSourcesByTmdbId(mediaType, tmdbId, season = 1, epi
   if (!entry || !Array.isArray(entry.episodes)) {
     return [];
   }
-  if (strictTitle && !isFastfluxTitleMatch(entry, strictTitle, strictYear)) {
+  const entryTmdb = toInt(entry?.tmdb_id || entry?.tmdbId, 0, 0, 999999999);
+  const shouldCheckTitle = !(safeTmdbId > 0 && entryTmdb === safeTmdbId);
+  if (strictTitle && shouldCheckTitle && !isFastfluxTitleMatch(entry, strictTitle, strictYear)) {
     return [];
   }
   const match = entry.episodes.find((episodeRow) => {
