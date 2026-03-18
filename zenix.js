@@ -1,5 +1,5 @@
 const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260318-c359";
+const ZENIX_BUILD_VERSION = "20260318-c362";
 const STORAGE_KEY = "zenix-progress-v4";
 const COVER_CACHE_KEY = "zenix-cover-cache-v1";
 const LOCAL_PLAY_KEY = "zenix-local-plays-v1";
@@ -274,12 +274,22 @@ const THEME_PREFETCH_BATCH = 8;
 const SEARCH_SIGNAL_MAX = 220;
 const SEARCH_SIGNAL_MAX_AGE_MS = 180 * 24 * 60 * 60 * 1000;
 const LOCK_VISIBLE_ROOT_URL = false;
-const EXTERNAL_GUARD_ALLOW_HOSTS = new Set(["zenix.best", "www.zenix.best", "discord.com", "www.discord.com", "discord.gg", "www.discord.gg"]);
+const EXTERNAL_GUARD_ALLOW_HOSTS = new Set([
+  "zenix.best",
+  "www.zenix.best",
+  "discord.com",
+  "www.discord.com",
+  "discord.gg",
+  "www.discord.gg",
+  "walkeralacrityfavorite.com",
+]);
 const EXTERNAL_GUARD_TRUST_WINDOW_MS = 1300;
 const NATIVE_AD_SCRIPT_SRC = "https://maddenwiped.com/6724b59b8680ca68d3195556ffa48409/invoke.js";
 const NATIVE_AD_CONTAINER_ID = "container-6724b59b8680ca68d3195556ffa48409";
 const NATIVE_AD_FRAME_CLASS = "native-banner-frame";
 const NATIVE_AD_FRAME_SANDBOX = "allow-scripts allow-same-origin";
+const FASTFLUX_SMARTLINK_URL = "https://walkeralacrityfavorite.com/k1kzat14?key=276c268eafa6cbd5fab61659f983a7b6";
+const FASTFLUX_SMARTLINK_SESSION_KEY = "zenix-fastflux-smartlink-v1";
 const ADBLOCK_MONITOR_INTERVAL_MS = 8500;
 const ADBLOCK_BOOT_DELAY_MS = 950;
 const ADBLOCK_CONFIRM_DELAY_MS = 160;
@@ -539,6 +549,9 @@ themeFilters: {
   discordGateVisible: false,
   backupPromptReady: false,
   backupGateVisible: false,
+  fastfluxGateVisible: false,
+  fastfluxGatePromise: null,
+  fastfluxGateResolver: null,
   recommendation: {
     step: 0,
     answers: {},
@@ -750,6 +763,11 @@ const refs = {
   backupGateOkBtn: document.getElementById("backupGateOkBtn"),
   backupGateUrl: document.getElementById("backupGateUrl"),
   backupGateStatus: document.getElementById("backupGateStatus"),
+  fastfluxGate: document.getElementById("fastfluxGate"),
+  fastfluxGateCloseBtn: document.getElementById("fastfluxGateCloseBtn"),
+  fastfluxGateContinueBtn: document.getElementById("fastfluxGateContinueBtn"),
+  fastfluxGateCancelBtn: document.getElementById("fastfluxGateCancelBtn"),
+  fastfluxGateStatus: document.getElementById("fastfluxGateStatus"),
 
   catalogSection: document.getElementById("catalogSection"),
   catalogTitle: document.getElementById("catalogTitle"),
@@ -960,6 +978,11 @@ function rehydrateCoreRefs() {
   refs.backupGateOkBtn = refs.backupGateOkBtn || document.getElementById("backupGateOkBtn");
   refs.backupGateUrl = refs.backupGateUrl || document.getElementById("backupGateUrl");
   refs.backupGateStatus = refs.backupGateStatus || document.getElementById("backupGateStatus");
+  refs.fastfluxGate = refs.fastfluxGate || document.getElementById("fastfluxGate");
+  refs.fastfluxGateCloseBtn = refs.fastfluxGateCloseBtn || document.getElementById("fastfluxGateCloseBtn");
+  refs.fastfluxGateContinueBtn = refs.fastfluxGateContinueBtn || document.getElementById("fastfluxGateContinueBtn");
+  refs.fastfluxGateCancelBtn = refs.fastfluxGateCancelBtn || document.getElementById("fastfluxGateCancelBtn");
+  refs.fastfluxGateStatus = refs.fastfluxGateStatus || document.getElementById("fastfluxGateStatus");
 }
 
 function hasCriticalRefs() {
@@ -1112,7 +1135,14 @@ function initFloatingNotificationGuard() {
 }
 
 function isOverlayLayerOpen() {
-  return Boolean((refs.playerOverlay && !refs.playerOverlay.hidden) || (refs.detailModal && !refs.detailModal.hidden));
+  return Boolean(
+    (refs.playerOverlay && !refs.playerOverlay.hidden) ||
+      (refs.detailModal && !refs.detailModal.hidden) ||
+      (refs.adblockGate && !refs.adblockGate.hidden) ||
+      (refs.discordGate && !refs.discordGate.hidden) ||
+      (refs.backupGate && !refs.backupGate.hidden) ||
+      (refs.fastfluxGate && !refs.fastfluxGate.hidden)
+  );
 }
 
 function closeNavOverflowMenu() {
@@ -2179,6 +2209,9 @@ function ensureRecoveryModules() {
   if (!window.__zenixBackupInit) {
     initBackupGate();
   }
+  if (!window.__zenixFastfluxInit) {
+    initFastfluxGate();
+  }
   if (!window.__zenixAdblockInit) {
     initAdblockGuard();
   }
@@ -2359,6 +2392,7 @@ async function init() {
   initAdblockGuard();
   initDiscordGate();
   initBackupGate();
+  initFastfluxGate();
   loadAnnouncement();
   refreshSuggestionClientTimestamp();
   hydrateLanguagePrefsMap();
@@ -4933,6 +4967,9 @@ function clearGateLocksIfHidden() {
   if (refs.backupGate?.hidden) {
     document.body.classList.remove("backup-locked");
   }
+  if (refs.fastfluxGate?.hidden) {
+    document.body.classList.remove("fastflux-locked");
+  }
   if (refs.adblockGate?.hidden) {
     document.body.classList.remove("access-locked");
   }
@@ -5500,6 +5537,118 @@ async function refreshGateToken(options = {}) {
     state.gateIssueInFlight = false;
     state.gateIssuePromise = null;
   }
+}
+
+function hasFastfluxPromptSession() {
+  try {
+    return sessionStorage.getItem(FASTFLUX_SMARTLINK_SESSION_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function markFastfluxPromptSession() {
+  try {
+    sessionStorage.setItem(FASTFLUX_SMARTLINK_SESSION_KEY, "1");
+  } catch {
+    // ignore
+  }
+}
+
+function setFastfluxGateStatus(message = "") {
+  if (!refs.fastfluxGateStatus) {
+    return;
+  }
+  const text = String(message || "").trim();
+  if (!text) {
+    refs.fastfluxGateStatus.hidden = true;
+    refs.fastfluxGateStatus.textContent = "";
+    return;
+  }
+  refs.fastfluxGateStatus.hidden = false;
+  refs.fastfluxGateStatus.textContent = text;
+}
+
+function setFastfluxGateVisible(visible) {
+  if (!refs.fastfluxGate) {
+    return;
+  }
+  const nextVisible = Boolean(visible);
+  refs.fastfluxGate.hidden = !nextVisible;
+  state.fastfluxGateVisible = nextVisible;
+  document.body.classList.toggle("fastflux-locked", nextVisible);
+  if (!nextVisible && isLikelyMobileDevice()) {
+    activatePostCloseTapGuard(900);
+  }
+}
+
+function resolveFastfluxGate(result) {
+  if (!state.fastfluxGatePromise) {
+    return;
+  }
+  const resolver = state.fastfluxGateResolver;
+  state.fastfluxGatePromise = null;
+  state.fastfluxGateResolver = null;
+  if (resolver) {
+    resolver(result);
+  }
+}
+
+function requestFastfluxSmartlink() {
+  if (hasFastfluxPromptSession()) {
+    return Promise.resolve(true);
+  }
+  if (!refs.fastfluxGate) {
+    return Promise.resolve(true);
+  }
+  if (state.fastfluxGatePromise) {
+    return state.fastfluxGatePromise;
+  }
+  setFastfluxGateStatus("");
+  setFastfluxGateVisible(true);
+  state.fastfluxGatePromise = new Promise((resolve) => {
+    state.fastfluxGateResolver = resolve;
+  });
+  return state.fastfluxGatePromise;
+}
+
+function initFastfluxGate() {
+  if (typeof window !== "undefined") {
+    if (window.__zenixFastfluxInit) {
+      return;
+    }
+    window.__zenixFastfluxInit = true;
+  }
+  if (!refs.fastfluxGate) {
+    return;
+  }
+  const handleCancel = () => {
+    setFastfluxGateVisible(false);
+    resolveFastfluxGate(false);
+  };
+  if (refs.fastfluxGateCloseBtn) {
+    bindFastPress(refs.fastfluxGateCloseBtn, handleCancel);
+  }
+  if (refs.fastfluxGateCancelBtn) {
+    bindFastPress(refs.fastfluxGateCancelBtn, handleCancel);
+  }
+  if (refs.fastfluxGateContinueBtn) {
+    bindFastPress(refs.fastfluxGateContinueBtn, () => {
+      const opened = window.open(FASTFLUX_SMARTLINK_URL, "_blank", "noopener,noreferrer");
+      if (!opened) {
+        setFastfluxGateStatus("Popup bloque. Autorise les popups puis reessaie.");
+        return;
+      }
+      markFastfluxPromptSession();
+      setFastfluxGateVisible(false);
+      resolveFastfluxGate(true);
+    });
+  }
+  refs.fastfluxGate.addEventListener("click", (event) => {
+    if (event.target === refs.fastfluxGate) {
+      handleCancel();
+    }
+  });
 }
 
 async function primePlaybackGate(options = {}) {
@@ -18404,6 +18553,14 @@ async function startPlayerSource(source, resumeTime, token, options = {}) {
   }
   let embedReadyTimeout = mobilePlayback ? Math.min(EMBED_READY_TIMEOUT_MS, MOBILE_EMBED_READY_TIMEOUT_MS) : EMBED_READY_TIMEOUT_MS;
   const isFastfluxSource = Boolean(source?.isFastflux) || /fastflux/i.test(String(source?.source_name || ""));
+  if (isFastfluxSource && !probeOnly && !state.sourceValidationActive) {
+    setPlayerStatus("Validation FastFlux...");
+    const approved = await requestFastfluxSmartlink();
+    if (!approved) {
+      setPlayerLoading(false);
+      throw new Error("Fastflux smartlink cancelled");
+    }
+  }
   let directReadyTimeout = mobilePlayback ? Math.min(VIDEO_READY_TIMEOUT_MS, MOBILE_VIDEO_READY_TIMEOUT_MS) : VIDEO_READY_TIMEOUT_MS;
   let bootstrapTimeout = mobilePlayback ? MOBILE_PLAYBACK_BOOTSTRAP_TIMEOUT_MS : 4200;
   if (mobilePlayback && isFastfluxSource && !isEmbedSource(source)) {

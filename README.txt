@@ -1568,3 +1568,11 @@ FASTFLUX-ONLY SOURCES + PROXY MP4 FIX (2026-03-17, c321)
 - Mobile topbar badge moved to the far right (search row) and spaced from title.
 - Cache-bust bumped to `20260317-c321`.
 
+
+FASTFLUX PROXY RETRY (2026-03-18, c361)
+- HLS proxy now retries FastFlux responses on 401/403/404/405/416/429 across header variants (fixes MP4 debug URLs returning HTML).
+
+FASTFLUX SMARTLINK GATE (2026-03-18, c362)
+- Added FastFlux smartlink modal: shown once per session before FastFlux playback; user continues to open sponsor tab and then playback starts.
+- New fastflux gate overlay + body lock, and external guard allows the smartlink host.
+- Cache-bust bumped to 20260318-c362.

@@ -6749,6 +6749,22 @@ body.discord-locked .back-to-top {
   user-select: none;
 }
 
+body.fastflux-locked {
+  overflow: hidden;
+}
+
+body.fastflux-locked main,
+body.fastflux-locked .topbar,
+body.fastflux-locked .detail-modal,
+body.fastflux-locked .player-overlay,
+body.fastflux-locked .mobile-tabbar,
+body.fastflux-locked .design-updates,
+body.fastflux-locked .toast,
+body.fastflux-locked .back-to-top {
+  pointer-events: none;
+  user-select: none;
+}
+
 /* ===== Backup info gate ===== */
 .backup-gate {
   position: fixed;
@@ -6847,6 +6863,10 @@ body.discord-locked .back-to-top {
 
 body.backup-locked {
   overflow: hidden;
+}
+
+.fastflux-gate {
+  z-index: 220;
 }
 
 body.backup-locked main,
