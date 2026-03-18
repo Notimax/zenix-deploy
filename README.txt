@@ -117,6 +117,12 @@ LATEST FIX LOG (2026-03-18, c353)
 - Improves TV playback reliability on mobile + desktop when streams block cross-origin.
 - Cache-bust bumped to 20260318-c353.
 
+LATEST FIX LOG (2026-03-18, c354)
+- FastFlux sources now allow direct fallback when proxy stalls (proxy still preferred).
+- Player validation adds a fast same-origin proxy HEAD probe for MP4 to avoid false negatives.
+- If validation fails, player does a real playback attempt before auto-repair (prevents 0-lecteur stalls).
+- Cache-bust bumped to 20260318-c354.
+
 LATEST FIX LOG (2026-03-17, c326)
 - Mobile navbar redesigned as a full-screen streaming menu (premium overlay).
 - Mobile nav now occupies the full viewport with slide-up animation.

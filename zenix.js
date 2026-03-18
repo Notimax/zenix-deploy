@@ -1,5 +1,5 @@
 const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260318-c353";
+const ZENIX_BUILD_VERSION = "20260318-c354";
 const STORAGE_KEY = "zenix-progress-v4";
 const COVER_CACHE_KEY = "zenix-cover-cache-v1";
 const LOCAL_PLAY_KEY = "zenix-local-plays-v1";
@@ -16769,6 +16769,17 @@ async function playFromSourcePoolWithValidation(resumeTime, token, options = {})
 
   state.sourceValidationActive = false;
   if (!options?.autoRepairTried) {
+    try {
+      setPlayerStatus("Validation terminee. Essai direct...", false);
+      await playFromSourcePoolWithRescue(resumeTime, token, {
+        startIndex: 0,
+        strictIndex: false,
+        skipPremiumFallback: false,
+      });
+      return;
+    } catch {
+      // continue to auto-repair if direct attempt fails
+    }
     const repairResult = await autoRepairSourcesForPlayback({
       itemId: Number(options?.itemId || 0),
       season: Number(options?.season || 0),
@@ -18223,6 +18234,41 @@ function shouldPreferProxyFirstForHls(video, source) {
   }
 }
 
+async function quickProxyVideoProbe(streamUrl, timeoutMs = 1800) {
+  if (!isSameOriginUrl(streamUrl)) {
+    return false;
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), Math.max(800, Number(timeoutMs || 0)));
+  try {
+    let response = await fetch(streamUrl, {
+      method: "HEAD",
+      credentials: "same-origin",
+      signal: controller.signal,
+    });
+    if (response.ok) {
+      return true;
+    }
+    const status = Number(response.status || 0);
+    if (status === 403 || status === 405 || status === 429 || status === 400) {
+      response = await fetch(streamUrl, {
+        method: "GET",
+        credentials: "same-origin",
+        headers: {
+          Range: "bytes=0-1",
+        },
+        signal: controller.signal,
+      });
+      return Boolean(response.ok);
+    }
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+  return false;
+}
+
 async function startPlayerSource(source, resumeTime, token, options = {}) {
   const video = refs.playerVideo;
   const mobilePlayback = isLikelyMobileDevice();
@@ -18308,6 +18354,15 @@ async function startPlayerSource(source, resumeTime, token, options = {}) {
           video.preload = "auto";
           if (source?.format === "dash" && !video.canPlayType(DASH_MIME)) {
             throw new Error("DASH not supported");
+          }
+          if (probeOnly) {
+            const quickOk = await quickProxyVideoProbe(streamUrl, probeTimeoutMs || 1800);
+            if (quickOk) {
+              sourceStarted = true;
+              state.ignoreVideoErrorUntil = 0;
+              markSourceHostResult(source?.host, true);
+              return;
+            }
           }
           video.src = streamUrl;
           video.load();

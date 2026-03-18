@@ -8497,7 +8497,8 @@ function buildFastfluxSourceEntry(sourceRow, index = 0) {
   if (isEmbed) {
     needsProxy = false;
   }
-  const allowDirect = Boolean(looksDirect && !isFastfluxHost);
+  const forceProxyHost = fastfluxHost === "s1.fsvid.lol";
+  const allowDirect = Boolean(looksDirect && !forceProxyHost);
   const proxyPreferred = true;
   const finalUrl = isAlreadyProxied ? streamUrl : needsProxy ? buildHlsProxyPath(streamUrl) : streamUrl;
   return {
