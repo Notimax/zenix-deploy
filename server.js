@@ -13140,6 +13140,12 @@ function isGateProtectedPath(pathname) {
   if (pathname === "/api/zenix-seasons") {
     return false;
   }
+  if (pathname === "/api/zenix-source") {
+    return false;
+  }
+  if (pathname === "/api/zenix-anime-source") {
+    return false;
+  }
   if (pathname === "/api/zenix-anime-seasons") {
     return false;
   }

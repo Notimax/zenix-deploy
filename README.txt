@@ -1615,3 +1615,7 @@ FASTFLUX VALIDATION + TV VIEWPORT (2026-03-18, c370)
 - Mobile validation now runs when FastFlux is absent (background reader test before play).
 - TV Direct view locks to viewport on mobile via tv-live class.
 - Cache-bust bumped to 20260318-c370.
+
+SOURCE GATE RELAX (2026-03-18, c371)
+- /api/zenix-source and /api/zenix-anime-source are now gate-exempt to prevent “adblock_required” stalls.
+- Fixes “chargement infini” when gate token fails on mobile/desktop.
