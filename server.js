@@ -8519,6 +8519,35 @@ function buildFastfluxSourceEntry(sourceRow, index = 0) {
   };
 }
 
+function buildFastfluxPlayerEmbedSource(tmdbId, mediaType = "movie", season = 1, episode = 1) {
+  if (!USE_FASTFLUX || !FASTFLUX_API_KEY) {
+    return null;
+  }
+  const safeId = toInt(tmdbId, 0, 0, 999999999);
+  if (!safeId) {
+    return null;
+  }
+  const normalizedType = mediaType === "tv" ? "series" : "movies";
+  const params = new URLSearchParams({
+    route: `${normalizedType}/${safeId}/player`,
+    api_key: FASTFLUX_API_KEY,
+  });
+  if (mediaType === "tv") {
+    params.set("season", String(Math.max(1, Number(season || 1))));
+    params.set("episode", String(Math.max(1, Number(episode || 1))));
+  }
+  const embedUrl = `${FASTFLUX_API_BASE}?${params.toString()}`;
+  return {
+    stream_url: embedUrl,
+    source_name: "FastFlux",
+    origin: "fastflux",
+    quality: "HD",
+    language: "VF",
+    format: "embed",
+    priority: 240,
+  };
+}
+
 function toFastfluxCatalogDetailUrl(mediaType, tmdbId) {
   const safeId = toInt(tmdbId, 0, 0, 999999999);
   if (!safeId) {
@@ -9026,7 +9055,17 @@ async function resolveFastfluxSourcesByTmdbId(mediaType, tmdbId, season = 1, epi
       return [];
     }
     const source = buildFastfluxSourceEntry(entry.source, 0);
-    return source ? [source] : [];
+    const embed = buildFastfluxPlayerEmbedSource(entryTmdb || safeTmdbId, "movie", 1, 1);
+    if (source && embed) {
+      return [source, embed];
+    }
+    if (source) {
+      return [source];
+    }
+    if (embed) {
+      return [embed];
+    }
+    return [];
   }
 
   if (safeTmdbId > 0) {
@@ -9060,7 +9099,17 @@ async function resolveFastfluxSourcesByTmdbId(mediaType, tmdbId, season = 1, epi
     return [];
   }
   const source = buildFastfluxSourceEntry(fallback, 0);
-  return source ? [source] : [];
+  const embed = buildFastfluxPlayerEmbedSource(entryTmdb || safeTmdbId, "tv", safeSeason, safeEpisode);
+  if (source && embed) {
+    return [source, embed];
+  }
+  if (source) {
+    return [source];
+  }
+  if (embed) {
+    return [embed];
+  }
+  return [];
 }
 
 

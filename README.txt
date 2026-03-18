@@ -1623,3 +1623,7 @@ SOURCE GATE RELAX (2026-03-18, c371)
 FASTFLUX CDN REWRITE (2026-03-18, c372)
 - FastFlux CDN URLs (cdn.fastflux.xyz) are rewritten to fastflux.xyz/api/video_proxy.php?file=...
 - Prevents CDN 403 hotlink blocks that caused “chargement infini”.
+
+FASTFLUX EMBED FALLBACK (2026-03-18, c373)
+- FastFlux sources now include an embedded player fallback (API /player) when direct MP4 blocks.
+- Keeps playback alive even if CDN hotlinking fails.
