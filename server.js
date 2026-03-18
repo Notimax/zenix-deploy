@@ -2612,6 +2612,150 @@ async function isTitleOnPurstream(title, type, year = 0) {
   });
 }
 
+function scorePurstreamCandidate(row, titleKey, year = 0) {
+  if (!row) {
+    return -1;
+  }
+  const rowKey = normalizeTitleKey(row.title || "");
+  if (!rowKey) {
+    return -1;
+  }
+  let score = 0;
+  if (rowKey === titleKey) {
+    score += 40;
+  } else if (titleKey && (rowKey.includes(titleKey) || titleKey.includes(rowKey))) {
+    score += 20;
+  }
+  const rowYear = toInt(row.year, 0, 0, 2099);
+  const safeYear = toInt(year, 0, 0, 2099);
+  if (safeYear > 0 && rowYear > 0) {
+    const delta = Math.abs(rowYear - safeYear);
+    if (delta === 0) {
+      score += 10;
+    } else if (delta === 1) {
+      score += 6;
+    } else if (delta <= 2) {
+      score += 2;
+    } else {
+      score -= 2;
+    }
+  }
+  return score;
+}
+
+function pickBestPurstreamCandidate(rows, title, mediaType, year = 0) {
+  const items = Array.isArray(rows) ? rows : [];
+  if (items.length === 0) {
+    return null;
+  }
+  const titleKey = normalizeTitleKey(title || "");
+  const safeType = String(mediaType || "").toLowerCase() === "tv" ? "tv" : "movie";
+  const filtered = items.filter((row) => row && row.type === safeType);
+  if (filtered.length === 0) {
+    return null;
+  }
+  let best = null;
+  let bestScore = -Infinity;
+  filtered.forEach((row) => {
+    const score = scorePurstreamCandidate(row, titleKey, year);
+    if (score > bestScore) {
+      bestScore = score;
+      best = row;
+    }
+  });
+  return best || filtered[0];
+}
+
+async function fetchPurstreamStreamSources(id, mediaType, season = 1, episode = 1) {
+  const safeId = toInt(id, 0, 0, 999999999);
+  if (safeId <= 0) {
+    return [];
+  }
+  const safeType = String(mediaType || "").toLowerCase() === "tv" ? "tv" : "movie";
+  const safeSeason = toInt(season, 1, 1, 500);
+  const safeEpisode = toInt(episode, 1, 1, 50000);
+  const headers = {
+    Referer: `${PURSTREAM_WEB_BASE}/`,
+    Origin: PURSTREAM_WEB_BASE,
+    "Accept-Language": DEFAULT_ACCEPT_LANGUAGE,
+  };
+  const tryFetch = async (url) => {
+    const response = await fetchRemote(url, headers);
+    if (response.status < 200 || response.status >= 300) {
+      return [];
+    }
+    const payload = parseJsonSafe(response.body);
+    const sources = Array.isArray(payload?.data?.items?.sources) ? payload.data.items.sources : [];
+    return sources;
+  };
+  if (safeType === "tv") {
+    const episodePath = `${PURSTREAM_API_BASE}/stream/${safeId}/episode?season=${safeSeason}&episode=${safeEpisode}`;
+    const episodeSources = await tryFetch(episodePath);
+    if (episodeSources.length > 0) {
+      return episodeSources;
+    }
+  }
+  const moviePath = `${PURSTREAM_API_BASE}/stream/${safeId}`;
+  return await tryFetch(moviePath);
+}
+
+function normalizePurstreamSourceEntry(sourceRow, index = 0) {
+  if (!sourceRow || typeof sourceRow !== "object") {
+    return null;
+  }
+  const streamUrl = String(sourceRow?.stream_url || sourceRow?.url || "").trim();
+  if (!streamUrl) {
+    return null;
+  }
+  const label = String(sourceRow?.source_name || sourceRow?.name || sourceRow?.label || "").trim();
+  const language = normalizePidoovLanguage(sourceRow?.language || sourceRow?.lang || label || "") || "";
+  if (language && language !== "VF" && language !== "MULTI") {
+    return null;
+  }
+  const quality = sanitizeToken(String(sourceRow?.quality || label || "HD"), 24) || "HD";
+  const format = inferOwnedSourceFormat(streamUrl, sourceRow?.format || sourceRow?.type || "m3u8");
+  const normalizedLanguage = language || "VF";
+  return {
+    stream_url: streamUrl,
+    source_name: "Purstream",
+    origin: "purstream",
+    quality,
+    language: normalizedLanguage,
+    format,
+    priority:
+      (normalizedLanguage === "VF" ? 388 : normalizedLanguage === "MULTI" ? 370 : 340) -
+      Math.min(40, index * 4),
+  };
+}
+
+async function resolvePurstreamSourcesByTitle(title, mediaType, year = 0, season = 1, episode = 1) {
+  const safeTitle = String(title || "").trim();
+  if (!safeTitle) {
+    return [];
+  }
+  const rows = await fetchPurstreamSearchRows(safeTitle);
+  const candidate = pickBestPurstreamCandidate(rows, safeTitle, mediaType, year);
+  if (!candidate) {
+    return [];
+  }
+  const rawSources = await fetchPurstreamStreamSources(candidate.id, mediaType, season, episode);
+  if (!Array.isArray(rawSources) || rawSources.length === 0) {
+    return [];
+  }
+  const out = rawSources
+    .map((row, index) => normalizePurstreamSourceEntry(row, index))
+    .filter(Boolean);
+  const dedupe = new Set();
+  return out.filter((entry) => {
+    const key = String(entry?.stream_url || "").trim();
+    if (!key || dedupe.has(key)) {
+      return false;
+    }
+    dedupe.add(key);
+    return true;
+  });
+}
+
 function isCustomAlreadyAdded(adminData, candidate) {
   if (!adminData || !candidate) {
     return false;
@@ -8494,7 +8638,12 @@ async function filterSourcesWithProbe(sources = []) {
     } catch {
       probeHost = "";
     }
-    if (probeHost.endsWith("fastflux.xyz") || probeHost.endsWith("cdn.fastflux.xyz")) {
+    if (
+      probeHost.endsWith("fastflux.xyz") ||
+      probeHost.endsWith("cdn.fastflux.xyz") ||
+      /purstream|xalaflix|fsvid/i.test(probeHost) ||
+      String(source?.origin || "").toLowerCase() === "purstream"
+    ) {
       results.push(source);
       continue;
     }
@@ -16116,6 +16265,36 @@ async function handleZenixSource(req, res, requestUrl) {
     } catch {
       sources = [];
     }
+  }
+
+  let purstreamSources = [];
+  const hasFastfluxVf = sources.some((entry) => {
+    const lang = normalizePidoovLanguage(entry?.language || entry?.source_name || entry?.name || "") || "";
+    return lang === "VF" || lang === "MULTI";
+  });
+  if ((sources.length === 0 || !hasFastfluxVf) && title.length >= 2) {
+    try {
+      purstreamSources = await resolvePurstreamSourcesByTitle(title, mediaType, year, season, episode);
+      if (purstreamSources.length === 0 && cleanedTitle && cleanedTitle !== title) {
+        purstreamSources = await resolvePurstreamSourcesByTitle(cleanedTitle, mediaType, year, season, episode);
+      }
+      if (purstreamSources.length === 0 && year > 0) {
+        purstreamSources = await resolvePurstreamSourcesByTitle(cleanedTitle || title, mediaType, 0, season, episode);
+      }
+    } catch {
+      purstreamSources = [];
+    }
+  }
+  if (purstreamSources.length > 0) {
+    const seen = new Set(sources.map((entry) => String(entry?.stream_url || "").trim()).filter(Boolean));
+    purstreamSources.forEach((entry) => {
+      const key = String(entry?.stream_url || "").trim();
+      if (!key || seen.has(key)) {
+        return;
+      }
+      seen.add(key);
+      sources.push(entry);
+    });
   }
 
   if (sources.length > 0) {

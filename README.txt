@@ -1660,3 +1660,8 @@ VF LABEL EXPANSION (2026-03-18, c381)
 VF VISIBILITY FIX (2026-03-18, c382)
 - Language filter now keeps VF sources visible alongside the selected language (avoids VF-only loss).
 - Cache-bust bumped to 20260318-c382.
+
+PURSTREAM VF FALLBACK (2026-03-18, c383)
+- If FastFlux has no VF for a title, VF/MULTI sources are pulled from Purstream.
+- Purstream sources are excluded from probe drops to avoid hotlink false negatives.
+- Cache-bust bumped to 20260318-c383.
