@@ -1642,3 +1642,6 @@ FASTFLUX PROBE BYPASS (2026-03-18, c376)
 FASTFLUX GATE LOCK (2026-03-18, c377)
 - FastFlux popup can no longer be dismissed via "Annuler" or backdrop click.
 - Only the "OUI, OUVRIR" button continues.
+
+REPAIR HARD RESET (2026-03-18, c378)
+- Repair now clears local playback locks/caches and bypasses FastFlux priority to test all sources.

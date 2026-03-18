@@ -1,5 +1,5 @@
 const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260318-c377";
+const ZENIX_BUILD_VERSION = "20260318-c378";
 const STORAGE_KEY = "zenix-progress-v4";
 const COVER_CACHE_KEY = "zenix-cover-cache-v1";
 const LOCAL_PLAY_KEY = "zenix-local-plays-v1";
@@ -15037,6 +15037,7 @@ async function runPlayerRepair() {
   if (refs.playerRepairStatus) {
     refs.playerRepairStatus.textContent = "Reparation en cours... ajout de lecteurs";
   }
+  resetRepairPlaybackState();
   await refreshGateToken({ force: true }).catch(() => {});
   const sources = await collectRepairSourcesForItem(item, season, episode, { forceExternal: true });
   if (!Array.isArray(sources) || sources.length === 0) {
@@ -15099,6 +15100,7 @@ async function runPlayerRepair() {
         startIndex: 0,
         strictIndex: false,
         skipPremiumFallback: false,
+        skipFastfluxPriority: true,
         itemId: item.id,
       });
     } catch {
@@ -16006,6 +16008,23 @@ function clearManualSourceLock() {
   state.manualSourceLock = false;
   state.manualSourceLockedIndex = -1;
   state.sourceRetryAttempts.clear();
+}
+
+function resetRepairPlaybackState() {
+  state.sourceRetryAttempts.clear();
+  state.sourceValidationActive = false;
+  state.manualSourceLock = false;
+  state.manualSourceLockedIndex = -1;
+  state.lastAutoSwitchAt = 0;
+  state.lastAutoSwitchReason = "";
+  state.mobileStableLockOverride = 0;
+  if (state.sourceSuccessMap instanceof Map) {
+    state.sourceSuccessMap.clear();
+    saveSourceSuccessMap(state.sourceSuccessMap);
+  }
+  if (state.repairCache instanceof Map) {
+    state.repairCache.clear();
+  }
 }
 
 function applyMobileFallbackLock(source) {
@@ -17154,6 +17173,7 @@ async function playFromSourcePoolWithValidation(resumeTime, token, options = {})
         ...options,
         autoRepairTried: true,
         skipValidation: false,
+        skipFastfluxPriority: true,
       });
     }
     const pending = Boolean(repairResult?.pending);
