@@ -131,6 +131,10 @@ LATEST FIX LOG (2026-03-18, c355)
 LATEST FIX LOG (2026-03-18, c356)
 - HLS proxy now retries MP4 requests without Range when upstream rejects byte ranges (fixes FastFlux MP4 not playing).
 
+LATEST FIX LOG (2026-03-18, c357)
+- Debug-only titles (Scream 7 / Banlieusards 3 / Cars) now fall back to normal sources if debug sources are missing.
+- Cache-bust bumped to 20260318-c357.
+
 LATEST FIX LOG (2026-03-17, c326)
 - Mobile navbar redesigned as a full-screen streaming menu (premium overlay).
 - Mobile nav now occupies the full viewport with slide-up animation.

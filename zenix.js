@@ -1,5 +1,5 @@
 const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260318-c355";
+const ZENIX_BUILD_VERSION = "20260318-c357";
 const STORAGE_KEY = "zenix-progress-v4";
 const COVER_CACHE_KEY = "zenix-cover-cache-v1";
 const LOCAL_PLAY_KEY = "zenix-local-plays-v1";
@@ -14024,41 +14024,37 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
     if (token !== state.playToken) {
       return;
     }
-    if (!Array.isArray(debugSources) || debugSources.length === 0) {
-      const message = "Lecteur debug indisponible pour ce titre.";
-      clearPlaybackGuard();
-      setPlayerStatus(message, true);
-      showMessage(message, true);
+    if (Array.isArray(debugSources) && debugSources.length > 0) {
+      clearManualSourceLock();
+      const mobileOrdered = isLikelyMobileDevice()
+        ? debugSources.filter((entry) => !entry?.mobileOnly).concat(debugSources.filter((entry) => entry?.mobileOnly))
+        : debugSources.slice();
+      state.sourcePool = mobileOrdered;
+      state.allEpisodeSources = mobileOrdered.slice();
+      state.sourceRetryAttempts.clear();
+      state.sourceIndex = -1;
+      renderPlayerSourceOptions();
+      scheduleHlsLanguageProbe(state.allEpisodeSources);
+      const allowPremiumRescue = shouldAllowPremiumRescueForMovie(state.sourcePool, refs.playerVideo);
+      const debugPlayOptions = {
+        startIndex: 0,
+        skipPremiumFallback: true,
+        allowPremiumRescue,
+        probeTimeoutMs: isLikelyMobileDevice() ? MOBILE_SOURCE_VALIDATION_TIMEOUT_MS : SOURCE_VALIDATION_TIMEOUT_MS,
+        itemId: selectedItem.id,
+      };
+      try {
+        if (isLikelyMobileDevice()) {
+          await playFromSourcePoolWithRescue(resumeTime, token, { ...debugPlayOptions, skipValidation: true });
+        } else {
+          await playFromSourcePoolWithValidation(resumeTime, token, debugPlayOptions);
+        }
+      } catch {
+        // handled by player status updates
+      }
       return;
     }
-    clearManualSourceLock();
-    const mobileOrdered = isLikelyMobileDevice()
-      ? debugSources.filter((entry) => !entry?.mobileOnly).concat(debugSources.filter((entry) => entry?.mobileOnly))
-      : debugSources.slice();
-    state.sourcePool = mobileOrdered;
-    state.allEpisodeSources = mobileOrdered.slice();
-    state.sourceRetryAttempts.clear();
-    state.sourceIndex = -1;
-    renderPlayerSourceOptions();
-    scheduleHlsLanguageProbe(state.allEpisodeSources);
-    const allowPremiumRescue = shouldAllowPremiumRescueForMovie(state.sourcePool, refs.playerVideo);
-    const debugPlayOptions = {
-      startIndex: 0,
-      skipPremiumFallback: true,
-      allowPremiumRescue,
-      probeTimeoutMs: isLikelyMobileDevice() ? MOBILE_SOURCE_VALIDATION_TIMEOUT_MS : SOURCE_VALIDATION_TIMEOUT_MS,
-      itemId: selectedItem.id,
-    };
-    try {
-      if (isLikelyMobileDevice()) {
-        await playFromSourcePoolWithRescue(resumeTime, token, { ...debugPlayOptions, skipValidation: true });
-      } else {
-        await playFromSourcePoolWithValidation(resumeTime, token, debugPlayOptions);
-      }
-    } catch {
-      // handled by player status updates
-    }
-    return;
+    // No debug source available -> fall back to normal flow instead of hard-failing.
   }
   const streamPath = `/stream/${selectedItem?.id || item.id}`;
   const refreshMovieSourcePool = async (statusLabel) => {
