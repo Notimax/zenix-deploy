@@ -1665,3 +1665,8 @@ PURSTREAM VF FALLBACK (2026-03-18, c383)
 - If FastFlux has no VF for a title, VF/MULTI sources are pulled from Purstream.
 - Purstream sources are excluded from probe drops to avoid hotlink false negatives.
 - Cache-bust bumped to 20260318-c383.
+
+FASTFLUX AUTO-SWITCH LOCK (2026-03-19, c384)
+- Auto-switch is blocked when FastFlux is active (no silent source change unless user clicks).
+- Repair now clears manual lock and keeps FastFlux priority after refresh.
+- Cache-bust bumped to 20260319-c384.

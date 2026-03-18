@@ -1,5 +1,5 @@
 const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260318-c383";
+const ZENIX_BUILD_VERSION = "20260319-c384";
 const STORAGE_KEY = "zenix-progress-v4";
 const COVER_CACHE_KEY = "zenix-cover-cache-v1";
 const LOCAL_PLAY_KEY = "zenix-local-plays-v1";
@@ -15002,6 +15002,8 @@ async function autoRepairSourcesForPlayback(options = {}) {
   }
   state.sourceRetryAttempts.clear();
   state.sourceIndex = -1;
+  state.manualSourceLock = false;
+  state.manualSourceLockedIndex = -1;
   renderPlayerSourceOptions();
   scheduleHlsLanguageProbe(state.allEpisodeSources);
   if (refs.playerRepairStatus) {
@@ -15091,6 +15093,8 @@ async function runPlayerRepair() {
   }
   state.sourceRetryAttempts.clear();
   state.sourceIndex = -1;
+  state.manualSourceLock = false;
+  state.manualSourceLockedIndex = -1;
   renderPlayerSourceOptions();
   scheduleHlsLanguageProbe(state.allEpisodeSources);
   if (refs.playerRepairStatus) {
@@ -15109,7 +15113,7 @@ async function runPlayerRepair() {
         startIndex: 0,
         strictIndex: false,
         skipPremiumFallback: false,
-        skipFastfluxPriority: true,
+        skipFastfluxPriority: false,
         itemId: item.id,
       });
     } catch {
@@ -16110,6 +16114,17 @@ function isManualSourceLockActive() {
   return Boolean(state.manualSourceLock || state.sourceValidationActive);
 }
 
+function shouldLockFastfluxAutoSwitch() {
+  if (state.manualSourceLock) {
+    return false;
+  }
+  const current = state.sourcePool[state.sourceIndex] || null;
+  if (!current || !current.isFastflux) {
+    return false;
+  }
+  return state.sourcePool.some((entry) => entry && entry.isFastflux);
+}
+
 function startPlaybackGuard() {
   clearPlaybackGuard();
   const mobileGuard = isLikelyMobileDevice();
@@ -16160,6 +16175,10 @@ function startPlaybackGuard() {
       hasNextCandidate;
     if (state.sourceLoading || state.sourceIndex < 0) {
       if (loadingTooLong && !autoSwitchCooldownActive) {
+        if (shouldLockFastfluxAutoSwitch()) {
+          setPlayerStatus("Lecture FastFlux bloquee. Change la source manuellement ou clique sur reparer.", true);
+          return;
+        }
         switchingSource = true;
         setPlayerStatus("Lecture bloquee, bascule automatique...", true);
         trySwitchToNextSource()
@@ -16194,6 +16213,10 @@ function startPlaybackGuard() {
           statusText
         );
       if (!embedStall) {
+        return;
+      }
+      if (shouldLockFastfluxAutoSwitch()) {
+        setPlayerStatus("Lecture FastFlux bloquee. Change la source manuellement ou clique sur reparer.", true);
         return;
       }
       switchingSource = true;
@@ -16554,6 +16577,10 @@ function getFallbackSourceIndex(startIndex, excludeKeys = null) {
 }
 
 async function trySwitchToNextSource() {
+  if (shouldLockFastfluxAutoSwitch()) {
+    setPlayerStatus("Lecture FastFlux active. Change la source manuellement si besoin.", true);
+    return;
+  }
   if (isManualSourceLockActive()) {
     setPlayerStatus("Source selectionnee indisponible. Choisis une autre source.", true);
     return;
@@ -22516,6 +22543,7 @@ async function cleanupLegacyServiceWorker() {
     await Promise.all(keys.map((key) => caches.delete(key)));
   }
 }
+
 
 
 
