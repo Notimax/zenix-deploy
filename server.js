@@ -2132,6 +2132,7 @@ function resetFastfluxCaches() {
 function triggerGlobalRepair() {
   globalRepairEpoch = Date.now();
   resetFastfluxCaches();
+  purstreamSearchCache.clear();
   SOURCE_PROBE_CACHE.clear();
 }
 

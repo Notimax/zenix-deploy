@@ -1670,3 +1670,6 @@ FASTFLUX AUTO-SWITCH LOCK (2026-03-19, c384)
 - Auto-switch is blocked when FastFlux is active (no silent source change unless user clicks).
 - Repair now clears manual lock and keeps FastFlux priority after refresh.
 - Cache-bust bumped to 20260319-c384.
+
+GLOBAL REPAIR CACHE CLEAR (2026-03-19, c384b)
+- Global repair now clears Purstream search cache too (ensures VF fallback refresh for everyone).
