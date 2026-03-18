@@ -1,5 +1,5 @@
 const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260318-c365";
+const ZENIX_BUILD_VERSION = "20260318-c366";
 const STORAGE_KEY = "zenix-progress-v4";
 const COVER_CACHE_KEY = "zenix-cover-cache-v1";
 const LOCAL_PLAY_KEY = "zenix-local-plays-v1";
@@ -16595,6 +16595,9 @@ async function playFromSourcePool(resumeTime, token, startIndex = 0, options = {
       return;
     } catch (error) {
       lastError = error;
+      if (error && error.code === "FASTFLUX_CANCELLED") {
+        throw error;
+      }
       if (strictIndex) {
         break;
       }
@@ -17559,6 +17562,11 @@ async function switchPlayerSource(index) {
   } catch (error) {
     state.sourceIndex = safeIndex;
     renderPlayerSourceOptions();
+    if (error && error.code === "FASTFLUX_CANCELLED") {
+      setPlayerStatus("Lecteur FastFlux annule. Choisis la source FastFlux pour relancer.", true);
+      showToast("Lecteur FastFlux annule.");
+      return;
+    }
     setPlayerStatus("Source selectionnee indisponible. Essaie une autre source.", true);
     throw error;
   }
@@ -18625,7 +18633,11 @@ async function startPlayerSource(source, resumeTime, token, options = {}) {
     const approved = await requestFastfluxSmartlink();
     if (!approved) {
       setPlayerLoading(false);
-      throw new Error("Fastflux smartlink cancelled");
+      const err = new Error("Fastflux smartlink cancelled");
+      err.code = "FASTFLUX_CANCELLED";
+      setPlayerStatus("Lecteur FastFlux annule. Choisis la source FastFlux pour relancer.", true);
+      showToast("Lecteur FastFlux annule.");
+      throw err;
     }
   }
   let directReadyTimeout = mobilePlayback ? Math.min(VIDEO_READY_TIMEOUT_MS, MOBILE_VIDEO_READY_TIMEOUT_MS) : VIDEO_READY_TIMEOUT_MS;

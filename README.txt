@@ -1588,3 +1588,7 @@ FASTFLUX SMARTLINK SESSION FIX (2026-03-18, c364)
 FASTFLUX SMARTLINK PERSISTENCE (2026-03-18, c365)
 - Smartlink suppression now persists across content changes using sessionStorage + localStorage TTL + cookie + window.name fallback.
 - Cache-bust bumped to 20260318-c365.
+
+FASTFLUX CANCEL FEEDBACK (2026-03-18, c366)
+- Cancelling the FastFlux gate now shows a clear message and stops fallback playback; user can reselect FastFlux to retry.
+- Cache-bust bumped to 20260318-c366.
