@@ -77,6 +77,12 @@ LATEST FIX LOG (2026-03-18, c346)
 - Admin analytics payload includes watchingNow.
 - Cache-bust bumped to 20260318-c346.
 
+LATEST FIX LOG (2026-03-18, c347)
+- FastFlux sources are now forced through the proxy (proxy-only) to avoid hotlink/CORS failures.
+- Player validation timeout raised for heavy MP4 sources (improves FastFlux start reliability).
+- Catalog rendering tuned for smoother scroll (smaller chunks + lower warmup budgets).
+- Cache-bust bumped to 20260318-c347.
+
 LATEST FIX LOG (2026-03-17, c326)
 - Mobile navbar redesigned as a full-screen streaming menu (premium overlay).
 - Mobile nav now occupies the full viewport with slide-up animation.

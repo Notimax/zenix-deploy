@@ -8449,6 +8449,14 @@ function buildFastfluxSourceEntry(sourceRow, index = 0) {
   if (!streamUrl) {
     return null;
   }
+  let fastfluxHost = "";
+  try {
+    fastfluxHost = new URL(streamUrl).hostname.toLowerCase();
+  } catch {
+    fastfluxHost = "";
+  }
+  const isFastfluxHost =
+    fastfluxHost.endsWith("fastflux.xyz") || fastfluxHost.endsWith("cdn.fastflux.xyz");
   const language = normalizePidoovLanguage(sourceRow?.language || sourceRow?.lang || "") || "VF";
   const quality = normalizeFastfluxQuality(sourceRow?.quality || sourceRow?.qlt || "");
   const formatHint = String(sourceRow?.type || sourceRow?.format || "").trim();
@@ -8461,22 +8469,12 @@ function buildFastfluxSourceEntry(sourceRow, index = 0) {
     format === "webm" ||
     format === "dash" ||
     /\.(mp4|webm|mpd)(?:$|[?#])/i.test(streamUrl);
-  let needsProxy = looksHls;
-  if (!needsProxy && !looksDirect && !isEmbed) {
-    try {
-      const host = new URL(streamUrl).hostname.toLowerCase();
-      if (host.endsWith("fastflux.xyz") || host.endsWith("cdn.fastflux.xyz")) {
-        needsProxy = true;
-      }
-    } catch {
-      // ignore URL parse errors, keep default proxy decision
-    }
-  }
+  let needsProxy = looksHls || isFastfluxHost;
   if (isEmbed) {
     needsProxy = false;
   }
-  const allowDirect = Boolean(looksDirect);
-  const proxyPreferred = allowDirect;
+  const allowDirect = Boolean(looksDirect && !isFastfluxHost);
+  const proxyPreferred = true;
   const finalUrl = isAlreadyProxied ? streamUrl : needsProxy ? buildHlsProxyPath(streamUrl) : streamUrl;
   return {
     stream_url: finalUrl,

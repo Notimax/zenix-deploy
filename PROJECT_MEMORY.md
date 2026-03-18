@@ -119,6 +119,12 @@ Last update: 2026-03-16
 - Admin analytics payload now returns `watchingNow`.
 - Cache-bust updated to `20260318-c346`.
 
+## c347 follow-up (2026-03-18)
+- FastFlux sources are forced proxy-only to prevent hotlink/CORS failures on direct MP4.
+- Player validation timeout increased to improve MP4 startup reliability.
+- Catalog render budgets reduced for smoother scroll on mobile/low-end devices.
+- Cache-bust updated to `20260318-c347`.
+
 ## c316 follow-up (2026-03-16)
 - HLS proxy now preserves referer across redirects; playlist rewrites use the final URL (FastFlux CDN fix).
 - External FastFlux items no longer swap to internal duplicates (FastFlux stays preferred).
