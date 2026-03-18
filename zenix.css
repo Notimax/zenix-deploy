@@ -7370,6 +7370,7 @@ body.backup-locked .back-to-top {
   overflow-x: hidden;
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
+  box-sizing: border-box;
 }
 
 .tv-controls {
@@ -7377,15 +7378,22 @@ body.backup-locked .back-to-top {
   flex-wrap: wrap;
   gap: 12px;
   align-items: flex-end;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .tv-controls .field {
   flex: 1 1 160px;
   min-width: 160px;
+  display: flex;
+  flex-direction: column;
 }
 
 .tv-controls .tv-search {
   flex: 2 1 260px;
+  display: flex;
+  flex-direction: column;
 }
 
 .tv-controls select {
@@ -7418,6 +7426,9 @@ body.backup-locked .back-to-top {
   grid-template-columns: minmax(0, 1.4fr) minmax(0, 0.6fr);
   gap: 16px;
   align-items: start;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .tv-player-card {
@@ -7426,6 +7437,9 @@ body.backup-locked .back-to-top {
   border: 1px solid rgba(255, 255, 255, 0.14);
   background: rgba(12, 14, 22, 0.78);
   box-shadow: 0 20px 44px rgba(0, 0, 0, 0.35);
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .tv-player-head {
@@ -7456,6 +7470,8 @@ body.backup-locked .back-to-top {
   background: rgba(5, 6, 10, 0.8);
   min-height: 220px;
   aspect-ratio: 16 / 9;
+  width: 100%;
+  max-width: 100%;
 }
 
 .tv-video-wrap video,
@@ -7465,6 +7481,7 @@ body.backup-locked .back-to-top {
   border: 0;
   display: block;
   background: #000;
+  max-width: 100%;
 }
 
 .tv-player-empty {
@@ -7739,6 +7756,9 @@ body.backup-locked .back-to-top {
   .tv-controls .field,
   .tv-controls .tv-search {
     width: 100%;
+  }
+  .tv-player-card {
+    padding: 12px;
   }
   .tv-panel-toggle {
     display: inline-flex;

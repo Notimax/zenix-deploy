@@ -148,6 +148,11 @@ Last update: 2026-03-16
 - Fallback keeps the JSON API path when M3U fails.
 - Cache-bust updated to `20260318-c351`.
 
+## c352 follow-up (2026-03-18)
+- TV Direct mobile layout hardened again: controls + player forced inside viewport.
+- Added box-sizing/width constraints to stop horizontal overflow on phone.
+- Cache-bust updated to `20260318-c352`.
+
 ## c316 follow-up (2026-03-16)
 - HLS proxy now preserves referer across redirects; playlist rewrites use the final URL (FastFlux CDN fix).
 - External FastFlux items no longer swap to internal duplicates (FastFlux stays preferred).

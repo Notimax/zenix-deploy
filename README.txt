@@ -107,6 +107,11 @@ LATEST FIX LOG (2026-03-18, c351)
 - Mobile TV Direct controls forced to full width to stop overflow on search.
 - Cache-bust bumped to 20260318-c351.
 
+LATEST FIX LOG (2026-03-18, c352)
+- TV Direct mobile layout hardened again: controls + player are forced inside viewport.
+- Added box-sizing + width constraints to stop any horizontal overflow on phone.
+- Cache-bust bumped to 20260318-c352.
+
 LATEST FIX LOG (2026-03-17, c326)
 - Mobile navbar redesigned as a full-screen streaming menu (premium overlay).
 - Mobile nav now occupies the full viewport with slide-up animation.
