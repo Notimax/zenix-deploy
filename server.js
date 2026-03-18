@@ -13065,6 +13065,8 @@ async function fetchHlsUpstreamWithFallback(target, range, signal, method = "GET
   ];
 
   let lastResponse = null;
+  const retryableStatuses = new Set([401, 403, 404, 405, 416, 429]);
+  const isFastfluxHost = targetHost.endsWith("fastflux.xyz") || targetHost.endsWith("cdn.fastflux.xyz");
   for (let index = 0; index < headerVariants.length; index += 1) {
     const headers = {
       ...baseHeaders,
@@ -13085,7 +13087,11 @@ async function fetchHlsUpstreamWithFallback(target, range, signal, method = "GET
     );
     lastResponse = upstream;
     const status = Number(upstream.status || 0);
-    if (status !== 403 && status !== 429) {
+    const shouldRetry =
+      status === 403 ||
+      status === 429 ||
+      (isFastfluxHost && retryableStatuses.has(status));
+    if (!shouldRetry) {
       return upstream;
     }
     if (index < headerVariants.length - 1) {

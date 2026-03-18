@@ -150,7 +150,9 @@ LATEST FIX LOG (2026-03-18, c360)
 - Scream 7 / Banlieusards 3 now return a dedicated debug MP4 source (FastFlux CDN via proxy).
 - Ensures the correct URL is always used for these titles.
 
-
+LATEST FIX LOG (2026-03-18, c361)
+- HLS proxy now retries more FastFlux responses (401/403/404/405/416/429) across header variants.
+- Fixes FastFlux MP4 debug URLs returning HTML/403 on some clients.
 
 LATEST FIX LOG (2026-03-17, c326)
 - Mobile navbar redesigned as a full-screen streaming menu (premium overlay).
@@ -785,12 +787,10 @@ LATEST MOBILE CATALOG 2-UP (2026-03-09, c161)
 - On phone widths, `catalog-grid` is now forced to 2 covers per row (duo layout).
 - Rule is applied in a late CSS block to avoid overrides from other responsive sections.
 
-
 LATEST TYPE/ANIME-SOURCE HARDENING (2026-03-09, c162)
 - Calendar type resolver now gates anime classification through Anime-Sama source checks.
 - Calendar feed now drops anime-like rows when source is not Anime-Sama (prevents serie/anime mixing).
 - Player source chips no longer render provider-origin bubble tags; labels are sanitized to avoid host/provider leaks.
-
 
 LATEST SOURCE LABEL PRIVACY HARDENING (2026-03-09, c163)
 - Source quality display now shows only normalized quality tokens (2160p/1080p/HD/SD) or `Auto`.
@@ -1427,11 +1427,9 @@ LATEST UI SELF-HEAL MONITOR (2026-03-15, c295)
 - Exposed __zenixCssEnsure in index.html and invoked it during health checks when CSS is missing.
 - One-time hard reload only if repeated health failures and no overlay is open (to avoid disrupting playback).
 
-
 LATEST UI HEALTH TUNING (2026-03-15, c296)
 - UI health monitor now runs every 12s with a 3.5s first check.
 - Health checks now re-run on tab focus and when the network returns (online).
-
 
 LATEST SOURCE MATCH + ADBLOCK FALLBACK (2026-03-15, c297)
 - Nakios strict matching tightened: strong title match required in search, stricter token checks + year compatibility in source filtering.
