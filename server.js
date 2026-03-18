@@ -13325,12 +13325,23 @@ async function handleHlsProxy(req, res, requestUrl) {
       upstream = await fetchHlsUpstreamWithFallback(target, likelyPlaylistPath ? "" : range, controller.signal, "GET");
     }
 
-    const status = Number(upstream.status || 502);
-    const contentType = String(upstream.headers.get("content-type") || "").toLowerCase();
+    let status = Number(upstream.status || 502);
+    let contentType = String(upstream.headers.get("content-type") || "").toLowerCase();
     const isPlaylist =
       target.pathname.toLowerCase().endsWith(".m3u8") ||
       contentType.includes("mpegurl") ||
       contentType.includes("vnd.apple.mpegurl");
+
+    if (!isPlaylist && range && [400, 401, 403, 404, 405, 416, 429].includes(status)) {
+      try {
+        await upstream.arrayBuffer();
+      } catch {
+        // ignore body drain issues
+      }
+      upstream = await fetchHlsUpstreamWithFallback(target, "", controller.signal, "GET");
+      status = Number(upstream.status || 502);
+      contentType = String(upstream.headers.get("content-type") || "").toLowerCase();
+    }
 
     if (isPlaylist) {
       // Always return full playlists to Safari/iOS. Partial ranged playlist responses can
