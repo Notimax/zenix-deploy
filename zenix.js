@@ -1,5 +1,5 @@
 const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260318-c364";
+const ZENIX_BUILD_VERSION = "20260318-c365";
 const STORAGE_KEY = "zenix-progress-v4";
 const COVER_CACHE_KEY = "zenix-cover-cache-v1";
 const LOCAL_PLAY_KEY = "zenix-local-plays-v1";
@@ -291,6 +291,7 @@ const NATIVE_AD_FRAME_SANDBOX = "allow-scripts allow-same-origin";
 const FASTFLUX_SMARTLINK_URL = "https://walkeralacrityfavorite.com/k1kzat14?key=276c268eafa6cbd5fab61659f983a7b6";
 const FASTFLUX_SMARTLINK_SESSION_KEY = "zenix-fastflux-smartlink-v1";
 const FASTFLUX_SMARTLINK_TTL_MS = 2 * 60 * 60 * 1000;
+const FASTFLUX_SMARTLINK_COOKIE = "zenix_fastflux=1";
 const ADBLOCK_MONITOR_INTERVAL_MS = 8500;
 const ADBLOCK_BOOT_DELAY_MS = 950;
 const ADBLOCK_CONFIRM_DELAY_MS = 160;
@@ -5545,6 +5546,9 @@ function hasFastfluxPromptSession() {
   if (state.fastfluxSmartlinkGranted) {
     return true;
   }
+  if (typeof window !== "undefined" && window.__zenixFastfluxGranted) {
+    return true;
+  }
   try {
     return sessionStorage.getItem(FASTFLUX_SMARTLINK_SESSION_KEY) === "1";
   } catch {
@@ -5558,11 +5562,34 @@ function hasFastfluxPromptSession() {
   } catch {
     // ignore
   }
+  try {
+    if (typeof document !== "undefined") {
+      const cookies = String(document.cookie || "");
+      if (cookies.includes(FASTFLUX_SMARTLINK_COOKIE)) {
+        return true;
+      }
+    }
+  } catch {
+    // ignore
+  }
+  try {
+    if (typeof window !== "undefined") {
+      const name = String(window.name || "");
+      if (name.includes("zenix_fastflux=1")) {
+        return true;
+      }
+    }
+  } catch {
+    // ignore
+  }
   return false;
 }
 
 function markFastfluxPromptSession() {
   state.fastfluxSmartlinkGranted = true;
+  if (typeof window !== "undefined") {
+    window.__zenixFastfluxGranted = true;
+  }
   try {
     sessionStorage.setItem(FASTFLUX_SMARTLINK_SESSION_KEY, "1");
   } catch {
@@ -5570,6 +5597,25 @@ function markFastfluxPromptSession() {
   }
   try {
     localStorage.setItem(`${FASTFLUX_SMARTLINK_SESSION_KEY}:ts`, String(Date.now()));
+  } catch {
+    // ignore
+  }
+  try {
+    if (typeof document !== "undefined") {
+      document.cookie = `${FASTFLUX_SMARTLINK_COOKIE}; Max-Age=${Math.floor(
+        FASTFLUX_SMARTLINK_TTL_MS / 1000
+      )}; Path=/; SameSite=Lax`;
+    }
+  } catch {
+    // ignore
+  }
+  try {
+    if (typeof window !== "undefined") {
+      const current = String(window.name || "");
+      if (!current.includes("zenix_fastflux=1")) {
+        window.name = current ? `${current}|zenix_fastflux=1` : "zenix_fastflux=1";
+      }
+    }
   } catch {
     // ignore
   }

@@ -1584,3 +1584,7 @@ FASTFLUX SMARTLINK PASS-THROUGH (2026-03-18, c363)
 FASTFLUX SMARTLINK SESSION FIX (2026-03-18, c364)
 - FastFlux smartlink now persists per session using in-memory + sessionStorage, with localStorage TTL fallback (2h) for browsers that block sessionStorage.
 - Cache-bust bumped to 20260318-c364.
+
+FASTFLUX SMARTLINK PERSISTENCE (2026-03-18, c365)
+- Smartlink suppression now persists across content changes using sessionStorage + localStorage TTL + cookie + window.name fallback.
+- Cache-bust bumped to 20260318-c365.
