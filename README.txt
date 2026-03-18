@@ -101,6 +101,12 @@ LATEST FIX LOG (2026-03-18, c350)
 - Client no longer caps TV Direct channels to 26.
 - Cache-bust bumped to 20260318-c350.
 
+LATEST FIX LOG (2026-03-18, c351)
+- TV Directs now pulls FR channels from the iptv-org FR M3U (more reliable + faster).
+- If M3U fails, fallback keeps the JSON API path.
+- Mobile TV Direct controls forced to full width to stop overflow on search.
+- Cache-bust bumped to 20260318-c351.
+
 LATEST FIX LOG (2026-03-17, c326)
 - Mobile navbar redesigned as a full-screen streaming menu (premium overlay).
 - Mobile nav now occupies the full viewport with slide-up animation.

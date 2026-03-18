@@ -143,6 +143,11 @@ Last update: 2026-03-16
 - Client no longer caps TV Direct channels to 26.
 - Cache-bust updated to `20260318-c350`.
 
+## c351 follow-up (2026-03-18)
+- TV Directs now pulls FR channels from the iptv-org FR M3U (faster + more reliable).
+- Fallback keeps the JSON API path when M3U fails.
+- Cache-bust updated to `20260318-c351`.
+
 ## c316 follow-up (2026-03-16)
 - HLS proxy now preserves referer across redirects; playlist rewrites use the final URL (FastFlux CDN fix).
 - External FastFlux items no longer swap to internal duplicates (FastFlux stays preferred).

@@ -24,6 +24,7 @@ const LIVEWATCH_API_URL = "https://v2.livewatch.sbs/?action=api";
 const LIVEWATCH_CACHE_MS = Math.max(2 * 60 * 1000, Number(process.env.LIVEWATCH_CACHE_MS || 12 * 60 * 1000));
 const IPTV_CHANNELS_URL = "https://iptv-org.github.io/api/channels.json";
 const IPTV_STREAMS_URL = "https://iptv-org.github.io/api/streams.json";
+const IPTV_FR_M3U_URL = "https://iptv-org.github.io/iptv/countries/fr.m3u";
 const IPTV_CACHE_MS = Math.max(5 * 60 * 1000, Number(process.env.IPTV_CACHE_MS || 20 * 60 * 1000));
 const NAKIOS_BASE = "https://nakios.site";
 const NAKIOS_HOST = "nakios.site";
@@ -1342,6 +1343,31 @@ function pickBestStream(streams) {
 }
 
 async function getIptvOrgFrChannels(options = {}) {
+  const queryKey = normalizeTitleKey(options.query || "");
+  try {
+    const m3u = await fetchIptvFrM3u();
+    const parsed = parseIptvFrM3u(m3u);
+    const ordered = parsed
+      .map((entry, index) => {
+        const tntMatch = IPTV_TNT_CHANNELS.find((slot) =>
+          matchesChannelNames({ name: entry.name || "" }, slot.names)
+        );
+        return {
+          ...entry,
+          order: tntMatch ? tntMatch.order : 1000 + index,
+        };
+      })
+      .filter((entry) => {
+        if (!queryKey) {
+          return true;
+        }
+        return normalizeTitleKey(entry.name || "").includes(queryKey);
+      });
+    return ordered;
+  } catch {
+    // Fallback to JSON API if M3U fails
+  }
+
   const payload = await fetchIptvPayload();
   const channels = Array.isArray(payload?.channels) ? payload.channels : [];
   const streams = Array.isArray(payload?.streams) ? payload.streams : [];
@@ -1369,10 +1395,7 @@ async function getIptvOrgFrChannels(options = {}) {
     streamsByChannel.set(channelId, rows);
   });
 
-  const queryKey = normalizeTitleKey(options.query || "");
   const results = [];
-  const tntSlots = IPTV_TNT_CHANNELS.slice();
-
   frChannels.forEach((channel, index) => {
     const channelId = String(channel?.id || "").trim();
     if (!channelId) {
@@ -1390,7 +1413,7 @@ async function getIptvOrgFrChannels(options = {}) {
         return;
       }
     }
-    const tntMatch = tntSlots.find((slot) => matchesChannelNames(channel, slot.names));
+    const tntMatch = IPTV_TNT_CHANNELS.find((slot) => matchesChannelNames(channel, slot.names));
     const entry = normalizeTvChannelEntry({
       id: `iptv_${channelId}`,
       name: metaName || channelId,
@@ -11748,6 +11771,63 @@ function resolveOwnedSources(type, mediaId, season, episode) {
     dedupe.add(key);
     return true;
   });
+}
+
+async function fetchIptvFrM3u() {
+  const response = await fetchRemoteText(IPTV_FR_M3U_URL, "application/x-mpegURL");
+  if (response.status < 200 || response.status >= 300) {
+    throw new Error(`IPTV FR m3u HTTP ${response.status}`);
+  }
+  return response.body;
+}
+
+function parseM3uAttributes(raw) {
+  const attrs = {};
+  const line = String(raw || "");
+  const attrRegex = /([a-zA-Z0-9_-]+)=\"([^\"]*)\"/g;
+  let match;
+  while ((match = attrRegex.exec(line))) {
+    attrs[match[1]] = match[2];
+  }
+  const nameSplit = line.split(",");
+  const name = nameSplit.length > 1 ? nameSplit.slice(1).join(",").trim() : "";
+  return { attrs, name };
+}
+
+function parseIptvFrM3u(text) {
+  const lines = String(text || "")
+    .split(/\r?\n/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  const results = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (!line.startsWith("#EXTINF")) {
+      continue;
+    }
+    const { attrs, name } = parseM3uAttributes(line);
+    const url = lines[i + 1] || "";
+    if (!/^https?:\/\//i.test(url)) {
+      continue;
+    }
+    const title = name || attrs["tvg-name"] || attrs["tvg-id"] || "";
+    if (!title) {
+      continue;
+    }
+    const entry = normalizeTvChannelEntry({
+      id: `iptv_m3u_${normalizeTitleKey(attrs["tvg-id"] || title) || normalizeTitleKey(url)}`,
+      name: title,
+      url,
+      type: /\.m3u8($|[?#])/i.test(url) ? "hls" : /youtube|embed|player/i.test(url) ? "embed" : "mp4",
+      logo: String(attrs["tvg-logo"] || "").trim(),
+      group: String(attrs["group-title"] || "France").trim(),
+      country: "France",
+    });
+    if (entry) {
+      results.push(entry);
+    }
+  }
+  return results;
 }
 
 async function fetchRemoteWithTimeout(target, extraHeaders = {}, timeoutMs = PROXY_TIMEOUT_MS) {
