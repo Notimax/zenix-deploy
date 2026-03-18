@@ -153,6 +153,11 @@ Last update: 2026-03-16
 - Added box-sizing/width constraints to stop horizontal overflow on phone.
 - Cache-bust updated to `20260318-c352`.
 
+## c353 follow-up (2026-03-18)
+- TV Direct HLS now tries proxy-first with direct fallback for blocked streams.
+- Improves TV playback reliability on mobile + desktop.
+- Cache-bust updated to `20260318-c353`.
+
 ## c316 follow-up (2026-03-16)
 - HLS proxy now preserves referer across redirects; playlist rewrites use the final URL (FastFlux CDN fix).
 - External FastFlux items no longer swap to internal duplicates (FastFlux stays preferred).

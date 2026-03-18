@@ -1,5 +1,5 @@
 const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260318-c352";
+const ZENIX_BUILD_VERSION = "20260318-c353";
 const STORAGE_KEY = "zenix-progress-v4";
 const COVER_CACHE_KEY = "zenix-cover-cache-v1";
 const LOCAL_PLAY_KEY = "zenix-local-plays-v1";
@@ -11258,44 +11258,62 @@ async function playTvChannel(channel) {
   refs.tvPlayerVideo.hidden = false;
   if (refs.tvPlayerEmpty) refs.tvPlayerEmpty.hidden = true;
 
+  const proxyUrl = toHlsProxyUrl(url);
+  const candidates = isHls
+    ? Array.from(new Set([proxyUrl, url].filter(Boolean)))
+    : Array.from(new Set([url, proxyUrl].filter(Boolean)));
+
   try {
-    if (isHls) {
-      if (shouldUseNativeHls(refs.tvPlayerVideo)) {
-        refs.tvPlayerVideo.src = url;
-        await refs.tvPlayerVideo.play();
-      } else {
-        const Hls = await loadHlsLibrary();
-        if (!Hls || !Hls.isSupported()) {
-          refs.tvPlayerVideo.src = url;
-          await refs.tvPlayerVideo.play();
+    let lastError = null;
+    for (const candidate of candidates) {
+      try {
+        teardownTvPlayback();
+        if (token !== state.tv.playToken) {
+          return;
+        }
+        if (isHls) {
+          if (shouldUseNativeHls(refs.tvPlayerVideo)) {
+            refs.tvPlayerVideo.src = candidate;
+            await refs.tvPlayerVideo.play();
+          } else {
+            const Hls = await loadHlsLibrary();
+            if (!Hls || !Hls.isSupported()) {
+              refs.tvPlayerVideo.src = candidate;
+              await refs.tvPlayerVideo.play();
+            } else {
+              const hls = new Hls({ lowLatencyMode: true });
+              state.tv.hls = hls;
+              hls.attachMedia(refs.tvPlayerVideo);
+              hls.on(Hls.Events.MEDIA_ATTACHED, () => {
+                hls.loadSource(candidate);
+              });
+              await new Promise((resolve, reject) => {
+                const timeoutId = setTimeout(() => reject(new Error("TV HLS timeout")), 5200);
+                hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                  clearTimeout(timeoutId);
+                  resolve();
+                });
+                hls.on(Hls.Events.ERROR, (_evt, data) => {
+                  if (data?.fatal) {
+                    clearTimeout(timeoutId);
+                    reject(new Error("TV HLS error"));
+                  }
+                });
+              });
+              await refs.tvPlayerVideo.play();
+            }
+          }
         } else {
-          const hls = new Hls({ lowLatencyMode: true });
-          state.tv.hls = hls;
-          hls.attachMedia(refs.tvPlayerVideo);
-          hls.on(Hls.Events.MEDIA_ATTACHED, () => {
-            hls.loadSource(url);
-          });
-          await new Promise((resolve, reject) => {
-            const timeoutId = setTimeout(() => reject(new Error("TV HLS timeout")), 5200);
-            hls.on(Hls.Events.MANIFEST_PARSED, () => {
-              clearTimeout(timeoutId);
-              resolve();
-            });
-            hls.on(Hls.Events.ERROR, (_evt, data) => {
-              if (data?.fatal) {
-                clearTimeout(timeoutId);
-                reject(new Error("TV HLS error"));
-              }
-            });
-          });
+          refs.tvPlayerVideo.src = candidate;
           await refs.tvPlayerVideo.play();
         }
+        if (refs.tvPlayerStatus) refs.tvPlayerStatus.textContent = "Lecture en cours";
+        return;
+      } catch (error) {
+        lastError = error;
       }
-    } else {
-      refs.tvPlayerVideo.src = url;
-      await refs.tvPlayerVideo.play();
     }
-    if (refs.tvPlayerStatus) refs.tvPlayerStatus.textContent = "Lecture en cours";
+    throw lastError || new Error("TV playback failed");
   } catch {
     if (refs.tvPlayerStatus) refs.tvPlayerStatus.textContent = "Lecture impossible";
     if (refs.tvPlayerEmpty) refs.tvPlayerEmpty.hidden = false;
