@@ -1,5 +1,5 @@
 const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260318-c369";
+const ZENIX_BUILD_VERSION = "20260318-c370";
 const STORAGE_KEY = "zenix-progress-v4";
 const COVER_CACHE_KEY = "zenix-cover-cache-v1";
 const LOCAL_PLAY_KEY = "zenix-local-plays-v1";
@@ -17042,7 +17042,6 @@ function rememberSourceSuccess(source, itemId = 0) {
 
 async function playFromSourcePoolWithValidation(resumeTime, token, options = {}) {
   const shouldValidate = SOURCE_VALIDATION_ENABLED && options?.skipValidation !== true;
-  const mobileGuard = isLikelyMobileDevice();
   const fastfluxContextKey = buildFastfluxContextKey(options);
   const enrichedOptions = fastfluxContextKey ? { ...options, fastfluxContextKey } : options;
   const fastfluxIndex = findFastfluxSourceIndex(state.sourcePool);
@@ -17057,47 +17056,6 @@ async function playFromSourcePoolWithValidation(resumeTime, token, options = {})
       allowPremiumRescue: true,
       fastfluxContextKey,
     });
-  }
-  if (mobileGuard && shouldValidate && !hasFastflux) {
-    state.sourceValidationActive = false;
-    try {
-      return await playFromSourcePoolWithRescue(resumeTime, token, {
-        startIndex: options?.startIndex ?? 0,
-        strictIndex: options?.strictIndex,
-        skipPremiumFallback: options?.skipPremiumFallback,
-        allowPremiumRescue: options?.allowPremiumRescue,
-        fastfluxContextKey,
-      });
-    } catch (firstError) {
-      if (options?.autoRepairTried) {
-        throw firstError;
-      }
-      const repairResult = await autoRepairSourcesForPlayback({
-        itemId: Number(options?.itemId || 0),
-        season: Number(options?.season || 0),
-        episode: Number(options?.episode || 0),
-      });
-      if (token !== state.playToken) {
-        return;
-      }
-      if (repairResult?.ok && state.sourcePool.length > 0) {
-        return playFromSourcePoolWithRescue(resumeTime, token, {
-          startIndex: options?.startIndex ?? 0,
-          strictIndex: options?.strictIndex,
-          skipPremiumFallback: options?.skipPremiumFallback,
-          allowPremiumRescue: options?.allowPremiumRescue,
-          autoRepairTried: true,
-          fastfluxContextKey,
-        });
-      }
-      const pending = Boolean(repairResult?.pending);
-      const message = pending
-        ? "Film trop recent, pas encore disponible."
-        : "Aucun lecteur en marche. Mentionner sur Discord \"Astrax\".";
-      setPlayerStatus(message, true);
-      setPlayerLoading(false);
-      throw firstError;
-    }
   }
   if (!shouldValidate || state.sourcePool.length <= 1) {
     return playFromSourcePoolWithRescue(resumeTime, token, enrichedOptions);

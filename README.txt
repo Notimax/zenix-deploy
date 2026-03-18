@@ -1610,3 +1610,8 @@ FASTFLUX START + TV MOBILE FIX (2026-03-18, c369)
 - When FastFlux is absent, validation runs to pick the fastest working reader, then auto-repair retries.
 - TV Direct mobile layout forced inside viewport (no horizontal overflow).
 - Cache-bust bumped to 20260318-c369.
+
+FASTFLUX VALIDATION + TV VIEWPORT (2026-03-18, c370)
+- Mobile validation now runs when FastFlux is absent (background reader test before play).
+- TV Direct view locks to viewport on mobile via tv-live class.
+- Cache-bust bumped to 20260318-c370.
