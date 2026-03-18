@@ -146,6 +146,11 @@ LATEST FIX LOG (2026-03-18, c359)
 - Mobile auto-switch guard relaxed to avoid rapid source bouncing.
 - Cache-bust bumped to 20260318-c359.
 
+LATEST FIX LOG (2026-03-18, c360)
+- Scream 7 / Banlieusards 3 now return a dedicated debug MP4 source (FastFlux CDN via proxy).
+- Ensures the correct URL is always used for these titles.
+
+
 
 LATEST FIX LOG (2026-03-17, c326)
 - Mobile navbar redesigned as a full-screen streaming menu (premium overlay).

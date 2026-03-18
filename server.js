@@ -15720,6 +15720,62 @@ async function handleZenixSource(req, res, requestUrl) {
   const externalKeyParam = String(requestUrl.searchParams.get("externalKey") || "").trim();
   const mediaId = toInt(requestUrl.searchParams.get("mediaId"), 0, 0, 999999999);
   let tmdbId = toInt(requestUrl.searchParams.get("tmdbId"), 0, 0, 999999999);
+  if (mediaType === "movie" && isScream7Target(title, tmdbId, mediaId) && NOCTA_SCREAM7_DEBUG_URL) {
+    const proxiedUrl = buildHlsProxyPath(NOCTA_SCREAM7_DEBUG_URL);
+    sendJson(res, 200, {
+      apiVersion: "zenix-source-v1",
+      type: "success",
+      data: {
+        title: String(title || "Scream 7").trim(),
+        mediaType,
+        year,
+        season: 1,
+        episode: 1,
+        tmdbId: tmdbId > 0 ? tmdbId : 0,
+        count: 1,
+        sources: [
+          {
+            stream_url: proxiedUrl,
+            source_name: "Scream 7 Debug",
+            debug: true,
+            quality: "Full HD",
+            language: "VF",
+            format: "mp4",
+            priority: 420,
+          },
+        ],
+      },
+    });
+    return true;
+  }
+  if (mediaType === "movie" && isBanlieusards3Target(title) && NOCTA_BANLIEUSARDS3_DEBUG_URL) {
+    const proxiedUrl = buildHlsProxyPath(NOCTA_BANLIEUSARDS3_DEBUG_URL);
+    sendJson(res, 200, {
+      apiVersion: "zenix-source-v1",
+      type: "success",
+      data: {
+        title: String(title || "Banlieusards 3").trim(),
+        mediaType,
+        year,
+        season: 1,
+        episode: 1,
+        tmdbId: tmdbId > 0 ? tmdbId : 0,
+        count: 1,
+        sources: [
+          {
+            stream_url: proxiedUrl,
+            source_name: "Banlieusards 3 Debug",
+            debug: true,
+            quality: "Full HD",
+            language: "VF",
+            format: "mp4",
+            priority: 418,
+          },
+        ],
+      },
+    });
+    return true;
+  }
   const isCarsQuatreRoues = isCarsQuatreRouesTarget(title, tmdbId);
   if (mediaType === "movie" && isCarsQuatreRoues) {
     let fastfluxSources = [];
