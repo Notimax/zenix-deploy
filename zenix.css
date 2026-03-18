@@ -7541,6 +7541,157 @@ body.backup-locked .back-to-top {
   color: rgba(255, 255, 255, 0.6);
 }
 
+.random-section {
+  display: grid;
+  gap: 16px;
+}
+
+.random-shell {
+  display: grid;
+  gap: 16px;
+}
+
+.random-picker {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+}
+
+.random-card {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(14, 18, 26, 0.7);
+  color: #f6f7ff;
+  text-align: left;
+  transition: transform 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.random-card .random-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  background: rgba(109, 193, 255, 0.18);
+  color: #9fd3ff;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+}
+
+.random-card .random-label {
+  font-weight: 700;
+  font-size: 1rem;
+}
+
+.random-card.active {
+  border-color: rgba(109, 193, 255, 0.6);
+  box-shadow: 0 16px 34px rgba(0, 0, 0, 0.3);
+  transform: translateY(-1px);
+}
+
+.random-animation {
+  display: grid;
+  place-items: center;
+  gap: 10px;
+  padding: 22px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(12, 14, 22, 0.72);
+  color: rgba(255, 255, 255, 0.78);
+  text-align: center;
+}
+
+.random-spinner {
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  border: 3px solid rgba(255, 255, 255, 0.2);
+  border-top-color: rgba(109, 193, 255, 0.9);
+  animation: randomSpin 0.9s linear infinite;
+}
+
+@keyframes randomSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.random-result {
+  display: grid;
+  gap: 12px;
+}
+
+.random-result-card {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 14px;
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(12, 14, 22, 0.78);
+  box-shadow: 0 18px 36px rgba(0, 0, 0, 0.32);
+}
+
+.random-result-card img {
+  width: 100%;
+  border-radius: 12px;
+  aspect-ratio: 2 / 3;
+  object-fit: cover;
+}
+
+.random-result-body {
+  display: grid;
+  gap: 10px;
+}
+
+.random-result-title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  margin: 0;
+}
+
+.random-result-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.random-result-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.random-empty {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.tv-shell,
+.tv-player-card,
+.tv-channel-panel {
+  max-width: 100%;
+}
+
+.tv-channel-card {
+  width: 100%;
+  min-width: 0;
+}
+
+.tv-channel-info {
+  min-width: 0;
+}
+
+.tv-channel-name,
+.tv-channel-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 @media (max-width: 960px) {
   .request-shell,
   .tv-shell {
@@ -7555,6 +7706,18 @@ body.backup-locked .back-to-top {
 @media (max-width: 740px) {
   .hero {
     display: none !important;
+  }
+  .random-picker {
+    grid-template-columns: 1fr;
+  }
+  .random-result-card {
+    grid-template-columns: 96px 1fr;
+  }
+  .random-card {
+    padding: 12px 14px;
+  }
+  .tv-section {
+    overflow-x: hidden;
   }
   .tv-controls {
     gap: 10px;

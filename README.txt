@@ -89,6 +89,12 @@ LATEST FIX LOG (2026-03-18, c348)
 - Probe-only validation no longer calls `video.play()` (avoids iOS autoplay blocks during validation).
 - Cache-bust bumped to 20260318-c348.
 
+LATEST FIX LOG (2026-03-18, c349)
+- TV Directs mobile layout tightened (no overflow), long channel names now ellipsized.
+- TV Directs client-side hard cap to TNT 1-26 if any extra channels leak.
+- Aleatoire now has a dedicated Nakios-style view (pick Film/Serie/Anime + animation + result card).
+- Cache-bust bumped to 20260318-c349.
+
 LATEST FIX LOG (2026-03-17, c326)
 - Mobile navbar redesigned as a full-screen streaming menu (premium overlay).
 - Mobile nav now occupies the full viewport with slide-up animation.

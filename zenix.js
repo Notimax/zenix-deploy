@@ -1,5 +1,5 @@
 const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260318-c348";
+const ZENIX_BUILD_VERSION = "20260318-c349";
 const STORAGE_KEY = "zenix-progress-v4";
 const COVER_CACHE_KEY = "zenix-cover-cache-v1";
 const LOCAL_PLAY_KEY = "zenix-local-plays-v1";
@@ -568,11 +568,18 @@ themeFilters: {
     source: "auto",
     country: "France",
     query: "",
-    limit: 180,
+    limit: 26,
     countries: [],
     searchTimer: 0,
     panelOpen: false,
     renderKey: "",
+  },
+  randomView: {
+    type: "movie",
+    loading: false,
+    result: null,
+    timer: 0,
+    seed: Date.now(),
   },
   repairCache: new Map(),
   repairInFlight: new Map(),
@@ -603,6 +610,10 @@ const refs = {
   recommendationResults: document.getElementById("recommendationResults"),
   recommendationGrid: document.getElementById("recommendationGrid"),
   recommendationRestartBtn: document.getElementById("recommendationRestartBtn"),
+  randomSection: document.getElementById("randomSection"),
+  randomPicker: document.getElementById("randomPicker"),
+  randomAnimation: document.getElementById("randomAnimation"),
+  randomResult: document.getElementById("randomResult"),
   requestSection: document.getElementById("requestSection"),
   requestTypeToggle: document.getElementById("requestTypeToggle"),
   requestSearchInput: document.getElementById("requestSearchInput"),
@@ -885,6 +896,10 @@ function rehydrateCoreRefs() {
   refs.calendarSection = refs.calendarSection || document.getElementById("calendarSection");
   refs.infoSection = refs.infoSection || document.getElementById("infoSection");
   refs.recommendationSection = refs.recommendationSection || document.getElementById("recommendationSection");
+  refs.randomSection = refs.randomSection || document.getElementById("randomSection");
+  refs.randomPicker = refs.randomPicker || document.getElementById("randomPicker");
+  refs.randomAnimation = refs.randomAnimation || document.getElementById("randomAnimation");
+  refs.randomResult = refs.randomResult || document.getElementById("randomResult");
   refs.requestSection = refs.requestSection || document.getElementById("requestSection");
   refs.requestTypeToggle = refs.requestTypeToggle || document.getElementById("requestTypeToggle");
   refs.requestSearchInput = refs.requestSearchInput || document.getElementById("requestSearchInput");
@@ -3225,6 +3240,15 @@ function bindEvents() {
     });
   });
 
+  if (refs.randomPicker) {
+    refs.randomPicker.querySelectorAll(".random-card").forEach((button) => {
+      bindSafeTap(button, () => {
+        const type = String(button.dataset.randomType || "movie");
+        startRandomPick(type);
+      });
+    });
+  }
+
   bindFastPress(refs.exportListBtn, () => {
     exportFavoritesAsJson();
   });
@@ -4034,8 +4058,13 @@ function handleViewSelection(view) {
     state.query = "";
   }
   if (normalizedView === "random") {
+    state.query = "";
+  }
+  if (normalizedView === "random") {
     state.sortBy = "random";
     state.randomSortSeed = Date.now();
+    state.randomView.loading = false;
+    state.randomView.result = null;
     if (refs.sortSelect) {
       refs.sortSelect.value = state.sortBy;
     }
@@ -8437,7 +8466,13 @@ function renderAll() {
   const isTvView = !hasQuery && state.view === "tv-live";
   const isRandomView = !hasQuery && state.view === "random";
   const showBrowseView =
-    !isInfoView && !isCalendarView && !isListView && !isRecommendationView && !isRequestView && !isTvView;
+    !isInfoView &&
+    !isCalendarView &&
+    !isListView &&
+    !isRecommendationView &&
+    !isRequestView &&
+    !isTvView &&
+    !isRandomView;
 
   const showHero = showBrowseView && !isCompactViewport();
 
@@ -8492,6 +8527,10 @@ function renderAll() {
     renderTvView();
   }
 
+  if (isRandomView) {
+    renderRandomView();
+  }
+
   if (isCalendarView) {
     renderCalendarSection();
   }
@@ -8499,21 +8538,41 @@ function renderAll() {
   updateCatalogHeading(hasQuery, visible.length);
 
   setHidden(refs.heroSection, !showHero);
-  setHidden(refs.statusStrip, isInfoView || isCalendarView || isRecommendationView || isRequestView || isTvView);
+  setHidden(
+    refs.statusStrip,
+    isInfoView || isCalendarView || isRecommendationView || isRequestView || isTvView || isRandomView
+  );
   setHidden(refs.quickLinksSection, true);
   setHidden(
     refs.filtersPanel,
-    HIDE_BROWSE_PANELS || isInfoView || isCalendarView || isTopView || isListView || isRecommendationView || isRequestView || isTvView
+    HIDE_BROWSE_PANELS ||
+      isInfoView ||
+      isCalendarView ||
+      isTopView ||
+      isListView ||
+      isRecommendationView ||
+      isRequestView ||
+      isTvView ||
+      isRandomView
   );
   setHidden(
     refs.communityPanel,
-    HIDE_BROWSE_PANELS || isInfoView || isCalendarView || isTopView || isListView || isRecommendationView || isRequestView || isTvView
+    HIDE_BROWSE_PANELS ||
+      isInfoView ||
+      isCalendarView ||
+      isTopView ||
+      isListView ||
+      isRecommendationView ||
+      isRequestView ||
+      isTvView ||
+      isRandomView
   );
   setHidden(refs.infoSection, !isInfoView);
   setHidden(refs.calendarSection, !isCalendarView);
   setHidden(refs.recommendationSection, !isRecommendationView);
   setHidden(refs.requestSection, !isRequestView);
   setHidden(refs.tvSection, !isTvView);
+  setHidden(refs.randomSection, !isRandomView);
 
   setHidden(refs.topSection, true);
   setHidden(refs.trendingSection, true);
@@ -11243,6 +11302,136 @@ async function playTvChannel(channel) {
   }
 }
 
+function normalizeRandomType(value) {
+  const raw = String(value || "").trim().toLowerCase();
+  if (raw === "movie" || raw === "tv" || raw === "anime") {
+    return raw;
+  }
+  return "movie";
+}
+
+function getRandomPoolByType(type) {
+  const normalized = normalizeRandomType(type);
+  const base = getVisibleCatalog({ skipThemeFilters: true });
+  if (normalized === "movie") {
+    return base.filter((item) => item.type === "movie" && !item.isAnime);
+  }
+  if (normalized === "tv") {
+    return base.filter((item) => item.type === "tv" && !item.isAnime);
+  }
+  return base.filter((item) => item.isAnime && !item.isExternal);
+}
+
+function setRandomLoading(active) {
+  state.randomView.loading = Boolean(active);
+  if (refs.randomAnimation) {
+    refs.randomAnimation.hidden = !state.randomView.loading;
+  }
+}
+
+function renderRandomResult(item) {
+  if (!refs.randomResult) {
+    return;
+  }
+  if (!item) {
+    refs.randomResult.innerHTML = '<p class="random-empty">Choisis un format pour lancer le tirage.</p>';
+    refs.randomResult.hidden = false;
+    return;
+  }
+  const cover = resolveCardCover(item);
+  const year = getItemReleaseYear(item) || getCatalogReleaseYear(item);
+  const typeLabel = getItemTypeLabel(item);
+  const yearPill = year ? `<span class="meta-pill meta-pill-year">${escapeHtml(String(year))}</span>` : "";
+  refs.randomResult.innerHTML = `
+    <div class="random-result-card">
+      <img src="${escapeHtml(cover)}" alt="${escapeHtml(item.title)}" loading="lazy" decoding="async" />
+      <div class="random-result-body">
+        <p class="random-result-title">${escapeHtml(item.title)}</p>
+        <div class="random-result-meta">
+          <span class="meta-pill">${escapeHtml(typeLabel)}</span>
+          ${yearPill}
+        </div>
+        <div class="random-result-actions">
+          <button class="btn btn-primary" type="button" data-random-action="play">Regarder</button>
+          <button class="btn btn-soft" type="button" data-random-action="details">Details</button>
+          <button class="btn btn-ghost" type="button" data-random-action="again">Relancer</button>
+        </div>
+      </div>
+    </div>
+  `;
+  const playBtn = refs.randomResult.querySelector('[data-random-action="play"]');
+  const detailBtn = refs.randomResult.querySelector('[data-random-action="details"]');
+  const againBtn = refs.randomResult.querySelector('[data-random-action="again"]');
+  if (playBtn) {
+    bindSafeTap(playBtn, () => {
+      openPlayer(item.id).catch(() => {
+        showToast("Lecture aleatoire indisponible.", true);
+      });
+    });
+  }
+  if (detailBtn) {
+    bindSafeTap(detailBtn, () => {
+      openDetails(item.id).catch(() => {
+        showToast("Details indisponibles.", true);
+      });
+    });
+  }
+  if (againBtn) {
+    bindSafeTap(againBtn, () => {
+      startRandomPick(state.randomView.type);
+    });
+  }
+  refs.randomResult.hidden = false;
+}
+
+function renderRandomView() {
+  if (!refs.randomSection) {
+    return;
+  }
+  const type = normalizeRandomType(state.randomView.type);
+  if (refs.randomPicker) {
+    refs.randomPicker.querySelectorAll(".random-card").forEach((card) => {
+      card.classList.toggle("active", String(card.dataset.randomType || "") === type);
+    });
+  }
+  if (state.randomView.loading) {
+    setRandomLoading(true);
+    if (refs.randomResult) {
+      refs.randomResult.hidden = true;
+    }
+    return;
+  }
+  setRandomLoading(false);
+  renderRandomResult(state.randomView.result);
+}
+
+function startRandomPick(type) {
+  const normalized = normalizeRandomType(type);
+  if (state.randomView.timer) {
+    clearTimeout(state.randomView.timer);
+    state.randomView.timer = 0;
+  }
+  state.randomView.type = normalized;
+  state.randomView.loading = true;
+  state.randomView.result = null;
+  renderRandomView();
+  state.randomView.timer = window.setTimeout(() => {
+    state.randomView.timer = 0;
+    const pool = getRandomPoolByType(normalized);
+    if (pool.length === 0) {
+      state.randomView.loading = false;
+      state.randomView.result = null;
+      renderRandomView();
+      showToast("Aucun titre disponible pour ce format.", true);
+      return;
+    }
+    const pick = pool[Math.floor(Math.random() * pool.length)];
+    state.randomView.loading = false;
+    state.randomView.result = pick;
+    renderRandomView();
+  }, 950);
+}
+
 function renderTvView() {
   if (!refs.tvSection || !refs.tvChannelList) {
     return;
@@ -11343,7 +11532,12 @@ async function ensureTvChannels(options = {}) {
     const endpoint = `${API_BASE}/tv-channels${params.toString() ? `?${params.toString()}` : ""}`;
     const payload = await fetchJson(endpoint, { timeoutMs: 9000, noCache: true });
     const list = Array.isArray(payload?.data) ? payload.data : Array.isArray(payload?.channels) ? payload.channels : [];
-    state.tv.list = list.map(normalizeTvChannel).filter(Boolean);
+    const normalized = list.map(normalizeTvChannel).filter(Boolean);
+    const tntOnly = normalized.filter((entry) => {
+      const order = Number(entry?.order || 0);
+      return order > 0 && order <= 26;
+    });
+    state.tv.list = tntOnly.length > 0 ? tntOnly : normalized;
     if (Array.isArray(payload?.meta?.countries)) {
       state.tv.countries = payload.meta.countries.map((entry) => String(entry || "").trim()).filter(Boolean);
     }
@@ -11352,7 +11546,11 @@ async function ensureTvChannels(options = {}) {
       renderTvView();
     }
   } catch {
-    // best effort
+    state.tv.list = [];
+    state.tv.lastUpdatedAt = Date.now();
+    if (state.view === "tv-live") {
+      renderTvView();
+    }
   } finally {
     state.tv.loading = false;
   }
