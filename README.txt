@@ -1576,3 +1576,7 @@ FASTFLUX SMARTLINK GATE (2026-03-18, c362)
 - Added FastFlux smartlink modal: shown once per session before FastFlux playback; user continues to open sponsor tab and then playback starts.
 - New fastflux gate overlay + body lock, and external guard allows the smartlink host.
 - Cache-bust bumped to 20260318-c362.
+
+FASTFLUX SMARTLINK PASS-THROUGH (2026-03-18, c363)
+- Continue now always unblocks playback even if the popup is blocked; shows a note but resolves the gate.
+- Cache-bust bumped to 20260318-c363.

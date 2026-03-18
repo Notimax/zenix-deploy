@@ -1,5 +1,5 @@
 const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260318-c362";
+const ZENIX_BUILD_VERSION = "20260318-c363";
 const STORAGE_KEY = "zenix-progress-v4";
 const COVER_CACHE_KEY = "zenix-cover-cache-v1";
 const LOCAL_PLAY_KEY = "zenix-local-plays-v1";
@@ -5636,12 +5636,13 @@ function initFastfluxGate() {
     bindFastPress(refs.fastfluxGateContinueBtn, () => {
       const opened = window.open(FASTFLUX_SMARTLINK_URL, "_blank", "noopener,noreferrer");
       if (!opened) {
-        setFastfluxGateStatus("Popup bloque. Autorise les popups puis reessaie.");
-        return;
+        setFastfluxGateStatus("Popup bloque. Lecture demarre quand meme.");
       }
       markFastfluxPromptSession();
       setFastfluxGateVisible(false);
-      resolveFastfluxGate(true);
+      window.setTimeout(() => {
+        resolveFastfluxGate(true);
+      }, 120);
     });
   }
   refs.fastfluxGate.addEventListener("click", (event) => {
