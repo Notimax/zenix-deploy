@@ -118,6 +118,7 @@ const NAKIOS_FETCH_HEADERS = {
   Origin: NAKIOS_BASE,
   "Accept-Language": DEFAULT_ACCEPT_LANGUAGE,
 };
+const GLOBAL_REPAIR_FORCE_MS = Math.max(2 * 60 * 1000, Number(process.env.GLOBAL_REPAIR_FORCE_MS || 12 * 60 * 1000));
 const FILMER2_FETCH_HEADERS = {
   Referer: `${FILMER2_BASE}/`,
   Origin: FILMER2_BASE,
@@ -590,6 +591,7 @@ const suggestionRateLimitMap = new Map();
 const suggestionFingerprintMap = new Map();
 const requestRateLimitMap = new Map();
 const requestFingerprintMap = new Map();
+let globalRepairEpoch = 0;
 let analyticsTotalSeen = 0;
 let analyticsTotalsHydrated = false;
 let analyticsPersistTimer = null;
@@ -2108,6 +2110,33 @@ function getRepairSourcesFallback(mediaType, mediaId, season = 1, episode = 1) {
   const entry = data.repairs && typeof data.repairs === "object" ? data.repairs[key] : null;
   const fallback = normalizeRepairSources(entry?.sources || []);
   return Array.isArray(fallback) ? fallback : [];
+}
+
+function resetFastfluxCaches() {
+  fastfluxMovieCache.loadedAt = 0;
+  fastfluxMovieCache.entries = [];
+  fastfluxMovieCache.inFlight = null;
+  fastfluxMovieCache.pagesLoaded = 0;
+  fastfluxMovieCache.totalPages = 0;
+  fastfluxMovieCache.map = new Map();
+  fastfluxSeriesCache.loadedAt = 0;
+  fastfluxSeriesCache.entries = [];
+  fastfluxSeriesCache.inFlight = null;
+  fastfluxSeriesCache.pagesLoaded = 0;
+  fastfluxSeriesCache.totalPages = 0;
+  fastfluxSeriesCache.map = new Map();
+  fastfluxSearchCache.clear();
+  tmdbSearchCache.clear();
+}
+
+function triggerGlobalRepair() {
+  globalRepairEpoch = Date.now();
+  resetFastfluxCaches();
+  SOURCE_PROBE_CACHE.clear();
+}
+
+function shouldForceRefreshGlobal() {
+  return globalRepairEpoch > 0 && Date.now() - globalRepairEpoch < GLOBAL_REPAIR_FORCE_MS;
 }
 
 function loadRepairStore() {
@@ -13238,6 +13267,9 @@ function isGateProtectedPath(pathname) {
   if (pathname === "/api/zenix-anime-source") {
     return false;
   }
+  if (pathname === "/api/repair-global") {
+    return false;
+  }
   if (pathname === "/api/zenix-anime-seasons") {
     return false;
   }
@@ -15273,6 +15305,24 @@ async function handleRepairStore(req, res, requestUrl) {
   return true;
 }
 
+async function handleGlobalRepair(req, res, requestUrl) {
+  if (requestUrl.pathname !== "/api/repair-global") {
+    return false;
+  }
+  if (req.method !== "POST") {
+    sendJson(res, 405, { error: "Method Not Allowed" });
+    return true;
+  }
+  const ip = getRemoteAddress(req);
+  if (!isRepairAllowed(ip, "global")) {
+    sendJson(res, 429, { error: "Rate limited" });
+    return true;
+  }
+  triggerGlobalRepair();
+  sendJson(res, 200, { ok: true, epoch: globalRepairEpoch });
+  return true;
+}
+
 
 async function fetchAnimePlanningPage() {
   const upstream = await fetchRemoteText(ANIME_PLANNING_URL, "text/html");
@@ -15821,7 +15871,7 @@ async function handleZenixSource(req, res, requestUrl) {
   const year = toInt(requestUrl.searchParams.get("year"), 0, 0, 2099);
   const season = toInt(requestUrl.searchParams.get("season"), 1, 1, 500);
   const episode = toInt(requestUrl.searchParams.get("episode"), 1, 1, 50000);
-  const forceRefresh = requestUrl.searchParams.get("force") === "1";
+  const forceRefresh = requestUrl.searchParams.get("force") === "1" || shouldForceRefreshGlobal();
   const externalKeyParam = String(requestUrl.searchParams.get("externalKey") || "").trim();
   const mediaId = toInt(requestUrl.searchParams.get("mediaId"), 0, 0, 999999999);
   let tmdbId = toInt(requestUrl.searchParams.get("tmdbId"), 0, 0, 999999999);
@@ -16797,6 +16847,12 @@ const server = http.createServer((req, res) => {
     })
     .then((handledRepairStore) => {
       if (handledRepairStore) {
+        return true;
+      }
+      return handleGlobalRepair(req, res, requestUrl);
+    })
+    .then((handledGlobalRepair) => {
+      if (handledGlobalRepair) {
         return true;
       }
       return handleSuggestionSubmit(req, res, requestUrl);

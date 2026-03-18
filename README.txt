@@ -1649,3 +1649,7 @@ REPAIR HARD RESET (2026-03-18, c378)
 REPAIR CACHE FALLBACK (2026-03-18, c379)
 - /api/zenix-source now falls back to stored repair sources when FastFlux API returns empty.
 - Repair is more reliable after leaving/returning to a title.
+
+GLOBAL REPAIR TRIGGER (2026-03-18, c380)
+- Repair button now triggers a global cache reset (/api/repair-global) for all users.
+- FastFlux caches + probe cache cleared, and all requests force fresh lookup for a few minutes.

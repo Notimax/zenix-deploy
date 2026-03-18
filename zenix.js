@@ -1,5 +1,5 @@
 const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260318-c379";
+const ZENIX_BUILD_VERSION = "20260318-c380";
 const STORAGE_KEY = "zenix-progress-v4";
 const COVER_CACHE_KEY = "zenix-cover-cache-v1";
 const LOCAL_PLAY_KEY = "zenix-local-plays-v1";
@@ -15038,6 +15038,14 @@ async function runPlayerRepair() {
     refs.playerRepairStatus.textContent = "Reparation en cours... ajout de lecteurs";
   }
   resetRepairPlaybackState();
+  try {
+    await fetchJson(`${API_BASE}/repair-global`, {
+      method: "POST",
+      timeoutMs: 4500,
+    });
+  } catch {
+    // best effort only
+  }
   await refreshGateToken({ force: true }).catch(() => {});
   const sources = await collectRepairSourcesForItem(item, season, episode, { forceExternal: true });
   if (!Array.isArray(sources) || sources.length === 0) {
