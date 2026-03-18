@@ -1,5 +1,5 @@
 const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260318-c368";
+const ZENIX_BUILD_VERSION = "20260318-c369";
 const STORAGE_KEY = "zenix-progress-v4";
 const COVER_CACHE_KEY = "zenix-cover-cache-v1";
 const LOCAL_PLAY_KEY = "zenix-local-plays-v1";
@@ -8764,6 +8764,7 @@ function renderAll() {
   const isRequestView = !hasQuery && state.view === "request";
   const isTvView = !hasQuery && state.view === "tv-live";
   const isRandomView = !hasQuery && state.view === "random";
+  document.body.classList.toggle("tv-live-view", isTvView);
   const showBrowseView =
     !isInfoView &&
     !isCalendarView &&
@@ -17044,7 +17045,20 @@ async function playFromSourcePoolWithValidation(resumeTime, token, options = {})
   const mobileGuard = isLikelyMobileDevice();
   const fastfluxContextKey = buildFastfluxContextKey(options);
   const enrichedOptions = fastfluxContextKey ? { ...options, fastfluxContextKey } : options;
-  if (mobileGuard && shouldValidate) {
+  const fastfluxIndex = findFastfluxSourceIndex(state.sourcePool);
+  const hasFastflux = fastfluxIndex >= 0;
+
+  if (hasFastflux && options?.skipFastfluxPriority !== true) {
+    state.sourceValidationActive = false;
+    return playFromSourcePoolWithRescue(resumeTime, token, {
+      startIndex: fastfluxIndex,
+      strictIndex: false,
+      skipPremiumFallback: false,
+      allowPremiumRescue: true,
+      fastfluxContextKey,
+    });
+  }
+  if (mobileGuard && shouldValidate && !hasFastflux) {
     state.sourceValidationActive = false;
     try {
       return await playFromSourcePoolWithRescue(resumeTime, token, {
@@ -18483,6 +18497,13 @@ function getSourceDedupKey(source) {
     return "";
   }
   return canonicalizeSourceUrl(source.url);
+}
+
+function findFastfluxSourceIndex(pool) {
+  if (!Array.isArray(pool)) {
+    return -1;
+  }
+  return pool.findIndex((entry) => Boolean(entry?.isFastflux));
 }
 
 function buildPlayableSourceCandidates(source, options = {}) {

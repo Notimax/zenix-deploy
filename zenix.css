@@ -7393,6 +7393,25 @@ body.backup-locked .back-to-top {
   box-sizing: border-box;
 }
 
+body.tv-live-view {
+  overflow-x: hidden;
+}
+
+.tv-section,
+.tv-shell,
+.tv-controls,
+.tv-player-card,
+.tv-video-wrap,
+.tv-channel-panel {
+  max-width: 100%;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.tv-section * {
+  box-sizing: border-box;
+}
+
 .tv-controls {
   display: flex;
   flex-wrap: wrap;
@@ -7767,6 +7786,15 @@ body.backup-locked .back-to-top {
   }
   .tv-section {
     overflow-x: hidden;
+  }
+  body.tv-live-view,
+  .tv-section,
+  .tv-shell,
+  .tv-controls,
+  .tv-player-card,
+  .tv-video-wrap,
+  .tv-channel-panel {
+    max-width: 100dvw;
   }
   .tv-controls {
     display: grid;

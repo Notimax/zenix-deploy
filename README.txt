@@ -1604,3 +1604,9 @@ FASTFLUX MOBILE/PRIORITY FIX (2026-03-18, c368)
 - Scream 7 now includes FastFlux sources (debug fallback kept).
 - FastFlux catalog cache default lowered to 8 min for faster updates.
 - Cache-bust bumped to 20260318-c368.
+
+FASTFLUX START + TV MOBILE FIX (2026-03-18, c369)
+- When FastFlux exists, playback now starts directly on it (no validation loop).
+- When FastFlux is absent, validation runs to pick the fastest working reader, then auto-repair retries.
+- TV Direct mobile layout forced inside viewport (no horizontal overflow).
+- Cache-bust bumped to 20260318-c369.
