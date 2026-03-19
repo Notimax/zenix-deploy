@@ -1,5 +1,5 @@
 const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260319-c386";
+const ZENIX_BUILD_VERSION = "20260319-c387";
 const STORAGE_KEY = "zenix-progress-v4";
 const COVER_CACHE_KEY = "zenix-cover-cache-v1";
 const LOCAL_PLAY_KEY = "zenix-local-plays-v1";
@@ -157,8 +157,8 @@ const SOURCE_SUCCESS_BONUS = 12;
 const SOURCE_RETRY_PER_INDEX = 1;
 const AUTO_GLOBAL_REPAIR_KEY = "zenix-auto-repair-v1";
 const AUTO_GLOBAL_REPAIR_WINDOW_MS = 2 * 60 * 1000;
-const AUTO_GLOBAL_REPAIR_THRESHOLD = 3;
-const AUTO_GLOBAL_REPAIR_COOLDOWN_MS = 3 * 60 * 1000;
+const AUTO_GLOBAL_REPAIR_THRESHOLD = 2;
+const AUTO_GLOBAL_REPAIR_COOLDOWN_MS = 2 * 60 * 1000;
 const FILTER_PREMIUM_SOURCES = false;
 const AUTO_PREMIUM_FALLBACK = true;
 const PLAYBACK_GUARD_INTERVAL_MS = 1200;
@@ -562,6 +562,7 @@ themeFilters: {
   fastfluxGateResolver: null,
   fastfluxSmartlinkGranted: false,
   globalRepairInFlight: false,
+  lastFastfluxStallReportAt: 0,
   recommendation: {
     step: 0,
     answers: {},
@@ -16130,6 +16131,23 @@ function shouldLockFastfluxAutoSwitch() {
   return state.sourcePool.some((entry) => entry && entry.isFastflux);
 }
 
+async function reportFastfluxStall(reason = "fastflux-stall") {
+  const now = Date.now();
+  if (now - Number(state.lastFastfluxStallReportAt || 0) < 15000) {
+    return;
+  }
+  state.lastFastfluxStallReportAt = now;
+  const report = await reportPlaybackFailure({
+    itemId: Number(state.nowPlaying?.id || state.selectedDetailId || 0),
+    mediaType: String(state.nowPlaying?.type || ""),
+    reason,
+  });
+  if (report?.triggered) {
+    setPlayerStatus("Reparation globale en cours...", true);
+    await hardRefreshCurrentPlayback(false).catch(() => {});
+  }
+}
+
 function startPlaybackGuard() {
   clearPlaybackGuard();
   const mobileGuard = isLikelyMobileDevice();
@@ -16182,6 +16200,7 @@ function startPlaybackGuard() {
       if (loadingTooLong && !autoSwitchCooldownActive) {
         if (shouldLockFastfluxAutoSwitch()) {
           setPlayerStatus("Lecture FastFlux bloquee. Change la source manuellement ou clique sur reparer.", true);
+          reportFastfluxStall("fastflux-loading");
           return;
         }
         switchingSource = true;
@@ -16222,6 +16241,7 @@ function startPlaybackGuard() {
       }
       if (shouldLockFastfluxAutoSwitch()) {
         setPlayerStatus("Lecture FastFlux bloquee. Change la source manuellement ou clique sur reparer.", true);
+        reportFastfluxStall("fastflux-embed-stall");
         return;
       }
       switchingSource = true;
@@ -22668,6 +22688,7 @@ async function cleanupLegacyServiceWorker() {
     await Promise.all(keys.map((key) => caches.delete(key)));
   }
 }
+
 
 
 

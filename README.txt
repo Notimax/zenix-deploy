@@ -1683,3 +1683,9 @@ GLOBAL FAIL AGGREGATOR + WARMUP (2026-03-19, c386)
 - Playback failure reports are aggregated server-side; multiple users failing triggers global repair.
 - FastFlux warmup runs every ~25 min (plus at startup) and clears Purstream search cache.
 - Cache-bust bumped to 20260319-c386.
+
+AUTO-REPAIR SENSITIVITY (2026-03-19, c387)
+- Global repair triggers at 2 concurrent failures (faster recovery).
+- Warmup interval lowered to ~20 min and repair cooldown reduced for faster retries.
+- Repair rate-limit reduced to 15s to allow quicker manual retries.
+- Cache-bust bumped to 20260319-c387.
