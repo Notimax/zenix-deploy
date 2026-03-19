@@ -882,10 +882,11 @@ function renderHealthCounters(payload) {
     const warmupMin = Math.round(Number(fastflux.warmupIntervalMs || 0) / 60000);
     const cooldownMin = Math.round(Number(fastflux.healthCooldownMs || 0) / 60000);
     const threshold = Number(fastflux.healthFailThreshold || 0);
+    const stateLabel = fastflux.degraded ? "DEGRADE" : "OK";
     const failWindowMin = Math.round(Number(data.playbackFailWindowMs || 0) / 60000);
     const failCooldownMin = Math.round(Number(data.playbackFailCooldownMs || 0) / 60000);
     const failThreshold = Number(data.playbackFailThreshold || 0);
-    refs.healthMeta.textContent = `Health ${healthIntervalMin} min • Warmup ${warmupMin} min • Seuil health ${threshold} • Cooldown ${cooldownMin} min • Auto-repair: ${failThreshold} echec(s) / ${failWindowMin} min (cooldown ${failCooldownMin} min)`;
+    refs.healthMeta.textContent = `Etat FastFlux: ${stateLabel} • Health ${healthIntervalMin} min • Warmup ${warmupMin} min • Seuil health ${threshold} • Cooldown ${cooldownMin} min • Auto-repair: ${failThreshold} echec(s) / ${failWindowMin} min (cooldown ${failCooldownMin} min)`;
   }
   if (refs.healthStatus) refs.healthStatus.textContent = "";
 }

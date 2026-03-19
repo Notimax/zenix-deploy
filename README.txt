@@ -1718,3 +1718,9 @@ AUTO-REFRESH COMPLETE (2026-03-19, c393)
 AUTO-REFRESH RESULT (2026-03-19, c394)
 - Auto-resync now shows explicit success/failed messages after a global repair refresh.
 - Cache-bust bumped to 20260319-c394 (zenix.js).
+
+FASTFLUX FAILOVER (2026-03-19, c395)
+- If FastFlux health is degraded, /api/zenix-source suppresses FastFlux and switches to Purstream fallback.
+- Purstream fallback allows all languages in degraded mode to avoid total playback outages.
+- Admin health meta now shows FastFlux state (OK/DEGRADE).
+- Admin assets cache-bust updated to 20260319-c395.

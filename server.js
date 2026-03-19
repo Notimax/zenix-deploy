@@ -2244,6 +2244,27 @@ function scheduleFastfluxWarmup() {
   }, 5000);
 }
 
+function isFastfluxHealthDegraded(now = Date.now()) {
+  if (!USE_FASTFLUX) {
+    return true;
+  }
+  const lastOk = Number(fastfluxHealthLastOkAt || 0);
+  const lastRun = Number(fastfluxHealthLastRunAt || 0);
+  if (!lastRun) {
+    return false;
+  }
+  if (fastfluxHealthFailStreak >= FASTFLUX_HEALTH_FAIL_THRESHOLD) {
+    return true;
+  }
+  if (lastOk > 0 && now - lastOk > FASTFLUX_HEALTH_INTERVAL_MS * 3) {
+    return true;
+  }
+  if (!lastOk && lastRun > 0 && now - lastRun > FASTFLUX_HEALTH_INTERVAL_MS * 3) {
+    return true;
+  }
+  return false;
+}
+
 async function runFastfluxHealthCheck(reason = "interval") {
   if (!USE_FASTFLUX || fastfluxHealthInFlight) {
     return;
@@ -2856,7 +2877,7 @@ async function fetchPurstreamStreamSources(id, mediaType, season = 1, episode = 
   return await tryFetch(moviePath);
 }
 
-function normalizePurstreamSourceEntry(sourceRow, index = 0) {
+function normalizePurstreamSourceEntry(sourceRow, index = 0, options = {}) {
   if (!sourceRow || typeof sourceRow !== "object") {
     return null;
   }
@@ -2866,12 +2887,13 @@ function normalizePurstreamSourceEntry(sourceRow, index = 0) {
   }
   const label = String(sourceRow?.source_name || sourceRow?.name || sourceRow?.label || "").trim();
   const language = normalizePidoovLanguage(sourceRow?.language || sourceRow?.lang || label || "") || "";
-  if (language && language !== "VF" && language !== "MULTI") {
+  const allowAll = Boolean(options?.allowAllLanguages);
+  if (!allowAll && language && language !== "VF" && language !== "MULTI") {
     return null;
   }
   const quality = sanitizeToken(String(sourceRow?.quality || label || "HD"), 24) || "HD";
   const format = inferOwnedSourceFormat(streamUrl, sourceRow?.format || sourceRow?.type || "m3u8");
-  const normalizedLanguage = language || "VF";
+  const normalizedLanguage = language || (allowAll ? "VO" : "VF");
   return {
     stream_url: streamUrl,
     source_name: "Purstream",
@@ -2885,7 +2907,7 @@ function normalizePurstreamSourceEntry(sourceRow, index = 0) {
   };
 }
 
-async function resolvePurstreamSourcesByTitle(title, mediaType, year = 0, season = 1, episode = 1) {
+async function resolvePurstreamSourcesByTitle(title, mediaType, year = 0, season = 1, episode = 1, options = {}) {
   const safeTitle = String(title || "").trim();
   if (!safeTitle) {
     return [];
@@ -2900,7 +2922,7 @@ async function resolvePurstreamSourcesByTitle(title, mediaType, year = 0, season
     return [];
   }
   const out = rawSources
-    .map((row, index) => normalizePurstreamSourceEntry(row, index))
+    .map((row, index) => normalizePurstreamSourceEntry(row, index, options))
     .filter(Boolean);
   const dedupe = new Set();
   return out.filter((entry) => {
@@ -14717,6 +14739,7 @@ async function handleAdminHealth(req, res, requestUrl) {
     return true;
   }
   const now = Date.now();
+  const degraded = isFastfluxHealthDegraded(now);
   sendJson(res, 200, {
     type: "success",
     data: {
@@ -14728,6 +14751,7 @@ async function handleAdminHealth(req, res, requestUrl) {
       playbackFailCooldownMs: PLAYBACK_FAIL_COOLDOWN_MS,
       fastflux: {
         enabled: USE_FASTFLUX,
+        degraded,
         warmupIntervalMs: FASTFLUX_WARMUP_INTERVAL_MS,
         warmupLastAt: fastfluxWarmupLastAt,
         warmupLastOkAt: fastfluxWarmupLastOkAt,
@@ -16518,19 +16542,41 @@ async function handleZenixSource(req, res, requestUrl) {
     }
   }
 
+  const fastfluxDegraded = isFastfluxHealthDegraded();
+  let warning = !USE_FASTFLUX ? "FastFlux indisponible." : "";
+  if (fastfluxDegraded && USE_FASTFLUX) {
+    warning = "FastFlux instable, secours Purstream actif.";
+    sources = [];
+  }
+
   let purstreamSources = [];
   const hasFastfluxVf = sources.some((entry) => {
     const lang = normalizePidoovLanguage(entry?.language || entry?.source_name || entry?.name || "") || "";
     return lang === "VF" || lang === "MULTI";
   });
-  if ((sources.length === 0 || !hasFastfluxVf) && title.length >= 2) {
+  if ((sources.length === 0 || !hasFastfluxVf || fastfluxDegraded) && title.length >= 2) {
     try {
-      purstreamSources = await resolvePurstreamSourcesByTitle(title, mediaType, year, season, episode);
+      const purstreamOptions = fastfluxDegraded ? { allowAllLanguages: true } : undefined;
+      purstreamSources = await resolvePurstreamSourcesByTitle(title, mediaType, year, season, episode, purstreamOptions);
       if (purstreamSources.length === 0 && cleanedTitle && cleanedTitle !== title) {
-        purstreamSources = await resolvePurstreamSourcesByTitle(cleanedTitle, mediaType, year, season, episode);
+        purstreamSources = await resolvePurstreamSourcesByTitle(
+          cleanedTitle,
+          mediaType,
+          year,
+          season,
+          episode,
+          purstreamOptions
+        );
       }
       if (purstreamSources.length === 0 && year > 0) {
-        purstreamSources = await resolvePurstreamSourcesByTitle(cleanedTitle || title, mediaType, 0, season, episode);
+        purstreamSources = await resolvePurstreamSourcesByTitle(
+          cleanedTitle || title,
+          mediaType,
+          0,
+          season,
+          episode,
+          purstreamOptions
+        );
       }
     } catch {
       purstreamSources = [];
@@ -16556,7 +16602,6 @@ async function handleZenixSource(req, res, requestUrl) {
     }
   }
 
-  let warning = !USE_FASTFLUX ? "FastFlux indisponible." : "";
   if (sources.length === 0 && mediaId > 0) {
     const fallback = getRepairSourcesFallback(mediaType, mediaId, season, episode);
     if (fallback.length > 0) {
