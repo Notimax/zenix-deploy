@@ -1752,3 +1752,7 @@ NON-FASTFLUX PROXY PREFERENCE (2026-03-19, c401)
 - Non-FastFlux sources now prefer proxy for hotlink-style hosts (Purstream/fsvid/xalaflix/etc),
   improving playback reliability on mobile + desktop when direct URLs stall.
 - Cache-bust bumped to 20260319-c401.
+
+PURSTREAM TITLE GUARD (2026-03-19, c402)
+- Purstream candidate matching is now stricter (title token overlap / year check) to avoid wrong-film playback.
+- If the match is weak, the source is rejected so we fall back to a safer provider.

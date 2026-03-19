@@ -3059,6 +3059,45 @@ function scorePurstreamCandidate(row, titleKey, year = 0) {
   return score;
 }
 
+function isPurstreamTitleMatch(rowKey, titleKey, year = 0, rowYear = 0) {
+  if (!rowKey || !titleKey) {
+    return false;
+  }
+  if (rowKey === titleKey) {
+    return true;
+  }
+  if (rowKey.includes(titleKey) || titleKey.includes(rowKey)) {
+    return true;
+  }
+  const titleTokens = titleKey.split(" ").filter((token) => token.length >= 2);
+  const rowTokens = rowKey.split(" ").filter((token) => token.length >= 2);
+  if (titleTokens.length === 0 || rowTokens.length === 0) {
+    return false;
+  }
+  const rowSet = new Set(rowTokens);
+  let matches = 0;
+  titleTokens.forEach((token) => {
+    if (rowSet.has(token)) {
+      matches += 1;
+    }
+  });
+  if (matches >= 2) {
+    const ratio = matches / Math.max(1, titleTokens.length);
+    if (ratio >= 0.5) {
+      return true;
+    }
+  }
+  const safeYear = toInt(year, 0, 0, 2099);
+  const safeRowYear = toInt(rowYear, 0, 0, 2099);
+  if (safeYear > 0 && safeRowYear > 0) {
+    return Math.abs(safeYear - safeRowYear) <= 1;
+  }
+  if (titleTokens.length <= 1) {
+    return true;
+  }
+  return false;
+}
+
 function pickBestPurstreamCandidate(rows, title, mediaType, year = 0) {
   const items = Array.isArray(rows) ? rows : [];
   if (items.length === 0) {
@@ -3066,7 +3105,17 @@ function pickBestPurstreamCandidate(rows, title, mediaType, year = 0) {
   }
   const titleKey = normalizeTitleKey(title || "");
   const safeType = String(mediaType || "").toLowerCase() === "tv" ? "tv" : "movie";
-  const filtered = items.filter((row) => row && row.type === safeType);
+  const filtered = items.filter((row) => {
+    if (!row || row.type !== safeType) {
+      return false;
+    }
+    const rowKey = normalizeTitleKey(row.title || "");
+    if (!rowKey || !titleKey) {
+      return false;
+    }
+    const rowYear = toInt(row.year, 0, 0, 2099);
+    return isPurstreamTitleMatch(rowKey, titleKey, year, rowYear);
+  });
   if (filtered.length === 0) {
     return null;
   }
