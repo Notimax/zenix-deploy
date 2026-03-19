@@ -17146,7 +17146,8 @@ async function handleZenixSource(req, res, requestUrl) {
     });
   }
 
-  if (sources.length > 0 && title.length >= 2) {
+  const relaxFastfluxGuard = /fastflux:/i.test(externalKeyParam);
+  if (sources.length > 0 && title.length >= 2 && !relaxFastfluxGuard) {
     const filtered = sources.filter((entry) => {
       const streamUrl = String(entry?.stream_url || entry?.url || "").trim();
       if (!streamUrl) {

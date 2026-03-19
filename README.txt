@@ -1741,3 +1741,6 @@ FASTFLUX + REQUEST URLS (2026-03-19, c398)
 - FastFlux degraded mode no longer wipes FastFlux sources; it now keeps FastFlux and adds Purstream fallback.
 - Admin "Demander Contenu": URL field + "Valider URL" to approve and inject a direct single-reader source into the catalogue.
 - Request URL is stored server-side but hidden from public /api/requests.
+
+FASTFLUX ALWAYS SHOWN (2026-03-19, c399)
+- For FastFlux items, the FastFlux guard is relaxed so valid FastFlux sources are never hidden.
