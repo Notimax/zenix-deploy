@@ -1756,3 +1756,7 @@ NON-FASTFLUX PROXY PREFERENCE (2026-03-19, c401)
 PURSTREAM TITLE GUARD (2026-03-19, c402)
 - Purstream candidate matching is now stricter (title token overlap / year check) to avoid wrong-film playback.
 - If the match is weak, the source is rejected so we fall back to a safer provider.
+
+FASTFLUX TITLE SAFETY (2026-03-19, c403)
+- FastFlux sources now re-validate the catalog title even when a TMDB id exists.
+- If the TMDB entry mismatches, we re-search by title to fetch the correct entry or drop the source.
