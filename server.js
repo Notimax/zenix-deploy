@@ -110,15 +110,15 @@ const FASTFLUX_SEARCH_CACHE_MS = Math.max(
 );
 const PLAYBACK_FAIL_WINDOW_MS = Math.max(
   30 * 1000,
-  Number(process.env.PLAYBACK_FAIL_WINDOW_MS || 2 * 60 * 1000)
+  Number(process.env.PLAYBACK_FAIL_WINDOW_MS || 3 * 60 * 1000)
 );
 const PLAYBACK_FAIL_THRESHOLD = Math.max(
   1,
-  Number(process.env.PLAYBACK_FAIL_THRESHOLD || 1)
+  Number(process.env.PLAYBACK_FAIL_THRESHOLD || 3)
 );
 const PLAYBACK_FAIL_COOLDOWN_MS = Math.max(
   60 * 1000,
-  Number(process.env.PLAYBACK_FAIL_COOLDOWN_MS || 60 * 1000)
+  Number(process.env.PLAYBACK_FAIL_COOLDOWN_MS || 3 * 60 * 1000)
 );
 const FASTFLUX_WARMUP_INTERVAL_MS = Math.max(
   5 * 60 * 1000,
@@ -14013,6 +14013,12 @@ async function fetchHlsUpstreamWithFallback(target, range, signal, method = "GET
     "User-Agent": HLS_PROXY_USER_AGENT,
   };
   const targetHost = String(target?.hostname || "").toLowerCase();
+  const fsvidHeaders = targetHost.endsWith("fsvid.lol")
+    ? {
+        Referer: "https://fsvid.lol/",
+        Origin: "https://fsvid.lol",
+      }
+    : null;
   const fastfluxHeaders =
     targetHost.endsWith("fastflux.xyz") || targetHost.endsWith("cdn.fastflux.xyz")
       ? {
@@ -14031,6 +14037,7 @@ async function fetchHlsUpstreamWithFallback(target, range, signal, method = "GET
       Referer: `${target.origin}/`,
       Origin: target.origin,
     },
+    ...(fsvidHeaders ? [fsvidHeaders] : []),
     ...(fastfluxHeaders ? [fastfluxHeaders] : []),
     ...(nakiosHeaders ? [nakiosHeaders] : []),
     {

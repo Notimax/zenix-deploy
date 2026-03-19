@@ -1760,3 +1760,9 @@ PURSTREAM TITLE GUARD (2026-03-19, c402)
 FASTFLUX TITLE SAFETY (2026-03-19, c403)
 - FastFlux sources now re-validate the catalog title even when a TMDB id exists.
 - If the TMDB entry mismatches, we re-search by title to fetch the correct entry or drop the source.
+
+GLOBAL REPAIR THROTTLE + FSVID HEADERS (2026-03-19, c404)
+- Playback failure auto-global repair now requires multiple failures + longer cooldowns (prevents 20s restarts).
+- Client global repair poll + refresh cooldown softened to avoid forced restarts during playback.
+- HLS proxy adds fsvid referer/origin headers to improve s1.fsvid.lol playback on mobile.
+- Cache-bust bumped to 20260319-c404.
