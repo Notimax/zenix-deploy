@@ -1701,3 +1701,8 @@ FASTFLUX HEALTH PANEL (2026-03-19, c390)
 - Admin now shows system health: last health run/OK, fail streak, last auto-repair, warmup OK, global repair time.
 - Cache-bust bumped to 20260319-c390 (zenix.js).
 - Admin assets cache-bust updated to 20260319-c390.
+
+GLOBAL REPAIR AUTO-REFRESH (2026-03-19, c391)
+- Added /api/repair-status (public) so clients can detect global repair epochs.
+- Player now auto-resyncs if a global repair happens while the player is open.
+- Cache-bust bumped to 20260319-c391 (zenix.js).

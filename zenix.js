@@ -1,5 +1,5 @@
 const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260319-c390";
+const ZENIX_BUILD_VERSION = "20260319-c391";
 const STORAGE_KEY = "zenix-progress-v4";
 const COVER_CACHE_KEY = "zenix-cover-cache-v1";
 const LOCAL_PLAY_KEY = "zenix-local-plays-v1";
@@ -156,6 +156,9 @@ const SOURCE_FAILURE_PENALTY = 26;
 const SOURCE_SUCCESS_BONUS = 12;
 const SOURCE_RETRY_PER_INDEX = 1;
 const AUTO_GLOBAL_REPAIR_KEY = "zenix-auto-repair-v1";
+const GLOBAL_REPAIR_STATUS_KEY = "zenix-global-repair-epoch-v1";
+const GLOBAL_REPAIR_STATUS_POLL_MS = 20000;
+const GLOBAL_REPAIR_REFRESH_COOLDOWN_MS = 15000;
 const AUTO_GLOBAL_REPAIR_WINDOW_MS = 2 * 60 * 1000;
 const AUTO_GLOBAL_REPAIR_THRESHOLD = 1;
 const AUTO_GLOBAL_REPAIR_COOLDOWN_MS = 60 * 1000;
@@ -562,6 +565,9 @@ themeFilters: {
   fastfluxGateResolver: null,
   fastfluxSmartlinkGranted: false,
   globalRepairInFlight: false,
+  globalRepairEpoch: 0,
+  globalRepairPollTimer: 0,
+  lastGlobalRepairPlayerRefreshAt: 0,
   lastFastfluxStallReportAt: 0,
   recommendation: {
     step: 0,
@@ -2395,6 +2401,7 @@ async function init() {
   }
   updateNetworkBadge();
   startOnlineCountPolling();
+  startGlobalRepairPolling();
   cleanupLegacyServiceWorker().catch(() => {
     // cleanup best effort only
   });
@@ -15048,10 +15055,13 @@ async function runPlayerRepair() {
   }
   resetRepairPlaybackState();
   try {
-    await fetchJson(`${API_BASE}/repair-global`, {
+    const payload = await fetchJson(`${API_BASE}/repair-global`, {
       method: "POST",
       timeoutMs: 4500,
     });
+    if (payload?.epoch) {
+      await handleGlobalRepairEpoch(payload.epoch, "manual");
+    }
   } catch {
     // best effort only
   }
@@ -17147,6 +17157,77 @@ function writeAutoGlobalRepairState(state) {
   } catch {}
 }
 
+function readGlobalRepairEpoch() {
+  try {
+    const raw = sessionStorage.getItem(GLOBAL_REPAIR_STATUS_KEY);
+    const parsed = Number(raw || 0);
+    return Number.isFinite(parsed) ? parsed : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function writeGlobalRepairEpoch(value) {
+  try {
+    sessionStorage.setItem(GLOBAL_REPAIR_STATUS_KEY, String(Number(value || 0)));
+  } catch {}
+}
+
+function shouldRefreshPlayerAfterGlobalRepair(epoch) {
+  if (!epoch || !Number.isFinite(epoch)) {
+    return false;
+  }
+  if (!refs.playerOverlay || refs.playerOverlay.hidden) {
+    return false;
+  }
+  if (!state.nowPlaying) {
+    return false;
+  }
+  const now = Date.now();
+  if (now - Number(state.lastGlobalRepairPlayerRefreshAt || 0) < GLOBAL_REPAIR_REFRESH_COOLDOWN_MS) {
+    return false;
+  }
+  return true;
+}
+
+async function handleGlobalRepairEpoch(epoch, reason = "poll") {
+  const safeEpoch = Number(epoch || 0);
+  if (!Number.isFinite(safeEpoch) || safeEpoch <= 0) {
+    return;
+  }
+  if (safeEpoch <= Number(state.globalRepairEpoch || 0)) {
+    return;
+  }
+  state.globalRepairEpoch = safeEpoch;
+  writeGlobalRepairEpoch(safeEpoch);
+  if (shouldRefreshPlayerAfterGlobalRepair(safeEpoch)) {
+    state.lastGlobalRepairPlayerRefreshAt = Date.now();
+    setPlayerStatus("Reparation globale detectee, resynchronisation...");
+    await hardRefreshCurrentPlayback(false).catch(() => {});
+  }
+}
+
+async function pollGlobalRepairStatus() {
+  try {
+    const payload = await fetchJson(`${API_BASE}/repair-status`, { timeoutMs: 3500 });
+    const epoch = Number(payload?.epoch || 0);
+    if (epoch > 0) {
+      await handleGlobalRepairEpoch(epoch, "poll");
+    }
+  } catch {
+    // silent
+  }
+}
+
+function startGlobalRepairPolling() {
+  if (state.globalRepairPollTimer) {
+    return;
+  }
+  state.globalRepairEpoch = readGlobalRepairEpoch();
+  pollGlobalRepairStatus();
+  state.globalRepairPollTimer = setInterval(pollGlobalRepairStatus, GLOBAL_REPAIR_STATUS_POLL_MS);
+}
+
 function registerPlaybackFailureForAutoRepair() {
   const now = Date.now();
   const stateData = readAutoGlobalRepairState();
@@ -17177,7 +17258,10 @@ async function triggerAutoGlobalRepair(reason = "") {
   state.globalRepairInFlight = true;
   setPlayerStatus("Reparation globale en cours...", true);
   try {
-    await fetchJson(`${API_BASE}/repair-global`, { method: "POST", timeoutMs: 4500 });
+    const payload = await fetchJson(`${API_BASE}/repair-global`, { method: "POST", timeoutMs: 4500 });
+    if (payload?.epoch) {
+      await handleGlobalRepairEpoch(payload.epoch, "auto");
+    }
   } catch {}
   await refreshGateToken({ force: true }).catch(() => {});
   await hardRefreshCurrentPlayback(false).catch(() => {});

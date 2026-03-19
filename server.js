@@ -13576,6 +13576,9 @@ function isGateProtectedPath(pathname) {
   if (pathname === "/api/repair-global") {
     return false;
   }
+  if (pathname === "/api/repair-status") {
+    return false;
+  }
   if (pathname === "/api/zenix-anime-seasons") {
     return false;
   }
@@ -15704,6 +15707,22 @@ async function handleGlobalRepair(req, res, requestUrl) {
   return true;
 }
 
+async function handleRepairStatus(req, res, requestUrl) {
+  if (requestUrl.pathname !== "/api/repair-status") {
+    return false;
+  }
+  if (req.method !== "GET") {
+    sendJson(res, 405, { error: "Method Not Allowed" });
+    return true;
+  }
+  sendJson(res, 200, {
+    ok: true,
+    epoch: Number(globalRepairEpoch || 0),
+    serverTime: Date.now(),
+  });
+  return true;
+}
+
 
 async function fetchAnimePlanningPage() {
   const upstream = await fetchRemoteText(ANIME_PLANNING_URL, "text/html");
@@ -17366,6 +17385,12 @@ const server = http.createServer((req, res) => {
     })
     .then((handledOwnedSource) => {
       if (handledOwnedSource) {
+        return true;
+      }
+      return handleRepairStatus(req, res, requestUrl);
+    })
+    .then((handledRepairStatus) => {
+      if (handledRepairStatus) {
         return true;
       }
       return handleApiProxy(req, res, requestUrl);
