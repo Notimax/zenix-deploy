@@ -985,6 +985,7 @@ function normalizeRequestEntry(raw) {
   const poster = sanitizeHttpUrl(raw.poster, 420);
   const backdrop = sanitizeHttpUrl(raw.backdrop, 420);
   const overview = sanitizeSuggestionText(raw.overview, 600);
+  const url = sanitizeHttpUrl(raw.url || raw.stream_url || raw.streamUrl, 900);
   const status = normalizeRequestStatus(raw.status || "pending");
   const id = sanitizeToken(raw.id, 80) || `req_${crypto.randomBytes(6).toString("hex")}`;
   const createdAt = raw.createdAt ? new Date(raw.createdAt).toISOString() : new Date().toISOString();
@@ -998,6 +999,7 @@ function normalizeRequestEntry(raw) {
     poster,
     backdrop,
     overview,
+    url,
     status,
     createdAt,
     updatedAt,
@@ -3653,6 +3655,14 @@ function isDisallowedExternalEntry(entry) {
   if (!entry || typeof entry !== "object") {
     return false;
   }
+  const externalKey = String(entry?.external_key || entry?.externalKey || "").toLowerCase();
+  const detailUrl = String(entry?.external_detail_url || entry?.detailUrl || "").toLowerCase();
+  const isDirect =
+    externalKey.startsWith("direct:") ||
+    /\.(m3u8|mp4|webm|mpd)(?:$|[?#])/i.test(detailUrl);
+  if (isDirect) {
+    return false;
+  }
   const provider = String(entry?.external_provider || entry?.provider || "").toLowerCase();
   const detail = String(entry?.external_detail_url || entry?.detailUrl || "").toLowerCase();
   const key = String(entry?.external_key || entry?.externalKey || "").toLowerCase();
@@ -4625,11 +4635,34 @@ function extractFilenameTokens(streamUrl) {
     return [];
   }
   let pathname = "";
+  let parsed = null;
   try {
-    const parsed = new URL(streamUrl);
+    parsed = new URL(streamUrl);
     pathname = String(parsed.pathname || "");
   } catch {
     pathname = String(streamUrl || "");
+  }
+  if (parsed && pathname) {
+    const lowerPath = pathname.toLowerCase();
+    if (lowerPath === "/api/hls-proxy" || lowerPath === "/api/hls-proxy-mobile") {
+      const target = parsed.searchParams.get("url");
+      if (target && target !== streamUrl) {
+        const nested = extractFilenameTokens(target);
+        if (nested.length > 0) {
+          return nested;
+        }
+      }
+    }
+    if (lowerPath === "/api/video_proxy.php") {
+      const file = parsed.searchParams.get("file");
+      if (file) {
+        const nestedUrl = `https://fastflux.xyz${file.startsWith("/") ? "" : "/"}${file}`;
+        const nested = extractFilenameTokens(nestedUrl);
+        if (nested.length > 0) {
+          return nested;
+        }
+      }
+    }
   }
   const last = pathname.split("/").filter(Boolean).pop() || "";
   if (!last) {
@@ -9083,6 +9116,36 @@ function buildProxyFallbackSource(source) {
   };
 }
 
+function buildDirectSourceEntry(url, options = {}) {
+  const safeUrl = sanitizeHttpUrl(url, 900);
+  if (!safeUrl) {
+    return null;
+  }
+  const format = inferOwnedSourceFormat(safeUrl, options?.format || "");
+  let streamUrl = safeUrl;
+  let host = "";
+  try {
+    host = new URL(safeUrl).hostname.toLowerCase();
+  } catch {
+    host = "";
+  }
+  const avoidProxy = host ? shouldAvoidProxyTarget(host) : false;
+  const needsProxy = !avoidProxy && format !== "embed";
+  if (needsProxy) {
+    streamUrl = buildHlsProxyPath(safeUrl);
+  }
+  return {
+    stream_url: streamUrl,
+    source_name: String(options?.sourceName || "URL Directe").trim() || "URL Directe",
+    origin: "direct",
+    quality: String(options?.quality || "HD").trim() || "HD",
+    language: String(options?.language || "VF").trim() || "VF",
+    format,
+    proxyOnly: needsProxy,
+    priority: Number.isFinite(options?.priority) ? Number(options.priority) : 520,
+  };
+}
+
 async function filterSourcesWithProbe(sources = []) {
   if (!Array.isArray(sources) || sources.length === 0) {
     return sources;
@@ -10602,6 +10665,52 @@ function buildAdminCustomEntryFromFastflux(entry, mediaType) {
   });
 }
 
+function buildDirectExternalKeyFromRequest(request, url) {
+  const safeId = sanitizeToken(request?.id || "", 80);
+  if (safeId) {
+    return `direct:req:${safeId}`;
+  }
+  const safeUrl = String(url || "").trim();
+  if (safeUrl) {
+    const hash = crypto.createHash("sha256").update(safeUrl).digest("hex").slice(0, 16);
+    return `direct:${hash}`;
+  }
+  return `direct:${crypto.randomBytes(6).toString("hex")}`;
+}
+
+function buildAdminCustomEntryFromDirectRequest(request, url) {
+  if (!request || typeof request !== "object") {
+    return null;
+  }
+  const safeUrl = sanitizeHttpUrl(url, 900);
+  if (!safeUrl) {
+    return null;
+  }
+  const title = String(request?.title || "").trim();
+  if (!title) {
+    return null;
+  }
+  const normalizedType = String(request?.type || "").toLowerCase() === "tv" ? "tv" : "movie";
+  const year = toInt(request?.year, 0, 0, 2099);
+  const poster = sanitizeHttpUrl(request?.poster, 420);
+  const backdrop = sanitizeHttpUrl(request?.backdrop, 420) || poster;
+  const overview = sanitizeSuggestionText(request?.overview, 600);
+  const externalKey = buildDirectExternalKeyFromRequest(request, safeUrl);
+  return normalizeAdminCustomEntry({
+    type: normalizedType,
+    title,
+    year,
+    overview,
+    small_poster_path: poster,
+    large_poster_path: poster,
+    wallpaper_poster_path: backdrop || poster,
+    external_key: externalKey,
+    external_detail_url: safeUrl,
+    providerLabel: ZENIX_BRAND_LABEL,
+    force_duplicate: true,
+  });
+}
+
 async function buildAdminCustomEntryFromMovix(parsed) {
   if (!parsed || typeof parsed !== "object") {
     return null;
@@ -10913,6 +11022,54 @@ function resolveYoutubeAdminEntry(options = {}) {
   }
   const externalKey = String(resolved?.external_key || "").trim();
   if (!externalKey.startsWith("youtube:playlist:")) {
+    return null;
+  }
+  return resolved;
+}
+
+function resolveDirectAdminEntry(options = {}) {
+  const title = String(options.title || "").trim();
+  const mediaType = String(options.mediaType || "").toLowerCase() === "tv" ? "tv" : "movie";
+  const externalKeyParam = String(options.externalKey || "").trim();
+  const mediaId = toInt(options.mediaId, 0, 0, 999999999);
+  const adminData = loadAdminData();
+  const custom = Array.isArray(adminData?.custom) ? adminData.custom : [];
+  let entry = null;
+
+  if (externalKeyParam && externalKeyParam.startsWith("direct:")) {
+    entry = custom.find((row) => String(row?.external_key || row?.externalKey || "") === externalKeyParam) || null;
+  }
+  if (!entry && mediaId > 0) {
+    entry =
+      custom.find((row) => {
+        const rowKey = String(row?.external_key || row?.externalKey || "");
+        return Number(row?.id || 0) === mediaId && rowKey.startsWith("direct:");
+      }) || null;
+  }
+  if (!entry && title) {
+    const key = normalizeTitleKey(title);
+    if (key) {
+      entry =
+        custom.find((row) => {
+          const rowKey = String(row?.external_key || row?.externalKey || "");
+          return rowKey.startsWith("direct:") && normalizeTitleKey(row?.title || "") === key;
+        }) || null;
+    }
+  }
+
+  if (!entry) {
+    return null;
+  }
+  const resolved = applyAdminOverride(entry, adminData);
+  if (!resolved) {
+    return null;
+  }
+  const entryType = String(resolved?.type || "").toLowerCase() === "tv" ? "tv" : "movie";
+  if (mediaType && mediaType !== entryType) {
+    return null;
+  }
+  const externalKey = String(resolved?.external_key || "").trim();
+  if (!externalKey.startsWith("direct:")) {
     return null;
   }
   return resolved;
@@ -14511,7 +14668,14 @@ async function handleRequestsPublic(req, res, requestUrl) {
   if (req.method === "GET") {
     const data = loadAdminData(true);
     const list = Array.isArray(data.requests) ? data.requests : [];
-    sendJson(res, 200, { type: "success", data: list });
+    const sanitized = list.map((entry) => {
+      if (!entry || typeof entry !== "object") {
+        return entry;
+      }
+      const { url, ...rest } = entry;
+      return rest;
+    });
+    sendJson(res, 200, { type: "success", data: sanitized });
     return true;
   }
   if (req.method !== "POST") {
@@ -14618,6 +14782,7 @@ async function handleAdminRequestsUpdate(req, res, requestUrl) {
     return true;
   }
   const status = normalizeRequestStatus(body?.status || "pending");
+  const url = sanitizeHttpUrl(body?.url || body?.stream_url || body?.streamUrl, 900);
   const data = loadAdminData(true);
   const list = Array.isArray(data.requests) ? data.requests.slice() : [];
   const idx = list.findIndex((entry) => String(entry?.id || "") === id);
@@ -14628,10 +14793,17 @@ async function handleAdminRequestsUpdate(req, res, requestUrl) {
   const updated = {
     ...list[idx],
     status,
+    url: url || list[idx]?.url || "",
     updatedAt: new Date().toISOString(),
   };
   list[idx] = updated;
   data.requests = list;
+  if (status === "in_catalog" && url) {
+    const entry = buildAdminCustomEntryFromDirectRequest(updated, url);
+    if (entry) {
+      upsertAdminCustomEntry(data, entry);
+    }
+  }
   saveAdminData(data);
   sendJson(res, 200, { ok: true, data: updated });
   return true;
@@ -16647,6 +16819,39 @@ async function handleZenixSource(req, res, requestUrl) {
   const externalKeyParam = String(requestUrl.searchParams.get("externalKey") || "").trim();
   const mediaId = toInt(requestUrl.searchParams.get("mediaId"), 0, 0, 999999999);
   let tmdbId = toInt(requestUrl.searchParams.get("tmdbId"), 0, 0, 999999999);
+
+  if (externalKeyParam.startsWith("direct:") || mediaId > 0) {
+    const directEntry = resolveDirectAdminEntry({
+      title,
+      mediaType,
+      externalKey: externalKeyParam,
+      mediaId,
+    });
+    if (directEntry && directEntry.external_detail_url) {
+      const directSource = buildDirectSourceEntry(directEntry.external_detail_url, {
+        sourceName: "URL Directe",
+        language: directEntry.language || "VF",
+        quality: "HD",
+      });
+      if (directSource) {
+        sendJson(res, 200, {
+          apiVersion: "zenix-source-v1",
+          type: "success",
+          data: {
+            title: String(directEntry.title || title || "").trim(),
+            mediaType,
+            year: directEntry.year || year,
+            season: mediaType === "tv" ? season : 1,
+            episode: mediaType === "tv" ? episode : 1,
+            tmdbId: toInt(directEntry.external_tmdb_id || tmdbId, 0, 0, 999999999) || 0,
+            count: 1,
+            sources: [directSource],
+          },
+        });
+        return true;
+      }
+    }
+  }
   const isScream7 = mediaType === "movie" && isScream7Target(title, tmdbId, mediaId);
   if (isScream7) {
     const screamTmdbId = tmdbId > 0 ? tmdbId : 1159559;
@@ -16894,7 +17099,6 @@ async function handleZenixSource(req, res, requestUrl) {
   let warning = !USE_FASTFLUX ? "FastFlux indisponible." : "";
   if (fastfluxDegraded && USE_FASTFLUX) {
     warning = "FastFlux instable, secours Purstream actif.";
-    sources = [];
   }
 
   let purstreamSources = [];

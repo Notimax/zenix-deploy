@@ -720,6 +720,7 @@ function renderRequestList(items = []) {
     const status = normalizeRequestStatus(entry?.status || "pending");
     const typeLabel = entry?.type === "tv" ? "Serie" : "Film";
     const year = entry?.year ? ` - ${entry.year}` : "";
+    const urlValue = String(entry?.url || "").replace(/"/g, "&quot;");
     const wrapper = document.createElement("div");
     wrapper.className = "admin-item";
     wrapper.dataset.requestId = String(entry?.id || "");
@@ -729,6 +730,10 @@ function renderRequestList(items = []) {
         <div class="admin-request-meta">${typeLabel}${year}</div>
         <span class="admin-request-status ${status}">${getRequestStatusLabel(status)}</span>
       </div>
+      <div class="admin-field admin-request-url">
+        <label>URL directe</label>
+        <input type="url" placeholder="https://... (mp4 / m3u8)" data-request-url value="${urlValue}" />
+      </div>
       <div class="admin-request-actions">
         <select class="admin-select" data-request-status>
           <option value="pending"${status === "pending" ? " selected" : ""}>En attente</option>
@@ -736,6 +741,7 @@ function renderRequestList(items = []) {
           <option value="refused"${status === "refused" ? " selected" : ""}>Refuse</option>
           <option value="in_catalog"${status === "in_catalog" ? " selected" : ""}>En catalogue</option>
         </select>
+        <button class="admin-btn" type="button" data-request-action="approve-url">Valider URL</button>
         <button class="admin-btn admin-danger" type="button" data-request-action="delete">Supprimer</button>
       </div>
     `;
@@ -743,13 +749,13 @@ function renderRequestList(items = []) {
   });
 }
 
-async function updateRequestStatus(id, status) {
+async function updateRequestStatus(id, status, url = "") {
   if (!id) return;
   setAdminRequestStatus("Mise a jour...");
   try {
     await apiFetch("/api/admin/requests/update", {
       method: "POST",
-      body: JSON.stringify({ id, status }),
+      body: JSON.stringify({ id, status, url }),
     });
     setAdminRequestStatus("Statut mis a jour.");
     await loadData();
@@ -1438,7 +1444,9 @@ function bindEvents() {
       if (!id) {
         return;
       }
-      updateRequestStatus(id, target.value);
+      const urlInput = wrapper.querySelector("[data-request-url]");
+      const urlValue = urlInput instanceof HTMLInputElement ? urlInput.value.trim() : "";
+      updateRequestStatus(id, target.value, target.value === "in_catalog" ? urlValue : "");
     });
     refs.requestList.addEventListener("click", (event) => {
       const target = event.target instanceof HTMLElement ? event.target.closest("[data-request-action]") : null;
@@ -1451,6 +1459,12 @@ function bindEvents() {
       }
       const id = String(wrapper.dataset.requestId || "").trim();
       if (!id) {
+        return;
+      }
+      if (target.dataset.requestAction === "approve-url") {
+        const urlInput = wrapper.querySelector("[data-request-url]");
+        const urlValue = urlInput instanceof HTMLInputElement ? urlInput.value.trim() : "";
+        updateRequestStatus(id, "in_catalog", urlValue);
         return;
       }
       if (target.dataset.requestAction === "delete") {

@@ -274,6 +274,10 @@ body.admin-body {
   align-items: center;
 }
 
+.admin-request-url {
+  margin-top: 6px;
+}
+
 .admin-select {
   background: #101425;
   border: 1px solid rgba(120, 130, 190, 0.3);

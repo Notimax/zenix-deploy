@@ -1735,3 +1735,9 @@ BACKUP CACHE FAILSAFE (2026-03-19, c396)
 FASTFLUX URL GUARD (2026-03-19, c397)
 - Added a title-vs-filename guard for FastFlux stream URLs.
 - If a FastFlux URL clearly mismatches the requested title, it's ignored and we fall back.
+
+FASTFLUX + REQUEST URLS (2026-03-19, c398)
+- FastFlux guard now understands proxied URLs (hls-proxy + fastflux video_proxy.php) so valid FastFlux sources are no longer filtered out.
+- FastFlux degraded mode no longer wipes FastFlux sources; it now keeps FastFlux and adds Purstream fallback.
+- Admin "Demander Contenu": URL field + "Valider URL" to approve and inject a direct single-reader source into the catalogue.
+- Request URL is stored server-side but hidden from public /api/requests.
