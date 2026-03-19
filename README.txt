@@ -1731,3 +1731,7 @@ BACKUP CACHE FAILSAFE (2026-03-19, c396)
 - When external sources are empty or unstable, player enters "Mode secours" and uses cached sources.
 - Global repair now clears backup cache to avoid stale bad sources.
 - Failure mode auto-exits on successful playback.
+
+FASTFLUX URL GUARD (2026-03-19, c397)
+- Added a title-vs-filename guard for FastFlux stream URLs.
+- If a FastFlux URL clearly mismatches the requested title, it's ignored and we fall back.

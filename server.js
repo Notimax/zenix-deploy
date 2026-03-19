@@ -4620,6 +4620,57 @@ function normalizeTitleKey(value) {
     .trim();
 }
 
+function extractFilenameTokens(streamUrl) {
+  if (!streamUrl) {
+    return [];
+  }
+  let pathname = "";
+  try {
+    const parsed = new URL(streamUrl);
+    pathname = String(parsed.pathname || "");
+  } catch {
+    pathname = String(streamUrl || "");
+  }
+  const last = pathname.split("/").filter(Boolean).pop() || "";
+  if (!last) {
+    return [];
+  }
+  const decoded = decodeURIComponent(last);
+  const stripped = decoded.replace(/\.(m3u8|mp4|mkv|webm|dash|ts|mov)(?:\?.*)?$/i, "");
+  const normalized = normalizeTitleKey(stripped);
+  if (!normalized) {
+    return [];
+  }
+  return normalized
+    .split(" ")
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 2 && !/^s\d+e\d+$/.test(token));
+}
+
+function shouldKeepFastfluxByTitle(streamUrl, title) {
+  const titleKey = normalizeTitleKey(title);
+  if (!titleKey) {
+    return true;
+  }
+  const titleTokens = titleKey.split(" ").filter((token) => token.length >= 2);
+  if (titleTokens.length < 2) {
+    return true;
+  }
+  const fileTokens = extractFilenameTokens(streamUrl);
+  if (fileTokens.length < 2) {
+    return true;
+  }
+  const titleSet = new Set(titleTokens);
+  let matches = 0;
+  fileTokens.forEach((token) => {
+    if (titleSet.has(token)) {
+      matches += 1;
+    }
+  });
+  const ratio = matches / Math.max(1, titleTokens.length);
+  return ratio >= 0.34;
+}
+
 function isMovixHost(host) {
   const safe = String(host || "").toLowerCase();
   if (!safe) {
@@ -16889,6 +16940,29 @@ async function handleZenixSource(req, res, requestUrl) {
       seen.add(key);
       sources.push(entry);
     });
+  }
+
+  if (sources.length > 0 && title.length >= 2) {
+    const filtered = sources.filter((entry) => {
+      const streamUrl = String(entry?.stream_url || entry?.url || "").trim();
+      if (!streamUrl) {
+        return true;
+      }
+      const isFastflux = /fastflux/i.test(String(entry?.origin || entry?.provider || entry?.source || "")) ||
+        /fastflux/i.test(String(entry?.source_name || entry?.name || "")) ||
+        streamUrl.includes("fastflux.xyz") ||
+        streamUrl.includes("cdn.fastflux.xyz");
+      if (!isFastflux) {
+        return true;
+      }
+      return shouldKeepFastfluxByTitle(streamUrl, title);
+    });
+    if (filtered.length !== sources.length) {
+      sources = filtered;
+      warning = warning
+        ? `${warning} Sources FastFlux suspectes ignorees.`
+        : "Sources FastFlux suspectes ignorees.";
+    }
   }
 
   if (sources.length > 0) {
