@@ -1710,3 +1710,7 @@ GLOBAL REPAIR AUTO-REFRESH (2026-03-19, c391)
 AUTO-REFRESH MESSAGE (2026-03-19, c392)
 - Player shows a visible "Resynchronisation auto en cours..." message when a global repair refreshes an open player.
 - Cache-bust bumped to 20260319-c392 (zenix.js).
+
+AUTO-REFRESH COMPLETE (2026-03-19, c393)
+- Player now shows a "Resynchronisation auto terminee" message after the auto-refresh completes.
+- Cache-bust bumped to 20260319-c393 (zenix.js).

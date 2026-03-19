@@ -1,5 +1,5 @@
 const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260319-c392";
+const ZENIX_BUILD_VERSION = "20260319-c393";
 const STORAGE_KEY = "zenix-progress-v4";
 const COVER_CACHE_KEY = "zenix-cover-cache-v1";
 const LOCAL_PLAY_KEY = "zenix-local-plays-v1";
@@ -17205,6 +17205,8 @@ async function handleGlobalRepairEpoch(epoch, reason = "poll") {
     setPlayerStatus("Resynchronisation auto en cours...");
     showToast("Resynchronisation auto en cours...");
     await hardRefreshCurrentPlayback(false).catch(() => {});
+    setPlayerStatus("Resynchronisation auto terminee.");
+    showToast("Resynchronisation auto terminee.");
   }
 }
 
