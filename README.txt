@@ -1673,3 +1673,8 @@ FASTFLUX AUTO-SWITCH LOCK (2026-03-19, c384)
 
 GLOBAL REPAIR CACHE CLEAR (2026-03-19, c384b)
 - Global repair now clears Purstream search cache too (ensures VF fallback refresh for everyone).
+
+AUTO GLOBAL REPAIR (2026-03-19, c385)
+- When multiple playback failures happen in a short window, a global repair is auto-triggered.
+- Global repair clears FastFlux+Purstream caches and refreshes playback for everyone.
+- Cache-bust bumped to 20260319-c385.

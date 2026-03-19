@@ -1,5 +1,5 @@
 const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260319-c384";
+const ZENIX_BUILD_VERSION = "20260319-c385";
 const STORAGE_KEY = "zenix-progress-v4";
 const COVER_CACHE_KEY = "zenix-cover-cache-v1";
 const LOCAL_PLAY_KEY = "zenix-local-plays-v1";
@@ -155,6 +155,10 @@ const SOURCE_SUCCESS_TTL_MS = 45 * 24 * 60 * 60 * 1000;
 const SOURCE_FAILURE_PENALTY = 26;
 const SOURCE_SUCCESS_BONUS = 12;
 const SOURCE_RETRY_PER_INDEX = 1;
+const AUTO_GLOBAL_REPAIR_KEY = "zenix-auto-repair-v1";
+const AUTO_GLOBAL_REPAIR_WINDOW_MS = 2 * 60 * 1000;
+const AUTO_GLOBAL_REPAIR_THRESHOLD = 3;
+const AUTO_GLOBAL_REPAIR_COOLDOWN_MS = 3 * 60 * 1000;
 const FILTER_PREMIUM_SOURCES = false;
 const AUTO_PREMIUM_FALLBACK = true;
 const PLAYBACK_GUARD_INTERVAL_MS = 1200;
@@ -557,6 +561,7 @@ themeFilters: {
   fastfluxGatePromise: null,
   fastfluxGateResolver: null,
   fastfluxSmartlinkGranted: false,
+  globalRepairInFlight: false,
   recommendation: {
     step: 0,
     answers: {},
@@ -17100,6 +17105,67 @@ function rememberSourceSuccess(source, itemId = 0) {
   }
 }
 
+function readAutoGlobalRepairState() {
+  try {
+    const raw = sessionStorage.getItem(AUTO_GLOBAL_REPAIR_KEY);
+    if (!raw) {
+      return { fails: [], lastGlobalAt: 0 };
+    }
+    const parsed = JSON.parse(raw);
+    return {
+      fails: Array.isArray(parsed?.fails) ? parsed.fails : [],
+      lastGlobalAt: Number(parsed?.lastGlobalAt || 0) || 0,
+    };
+  } catch {
+    return { fails: [], lastGlobalAt: 0 };
+  }
+}
+
+function writeAutoGlobalRepairState(state) {
+  try {
+    sessionStorage.setItem(AUTO_GLOBAL_REPAIR_KEY, JSON.stringify(state));
+  } catch {}
+}
+
+function registerPlaybackFailureForAutoRepair() {
+  const now = Date.now();
+  const stateData = readAutoGlobalRepairState();
+  const recent = (stateData.fails || []).filter((ts) => now - Number(ts || 0) < AUTO_GLOBAL_REPAIR_WINDOW_MS);
+  recent.push(now);
+  stateData.fails = recent;
+  if (stateData.lastGlobalAt && now - stateData.lastGlobalAt < AUTO_GLOBAL_REPAIR_COOLDOWN_MS) {
+    writeAutoGlobalRepairState(stateData);
+    return false;
+  }
+  if (recent.length >= AUTO_GLOBAL_REPAIR_THRESHOLD) {
+    stateData.fails = [];
+    stateData.lastGlobalAt = now;
+    writeAutoGlobalRepairState(stateData);
+    return true;
+  }
+  writeAutoGlobalRepairState(stateData);
+  return false;
+}
+
+async function triggerAutoGlobalRepair(reason = "") {
+  if (state.globalRepairInFlight) {
+    return false;
+  }
+  if (!registerPlaybackFailureForAutoRepair()) {
+    return false;
+  }
+  state.globalRepairInFlight = true;
+  setPlayerStatus("Reparation globale en cours...", true);
+  try {
+    await fetchJson(`${API_BASE}/repair-global`, { method: "POST", timeoutMs: 4500 });
+  } catch {}
+  await refreshGateToken({ force: true }).catch(() => {});
+  await hardRefreshCurrentPlayback(false).catch(() => {});
+  showToast("Reparation globale lancee.");
+  state.globalRepairInFlight = false;
+  return true;
+}
+
 async function playFromSourcePoolWithValidation(resumeTime, token, options = {}) {
   const shouldValidate = SOURCE_VALIDATION_ENABLED && options?.skipValidation !== true;
   const fastfluxContextKey = buildFastfluxContextKey(options);
@@ -17216,12 +17282,20 @@ async function playFromSourcePoolWithValidation(resumeTime, token, options = {})
         skipFastfluxPriority: true,
       });
     }
+    const autoTriggered = await triggerAutoGlobalRepair("no-playable");
+    if (autoTriggered) {
+      return;
+    }
     const pending = Boolean(repairResult?.pending);
     const message = pending
       ? "Film trop recent, pas encore disponible."
       : "Aucun lecteur en marche. Mentionner sur Discord \"Astrax\".";
     setPlayerStatus(message, true);
     setPlayerLoading(false);
+    return;
+  }
+  const autoTriggered = await triggerAutoGlobalRepair("no-playable");
+  if (autoTriggered) {
     return;
   }
   setPlayerStatus("Aucun lecteur en marche. Mentionner sur Discord \"Astrax\".", true);
@@ -22543,6 +22617,7 @@ async function cleanupLegacyServiceWorker() {
     await Promise.all(keys.map((key) => caches.delete(key)));
   }
 }
+
 
 
 
