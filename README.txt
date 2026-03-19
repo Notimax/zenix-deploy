@@ -1747,3 +1747,8 @@ FASTFLUX ALWAYS SHOWN (2026-03-19, c399)
 
 BOOTSTRAP STALL FALLBACK (2026-03-19, c400)
 - If playback looks started on iPhone but currentTime never advances, we now treat it as a stall and try the next stream candidate (proxy -> direct).
+
+NON-FASTFLUX PROXY PREFERENCE (2026-03-19, c401)
+- Non-FastFlux sources now prefer proxy for hotlink-style hosts (Purstream/fsvid/xalaflix/etc),
+  improving playback reliability on mobile + desktop when direct URLs stall.
+- Cache-bust bumped to 20260319-c401.
