@@ -1,5 +1,5 @@
 const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260319-c396";
+const ZENIX_BUILD_VERSION = "20260319-c400";
 const STORAGE_KEY = "zenix-progress-v4";
 const COVER_CACHE_KEY = "zenix-cover-cache-v1";
 const LOCAL_PLAY_KEY = "zenix-local-plays-v1";
@@ -19429,6 +19429,10 @@ async function waitForPlaybackBootstrap(video, token, timeoutMs = 4200) {
   if (currentTime <= 0.18 && paused && readyState >= 2) {
     markAwaitingUserPlay(60000);
     return;
+  }
+  if (currentTime <= 0.18 && !paused && readyState >= 2) {
+    // Playback looks "started" but time never advances: treat as stalled to try next candidate.
+    throw new Error("Source stalled at bootstrap");
   }
 }
 

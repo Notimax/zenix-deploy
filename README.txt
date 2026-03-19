@@ -1744,3 +1744,6 @@ FASTFLUX + REQUEST URLS (2026-03-19, c398)
 
 FASTFLUX ALWAYS SHOWN (2026-03-19, c399)
 - For FastFlux items, the FastFlux guard is relaxed so valid FastFlux sources are never hidden.
+
+BOOTSTRAP STALL FALLBACK (2026-03-19, c400)
+- If playback looks started on iPhone but currentTime never advances, we now treat it as a stall and try the next stream candidate (proxy -> direct).
