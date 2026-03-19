@@ -1706,3 +1706,7 @@ GLOBAL REPAIR AUTO-REFRESH (2026-03-19, c391)
 - Added /api/repair-status (public) so clients can detect global repair epochs.
 - Player now auto-resyncs if a global repair happens while the player is open.
 - Cache-bust bumped to 20260319-c391 (zenix.js).
+
+AUTO-REFRESH MESSAGE (2026-03-19, c392)
+- Player shows a visible "Resynchronisation auto en cours..." message when a global repair refreshes an open player.
+- Cache-bust bumped to 20260319-c392 (zenix.js).
