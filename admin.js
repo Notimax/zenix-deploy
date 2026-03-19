@@ -79,6 +79,14 @@ const refs = {
   analyticsTotal: document.getElementById("adminAnalyticsTotal"),
   analyticsUpdated: document.getElementById("adminAnalyticsUpdated"),
   analyticsStatus: document.getElementById("adminAnalyticsStatus"),
+  healthLastRun: document.getElementById("adminHealthLastRun"),
+  healthLastOk: document.getElementById("adminHealthLastOk"),
+  healthFailStreak: document.getElementById("adminHealthFailStreak"),
+  healthLastRepair: document.getElementById("adminHealthLastRepair"),
+  healthWarmupOk: document.getElementById("adminHealthWarmupOk"),
+  healthGlobalRepair: document.getElementById("adminHealthGlobalRepair"),
+  healthMeta: document.getElementById("adminHealthMeta"),
+  healthStatus: document.getElementById("adminHealthStatus"),
   requestList: document.getElementById("adminRequestList"),
   requestEmpty: document.getElementById("adminRequestEmpty"),
   requestStatus: document.getElementById("adminRequestStatus"),
@@ -99,6 +107,7 @@ const state = {
   searchSeq: 0,
   searchTimer: 0,
   analyticsTimer: 0,
+  healthTimer: 0,
   lastQuery: "",
   selectedItem: null,
   customById: new Map(),
@@ -848,6 +857,63 @@ function renderAnalyticsCounters(payload) {
   if (refs.analyticsStatus) refs.analyticsStatus.textContent = "";
 }
 
+function formatAdminStamp(value) {
+  const ts = Number(value || 0);
+  if (!ts) return "-";
+  try {
+    return new Date(ts).toLocaleString("fr-FR");
+  } catch {
+    return "-";
+  }
+}
+
+function renderHealthCounters(payload) {
+  if (!payload) return;
+  const data = payload.data || payload;
+  const fastflux = data.fastflux || {};
+  if (refs.healthLastRun) refs.healthLastRun.textContent = formatAdminStamp(fastflux.healthLastRunAt);
+  if (refs.healthLastOk) refs.healthLastOk.textContent = formatAdminStamp(fastflux.healthLastOkAt);
+  if (refs.healthFailStreak) refs.healthFailStreak.textContent = String(fastflux.healthFailStreak ?? 0);
+  if (refs.healthLastRepair) refs.healthLastRepair.textContent = formatAdminStamp(fastflux.healthLastRepairAt);
+  if (refs.healthWarmupOk) refs.healthWarmupOk.textContent = formatAdminStamp(fastflux.warmupLastOkAt);
+  if (refs.healthGlobalRepair) refs.healthGlobalRepair.textContent = formatAdminStamp(data.globalRepairEpoch);
+  if (refs.healthMeta) {
+    const healthIntervalMin = Math.round(Number(fastflux.healthIntervalMs || 0) / 60000);
+    const warmupMin = Math.round(Number(fastflux.warmupIntervalMs || 0) / 60000);
+    const cooldownMin = Math.round(Number(fastflux.healthCooldownMs || 0) / 60000);
+    const threshold = Number(fastflux.healthFailThreshold || 0);
+    const failWindowMin = Math.round(Number(data.playbackFailWindowMs || 0) / 60000);
+    const failCooldownMin = Math.round(Number(data.playbackFailCooldownMs || 0) / 60000);
+    const failThreshold = Number(data.playbackFailThreshold || 0);
+    refs.healthMeta.textContent = `Health ${healthIntervalMin} min • Warmup ${warmupMin} min • Seuil health ${threshold} • Cooldown ${cooldownMin} min • Auto-repair: ${failThreshold} echec(s) / ${failWindowMin} min (cooldown ${failCooldownMin} min)`;
+  }
+  if (refs.healthStatus) refs.healthStatus.textContent = "";
+}
+
+async function refreshHealth() {
+  if (!refs.healthLastRun) return;
+  try {
+    const payload = await apiFetch("/api/admin/health");
+    renderHealthCounters(payload || {});
+  } catch (err) {
+    if (refs.healthStatus) refs.healthStatus.textContent = err.message || "Erreur health.";
+  }
+}
+
+function startHealthPolling() {
+  if (!refs.healthLastRun) return;
+  stopHealthPolling();
+  refreshHealth();
+  state.healthTimer = setInterval(refreshHealth, 30000);
+}
+
+function stopHealthPolling() {
+  if (state.healthTimer) {
+    clearInterval(state.healthTimer);
+    state.healthTimer = 0;
+  }
+}
+
 async function refreshAnalytics() {
   if (!refs.analyticsLive) return;
   try {
@@ -1020,6 +1086,7 @@ async function checkSession() {
       await loadData();
       await loadSuggestions(true);
       startAnalyticsPolling();
+      startHealthPolling();
       return;
     }
   } catch {
@@ -1029,6 +1096,7 @@ async function checkSession() {
   setVisible(refs.app, false);
   setVisible(refs.logoutBtn, false);
   stopAnalyticsPolling();
+  stopHealthPolling();
 }
 
 async function handleLogin() {

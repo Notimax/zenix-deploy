@@ -623,11 +623,14 @@ const playbackFailureByIp = new Map();
 let playbackFailureLastGlobalAt = 0;
 let fastfluxWarmupInFlight = false;
 let fastfluxWarmupTimer = null;
+let fastfluxWarmupLastAt = 0;
+let fastfluxWarmupLastOkAt = 0;
 let fastfluxHealthInFlight = false;
 let fastfluxHealthTimer = null;
 let fastfluxHealthFailStreak = 0;
 let fastfluxHealthLastOkAt = 0;
 let fastfluxHealthLastRepairAt = 0;
+let fastfluxHealthLastRunAt = 0;
 let globalRepairEpoch = 0;
 let analyticsTotalSeen = 0;
 let analyticsTotalsHydrated = false;
@@ -2209,10 +2212,12 @@ async function runFastfluxWarmup(reason = "interval") {
     return;
   }
   fastfluxWarmupInFlight = true;
+  fastfluxWarmupLastAt = Date.now();
   try {
     purstreamSearchCache.clear();
     await loadFastfluxMovies(true, { minPages: FASTFLUX_MOVIES_PAGES_PER_FEED });
     await loadFastfluxSeries(true, { minPages: FASTFLUX_SERIES_PAGES_PER_FEED });
+    fastfluxWarmupLastOkAt = Date.now();
     console.log(`[fastflux] Warmup OK (${reason}).`);
   } catch (error) {
     console.warn("[fastflux] Warmup failed.", sanitizeToken(String(error?.message || ""), 120));
@@ -2244,6 +2249,7 @@ async function runFastfluxHealthCheck(reason = "interval") {
     return;
   }
   fastfluxHealthInFlight = true;
+  fastfluxHealthLastRunAt = Date.now();
   try {
     const response = await fetchFastfluxPage("movies", 1, { timeoutMs: 9000 });
     const items = Array.isArray(response?.items) ? response.items : [];
@@ -14695,6 +14701,47 @@ async function handleAdminAnalytics(req, res, requestUrl) {
   return true;
 }
 
+async function handleAdminHealth(req, res, requestUrl) {
+  if (requestUrl.pathname !== "/api/admin/health") {
+    return false;
+  }
+  if (req.method !== "GET") {
+    sendJson(res, 405, { error: "Method Not Allowed" });
+    return true;
+  }
+  if (!isAdminAuthenticated(req)) {
+    sendJson(res, 401, { error: "Unauthorized" });
+    return true;
+  }
+  const now = Date.now();
+  sendJson(res, 200, {
+    type: "success",
+    data: {
+      generatedAt: new Date().toISOString(),
+      globalRepairEpoch: Number(globalRepairEpoch || 0),
+      playbackFailActive: playbackFailureByIp.size,
+      playbackFailWindowMs: PLAYBACK_FAIL_WINDOW_MS,
+      playbackFailThreshold: PLAYBACK_FAIL_THRESHOLD,
+      playbackFailCooldownMs: PLAYBACK_FAIL_COOLDOWN_MS,
+      fastflux: {
+        enabled: USE_FASTFLUX,
+        warmupIntervalMs: FASTFLUX_WARMUP_INTERVAL_MS,
+        warmupLastAt: fastfluxWarmupLastAt,
+        warmupLastOkAt: fastfluxWarmupLastOkAt,
+        healthIntervalMs: FASTFLUX_HEALTH_INTERVAL_MS,
+        healthLastRunAt: fastfluxHealthLastRunAt,
+        healthLastOkAt: fastfluxHealthLastOkAt,
+        healthFailStreak: fastfluxHealthFailStreak,
+        healthFailThreshold: FASTFLUX_HEALTH_FAIL_THRESHOLD,
+        healthCooldownMs: FASTFLUX_HEALTH_FAIL_COOLDOWN_MS,
+        healthLastRepairAt: fastfluxHealthLastRepairAt,
+      },
+      serverTime: now,
+    },
+  });
+  return true;
+}
+
 async function handleAdminAnnouncement(req, res, requestUrl) {
   if (requestUrl.pathname !== "/api/admin/announcement") {
     return false;
@@ -17115,6 +17162,12 @@ const server = http.createServer((req, res) => {
     })
     .then((handledAdminAnalytics) => {
       if (handledAdminAnalytics) {
+        return true;
+      }
+      return handleAdminHealth(req, res, requestUrl);
+    })
+    .then((handledAdminHealth) => {
+      if (handledAdminHealth) {
         return true;
       }
       return handleAdminAnnouncement(req, res, requestUrl);

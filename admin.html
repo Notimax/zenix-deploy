@@ -5,11 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="robots" content="noindex, nofollow" />
   <title>Zenix Admin</title>
-  <link rel="stylesheet" href="/admin.css?v=20260318-c346" />
+  <link rel="stylesheet" href="/admin.css?v=20260319-c390" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet" />
-  <script defer src="/admin.js?v=20260318-c346"></script>
+  <script defer src="/admin.js?v=20260319-c390"></script>
 </head>
 <body class="admin-body">
   <div class="admin-shell">
@@ -59,6 +59,38 @@
           </div>
           <div class="admin-muted" id="adminAnalyticsUpdated"></div>
           <p class="admin-muted" id="adminAnalyticsStatus"></p>
+        </section>
+
+        <section class="admin-card" id="adminHealthCard">
+          <h2>Etat systeme</h2>
+          <div class="admin-stats-grid">
+            <div class="admin-stat">
+              <div class="admin-stat-label">Health FastFlux (dernier)</div>
+              <div class="admin-stat-value" id="adminHealthLastRun">-</div>
+            </div>
+            <div class="admin-stat">
+              <div class="admin-stat-label">Health OK (dernier)</div>
+              <div class="admin-stat-value" id="adminHealthLastOk">-</div>
+            </div>
+            <div class="admin-stat">
+              <div class="admin-stat-label">Echecs consecutifs</div>
+              <div class="admin-stat-value" id="adminHealthFailStreak">-</div>
+            </div>
+            <div class="admin-stat">
+              <div class="admin-stat-label">Derniere auto-reparation</div>
+              <div class="admin-stat-value" id="adminHealthLastRepair">-</div>
+            </div>
+            <div class="admin-stat">
+              <div class="admin-stat-label">Warmup OK (dernier)</div>
+              <div class="admin-stat-value" id="adminHealthWarmupOk">-</div>
+            </div>
+            <div class="admin-stat">
+              <div class="admin-stat-label">Reparation globale</div>
+              <div class="admin-stat-value" id="adminHealthGlobalRepair">-</div>
+            </div>
+          </div>
+          <div class="admin-muted" id="adminHealthMeta"></div>
+          <p class="admin-muted" id="adminHealthStatus"></p>
         </section>
 
         <section class="admin-card">

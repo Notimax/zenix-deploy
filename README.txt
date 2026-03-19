@@ -1695,3 +1695,9 @@ AUTO-REPAIR MAX (2026-03-19, c388)
 - Global repair cooldown reduced to 60s; manual repair rate-limit now 10s.
 - FastFlux stall report throttled to 8s for faster detection.
 - Cache-bust bumped to 20260319-c388.
+
+FASTFLUX HEALTH PANEL (2026-03-19, c390)
+- Added FastFlux health-check loop (light API check) that can trigger global repair on consecutive failures.
+- Admin now shows system health: last health run/OK, fail streak, last auto-repair, warmup OK, global repair time.
+- Cache-bust bumped to 20260319-c390 (zenix.js).
+- Admin assets cache-bust updated to 20260319-c390.
