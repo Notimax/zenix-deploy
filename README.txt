@@ -1724,3 +1724,10 @@ FASTFLUX FAILOVER (2026-03-19, c395)
 - Purstream fallback allows all languages in degraded mode to avoid total playback outages.
 - Admin health meta now shows FastFlux state (OK/DEGRADE).
 - Admin assets cache-bust updated to 20260319-c395.
+
+BACKUP CACHE FAILSAFE (2026-03-19, c396)
+- Added /api/backup-cache (GET/POST) to store last-known working sources per media.
+- Client stores successful playback sources locally and syncs them to server.
+- When external sources are empty or unstable, player enters "Mode secours" and uses cached sources.
+- Global repair now clears backup cache to avoid stale bad sources.
+- Failure mode auto-exits on successful playback.

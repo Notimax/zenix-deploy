@@ -386,6 +386,22 @@ const ADMIN_DATA_FILE_FALLBACK = path.resolve(path.join(FALLBACK_DATA_DIR, "admi
 const BACKUP_CONFIG_FILE = path.resolve(
   process.env.ZENIX_BACKUP_CONFIG_FILE || path.join(DATA_DIR, "backup-config.json")
 );
+const BACKUP_CACHE_FILE = path.resolve(
+  process.env.ZENIX_BACKUP_CACHE_FILE || path.join(DATA_DIR, "backup-cache.json")
+);
+const BACKUP_CACHE_FILE_FALLBACK = path.resolve(path.join(FALLBACK_DATA_DIR, "backup-cache.json"));
+const BACKUP_CACHE_TTL_MS = Math.max(
+  60 * 60 * 1000,
+  Number(process.env.ZENIX_BACKUP_CACHE_TTL_MS || 7 * 24 * 60 * 60 * 1000)
+);
+const BACKUP_CACHE_MAX_ENTRIES = Math.max(
+  200,
+  toInt(process.env.ZENIX_BACKUP_CACHE_MAX_ENTRIES, 4000, 200, 12000)
+);
+const BACKUP_CACHE_MAX_SOURCES = Math.max(
+  1,
+  toInt(process.env.ZENIX_BACKUP_CACHE_MAX_SOURCES, 5, 1, 12)
+);
 const ADMIN_LOGIN_WINDOW_MS = Math.max(60 * 1000, Number(process.env.ZENIX_ADMIN_LOGIN_WINDOW_MS || 5 * 60 * 1000));
 const ADMIN_LOGIN_MAX_ATTEMPTS = Math.max(
   3,
@@ -395,6 +411,8 @@ const adminLoginAttempts = new Map();
 const adminSessions = new Map();
 const adminDataCache = { loadedAt: 0, value: null };
 const backupConfigCache = { loadedAt: 0, value: null };
+const backupCacheStore = { loadedAt: 0, value: null };
+let backupCacheSaveTimer = null;
 const livewatchCache = { loadedAt: 0, payload: null, inFlight: null };
 const iptvCache = { loadedAt: 0, payload: null, inFlight: null };
 let tvChannelsPurged = false;
@@ -2136,6 +2154,217 @@ function normalizeRepairSources(list) {
   return out.slice(0, REPAIR_STORE_MAX_SOURCES);
 }
 
+function normalizeBackupSource(row) {
+  const rawUrl = String(row?.stream_url || row?.url || "").trim();
+  if (!rawUrl) {
+    return null;
+  }
+  const parsed = parseSafeRemoteUrl(rawUrl);
+  if (!parsed) {
+    return null;
+  }
+  const streamUrl = parsed.href;
+  const language = normalizePidoovLanguage(row?.language || row?.lang || row?.name || "") || "VF";
+  const quality = sanitizeToken(String(row?.quality || "HD"), 16) || "HD";
+  const rawFormat = sanitizeToken(String(row?.format || "").toLowerCase(), 10);
+  const format =
+    rawFormat === "hls" || rawFormat === "mp4" || rawFormat === "dash" || rawFormat === "webm" || rawFormat === "embed"
+      ? rawFormat
+      : /\.m3u8(?:$|\?)/i.test(streamUrl)
+        ? "hls"
+        : /\.mp4(?:$|\?)/i.test(streamUrl)
+          ? "mp4"
+          : "embed";
+  const sourceName =
+    sanitizeToken(String(row?.source_name || row?.name || ZENIX_BRAND_LABEL), 46) || ZENIX_BRAND_LABEL;
+  const priority = toInt(row?.priority, 0, 0, 1000);
+  return {
+    stream_url: streamUrl,
+    source_name: sourceName,
+    quality,
+    language,
+    format,
+    priority,
+    origin: String(row?.origin || row?.provider || row?.source || "").trim(),
+  };
+}
+
+function normalizeBackupSources(list) {
+  const rows = Array.isArray(list) ? list : [];
+  const dedupe = new Set();
+  const out = [];
+  rows.forEach((row) => {
+    const normalized = normalizeBackupSource(row);
+    if (!normalized) {
+      return;
+    }
+    const key = normalized.stream_url;
+    if (!key || dedupe.has(key)) {
+      return;
+    }
+    dedupe.add(key);
+    out.push(normalized);
+  });
+  return out.slice(0, BACKUP_CACHE_MAX_SOURCES);
+}
+
+function buildBackupCacheKey(mediaType, mediaId, season = 1, episode = 1) {
+  const safeId = toInt(mediaId, 0, 0, 999999999);
+  if (!safeId) {
+    return "";
+  }
+  const type = mediaType === "tv" ? "tv" : "movie";
+  if (type === "tv") {
+    const safeSeason = toInt(season, 1, 1, 500);
+    const safeEpisode = toInt(episode, 1, 1, 50000);
+    return `${type}:${safeId}:s${safeSeason}e${safeEpisode}`;
+  }
+  return `${type}:${safeId}`;
+}
+
+function loadBackupCacheStore(force = false) {
+  const now = Date.now();
+  if (!force && backupCacheStore.value && now - backupCacheStore.loadedAt < 2000) {
+    return backupCacheStore.value;
+  }
+  let data = null;
+  try {
+    if (fs.existsSync(BACKUP_CACHE_FILE)) {
+      const raw = fs.readFileSync(BACKUP_CACHE_FILE, "utf-8");
+      data = parseJsonSafe(raw);
+    }
+  } catch {
+    data = null;
+  }
+  if (!data) {
+    try {
+      if (fs.existsSync(BACKUP_CACHE_FILE_FALLBACK)) {
+        const raw = fs.readFileSync(BACKUP_CACHE_FILE_FALLBACK, "utf-8");
+        data = parseJsonSafe(raw);
+      }
+    } catch {
+      data = null;
+    }
+  }
+  if (!data || typeof data !== "object") {
+    data = { items: {} };
+  }
+  if (!data.items || typeof data.items !== "object") {
+    data.items = {};
+  }
+  backupCacheStore.value = data;
+  backupCacheStore.loadedAt = now;
+  return data;
+}
+
+function saveBackupCacheStore(data) {
+  const payload = data && typeof data === "object" ? data : { items: {} };
+  if (!payload.items || typeof payload.items !== "object") {
+    payload.items = {};
+  }
+  let saved = false;
+  try {
+    const tmp = `${BACKUP_CACHE_FILE}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(payload, null, 2), "utf-8");
+    fs.renameSync(tmp, BACKUP_CACHE_FILE);
+    saved = true;
+  } catch {
+    saved = false;
+  }
+  if (!saved) {
+    try {
+      const tmp = `${BACKUP_CACHE_FILE_FALLBACK}.tmp`;
+      fs.writeFileSync(tmp, JSON.stringify(payload, null, 2), "utf-8");
+      fs.renameSync(tmp, BACKUP_CACHE_FILE_FALLBACK);
+    } catch {
+      // best effort
+    }
+  }
+  backupCacheStore.value = payload;
+  backupCacheStore.loadedAt = Date.now();
+  return payload;
+}
+
+function scheduleBackupCacheSave(data) {
+  if (backupCacheSaveTimer) {
+    return;
+  }
+  backupCacheSaveTimer = setTimeout(() => {
+    backupCacheSaveTimer = null;
+    saveBackupCacheStore(data);
+  }, 1200);
+}
+
+function pruneBackupCache(data) {
+  if (!data || typeof data !== "object" || !data.items || typeof data.items !== "object") {
+    return;
+  }
+  const now = Date.now();
+  Object.entries(data.items).forEach(([key, entry]) => {
+    const updatedAt = Number(entry?.updatedAt || 0);
+    if (!updatedAt || now - updatedAt > BACKUP_CACHE_TTL_MS) {
+      delete data.items[key];
+    }
+  });
+  const keys = Object.keys(data.items);
+  if (keys.length <= BACKUP_CACHE_MAX_ENTRIES) {
+    return;
+  }
+  keys
+    .sort((a, b) => Number(data.items[b]?.updatedAt || 0) - Number(data.items[a]?.updatedAt || 0))
+    .slice(BACKUP_CACHE_MAX_ENTRIES)
+    .forEach((key) => {
+      delete data.items[key];
+    });
+}
+
+function updateBackupCacheEntry(entry) {
+  if (!entry || typeof entry !== "object") {
+    return;
+  }
+  const key = buildBackupCacheKey(entry.mediaType, entry.mediaId, entry.season, entry.episode);
+  if (!key) {
+    return;
+  }
+  const sources = normalizeBackupSources(entry.sources || []);
+  if (sources.length === 0) {
+    return;
+  }
+  const data = loadBackupCacheStore(true);
+  const current = data.items[key] || {};
+  data.items[key] = {
+    mediaId: toInt(entry.mediaId, 0, 0, 999999999),
+    mediaType: entry.mediaType === "tv" ? "tv" : "movie",
+    season: toInt(entry.season, 1, 1, 500),
+    episode: toInt(entry.episode, 1, 1, 50000),
+    sources,
+    provider: String(entry.provider || current.provider || "").trim(),
+    successCount: Math.max(0, Number(current.successCount || 0)) + 1,
+    updatedAt: Date.now(),
+  };
+  pruneBackupCache(data);
+  scheduleBackupCacheSave(data);
+}
+
+function fetchBackupCacheEntry(mediaType, mediaId, season = 1, episode = 1) {
+  const key = buildBackupCacheKey(mediaType, mediaId, season, episode);
+  if (!key) {
+    return null;
+  }
+  const data = loadBackupCacheStore(true);
+  const entry = data.items && typeof data.items === "object" ? data.items[key] : null;
+  if (!entry) {
+    return null;
+  }
+  const updatedAt = Number(entry.updatedAt || 0);
+  if (!updatedAt || Date.now() - updatedAt > BACKUP_CACHE_TTL_MS) {
+    delete data.items[key];
+    scheduleBackupCacheSave(data);
+    return null;
+  }
+  return entry;
+}
+
 function getRepairSourcesFallback(mediaType, mediaId, season = 1, episode = 1) {
   const safeId = toInt(mediaId, 0, 0, 999999999);
   if (!safeId) {
@@ -2169,11 +2398,18 @@ function resetFastfluxCaches() {
   tmdbSearchCache.clear();
 }
 
+function resetBackupCacheStore() {
+  const data = loadBackupCacheStore(true);
+  data.items = {};
+  saveBackupCacheStore(data);
+}
+
 function triggerGlobalRepair() {
   globalRepairEpoch = Date.now();
   resetFastfluxCaches();
   purstreamSearchCache.clear();
   SOURCE_PROBE_CACHE.clear();
+  resetBackupCacheStore();
 }
 
 function shouldForceRefreshGlobal() {
@@ -13610,6 +13846,9 @@ function isGateProtectedPath(pathname) {
   if (pathname === "/api/backup-config") {
     return false;
   }
+  if (pathname === "/api/backup-cache") {
+    return false;
+  }
   if (pathname === "/api/requests") {
     return false;
   }
@@ -14559,6 +14798,64 @@ async function handleBackupConfig(req, res, requestUrl) {
   };
   const saved = saveBackupConfig(updated);
   sendJson(res, 200, { ok: true, data: saved });
+  return true;
+}
+
+async function handleBackupCache(req, res, requestUrl) {
+  if (requestUrl.pathname !== "/api/backup-cache") {
+    return false;
+  }
+  if (req.method === "OPTIONS") {
+    res.writeHead(204, {
+      Allow: "GET, POST, OPTIONS",
+      "Cache-Control": "no-cache",
+    });
+    res.end();
+    return true;
+  }
+  if (req.method === "GET") {
+    const mediaType = String(requestUrl.searchParams.get("type") || "movie").toLowerCase() === "tv" ? "tv" : "movie";
+    const mediaId = toInt(requestUrl.searchParams.get("mediaId"), 0, 0, 999999999);
+    const season = toInt(requestUrl.searchParams.get("season"), 1, 1, 500);
+    const episode = toInt(requestUrl.searchParams.get("episode"), 1, 1, 50000);
+    if (!mediaId) {
+      sendJson(res, 200, { ok: false, data: null });
+      return true;
+    }
+    const entry = fetchBackupCacheEntry(mediaType, mediaId, season, episode);
+    if (!entry) {
+      sendJson(res, 200, { ok: false, data: null });
+      return true;
+    }
+    sendJson(res, 200, { ok: true, data: entry });
+    return true;
+  }
+  if (req.method !== "POST") {
+    sendJson(res, 405, { error: "Method Not Allowed" });
+    return true;
+  }
+  let payload;
+  try {
+    payload = await readJsonBody(req, 64 * 1024);
+  } catch {
+    sendJson(res, 400, { error: "Invalid payload" });
+    return true;
+  }
+  const mediaType = String(payload?.mediaType || payload?.type || "movie").toLowerCase() === "tv" ? "tv" : "movie";
+  const mediaId = toInt(payload?.mediaId || payload?.id, 0, 0, 999999999);
+  if (!mediaId) {
+    sendJson(res, 400, { error: "Missing mediaId" });
+    return true;
+  }
+  updateBackupCacheEntry({
+    mediaType,
+    mediaId,
+    season: toInt(payload?.season, 1, 1, 500),
+    episode: toInt(payload?.episode, 1, 1, 50000),
+    sources: payload?.sources || [],
+    provider: payload?.provider || "",
+  });
+  sendJson(res, 200, { ok: true });
   return true;
 }
 
@@ -16603,6 +16900,13 @@ async function handleZenixSource(req, res, requestUrl) {
   }
 
   if (sources.length === 0 && mediaId > 0) {
+    const backupEntry = fetchBackupCacheEntry(mediaType, mediaId, season, episode);
+    if (backupEntry && Array.isArray(backupEntry.sources) && backupEntry.sources.length > 0) {
+      sources = normalizeBackupSources(backupEntry.sources);
+      warning = warning ? `${warning} Sources recuperees du cache local.` : "Sources recuperees du cache local.";
+    }
+  }
+  if (sources.length === 0 && mediaId > 0) {
     const fallback = getRepairSourcesFallback(mediaType, mediaId, season, episode);
     if (fallback.length > 0) {
       sources = fallback;
@@ -17196,6 +17500,12 @@ const server = http.createServer((req, res) => {
     })
     .then((handledBackupConfig) => {
       if (handledBackupConfig) {
+        return true;
+      }
+      return handleBackupCache(req, res, requestUrl);
+    })
+    .then((handledBackupCache) => {
+      if (handledBackupCache) {
         return true;
       }
       return handleAdminSession(req, res, requestUrl);

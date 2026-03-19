@@ -126,6 +126,9 @@ const BROWSE_STATE_KEY = "zenix-browse-state-v1";
 const VIEW_SCROLL_KEY = "zenix-view-scroll-v1";
 const SOURCE_HOST_HEALTH_KEY = "zenix-source-health-v1";
 const SOURCE_SUCCESS_KEY = "zenix-source-success-v1";
+const SOURCE_FALLBACK_CACHE_KEY = "zenix-source-fallback-cache-v1";
+const SOURCE_FAILURE_MODE_MS = 3 * 60 * 1000;
+const SOURCE_FALLBACK_CACHE_KEY = "zenix-source-fallback-cache-v1";
 const ITEM_QUALITY_KEY = "zenix-item-quality-v1";
 const DISCORD_PROMPT_SESSION_KEY = "zenix-discord-prompt-session-v1";
 const DISCORD_INVITE_URL = "https://discord.gg/xydTB8VmZT";
@@ -439,6 +442,11 @@ const state = {
   sourceRetryAttempts: new Map(),
   sourceHostHealth: loadSourceHostHealth(),
   sourceSuccessMap: loadSourceSuccessMap(),
+  sourceFallbackCache: loadSourceFallbackCache(),
+  sourceFailureModeUntil: 0,
+  sourceFailureModeLastAt: 0,
+  sourceFailureModeHits: 0,
+  sourceFailureModeNotifiedAt: 0,
   itemQualityMap: loadItemQualityMap(),
   hlsLangProbeToken: 0,
   sourceLoading: false,
@@ -3758,11 +3766,13 @@ function bindEvents() {
       clearAwaitingUserPlay();
       setPlayerLoading(false);
       updateActiveSourceLanguageFromPlayback(refs.playerVideo);
+      exitSourceFailureMode();
     });
     refs.playerVideo.addEventListener("playing", () => {
       clearAwaitingUserPlay();
       setPlayerLoading(false);
       updateActiveSourceLanguageFromPlayback(refs.playerVideo);
+      exitSourceFailureMode();
     });
     refs.playerVideo.addEventListener("pause", () => {
       saveNowPlayingProgress({ force: true });
@@ -3800,14 +3810,15 @@ function bindEvents() {
       saveNowPlayingProgress({ force: true });
     });
     refs.playerVideo.addEventListener("ended", onPlayerEnded);
-    refs.playerVideo.addEventListener("error", () => {
-      if (shouldIgnoreVideoErrorFallback()) {
-        return;
-      }
-      handlePlayerPlaybackError().catch(() => {
-        setPlayerStatus("Erreur video detectee. Choisis un autre titre.", true);
-      });
+  refs.playerVideo.addEventListener("error", () => {
+    if (shouldIgnoreVideoErrorFallback()) {
+      return;
+    }
+    enterSourceFailureMode("lecture instable");
+    handlePlayerPlaybackError().catch(() => {
+      setPlayerStatus("Erreur video detectee. Choisis un autre titre.", true);
     });
+  });
   }
   bindFastPress(refs.playerRestartBtn, async () => {
     refs.playerVideo.currentTime = 0;
@@ -13331,6 +13342,13 @@ function filterSourcesByLanguage(sources, language) {
 
 function filterMovieSourcesForFrench(sources) {
   const rows = Array.isArray(sources) ? sources.slice() : [];
+  if (rows.length > 0 && state.nowPlaying && !isSourceFailureModeActive()) {
+    updateLocalFallbackCache(state.nowPlaying, rows, {
+      season: state.nowPlaying?.season || 1,
+      episode: state.nowPlaying?.episode || 1,
+      provider: "zenix",
+    });
+  }
   if (rows.length <= 1) {
     return rows;
   }
@@ -14895,8 +14913,19 @@ async function collectRepairSourcesForItem(item, season = 1, episode = 1, option
 
   if (item.type !== "tv") {
     if (item.isExternal) {
+      if (isSourceFailureModeActive()) {
+        return fetchBackupSources(item, safeSeason, safeEpisode);
+      }
       const resolved = await resolveExternalItemSources(item);
-      return Array.isArray(resolved?.sources) ? resolved.sources : [];
+      const sources = Array.isArray(resolved?.sources) ? resolved.sources : [];
+      if (sources.length > 0) {
+        updateLocalFallbackCache(item, sources, { season: safeSeason, episode: safeEpisode, provider: "zenix" });
+        syncBackupCacheToServer(item, sources, { season: safeSeason, episode: safeEpisode, provider: "zenix" });
+      }
+      return sources;
+    }
+    if (isSourceFailureModeActive()) {
+      return fetchBackupSources(item, safeSeason, safeEpisode);
     }
     let payload = null;
     try {
@@ -14909,7 +14938,13 @@ async function collectRepairSourcesForItem(item, season = 1, episode = 1, option
     const ownedMergedSources = await appendZenixOwnedSources(item, 1, 1, autoMergedSources);
     const nakiosMerged = await appendNakiosSources(item, 1, 1, ownedMergedSources, { force: forceExternal });
     const filmer2Merged = await appendFilmer2Sources(item, 1, 1, nakiosMerged);
-    return filterMovieSourcesForFrench(filmer2Merged);
+    const filtered = filterMovieSourcesForFrench(filmer2Merged);
+    if (filtered.length === 0) {
+      return fetchBackupSources(item, safeSeason, safeEpisode);
+    }
+    updateLocalFallbackCache(item, filtered, { season: safeSeason, episode: safeEpisode, provider: "zenix" });
+    syncBackupCacheToServer(item, filtered, { season: safeSeason, episode: safeEpisode, provider: "zenix" });
+    return filtered;
   }
 
   let resolved = null;
@@ -14917,6 +14952,9 @@ async function collectRepairSourcesForItem(item, season = 1, episode = 1, option
     resolved = await resolveEpisodePayloadWithStrategy(item, safeSeason, safeEpisode);
   } catch {
     resolved = null;
+  }
+  if (isSourceFailureModeActive() && !resolved) {
+    return fetchBackupSources(item, safeSeason, safeEpisode);
   }
   const selectedItem = resolved?.selectedItem || item;
   const baseSources = extractSources(resolved?.payload || null);
@@ -14944,6 +14982,11 @@ async function collectRepairSourcesForItem(item, season = 1, episode = 1, option
   const filmer2Merged = await appendFilmer2Sources(selectedItem, safeSeason, safeEpisode, nakiosMergedSources);
   let allSources = await appendAnimeSibnetSource(selectedItem, safeSeason, safeEpisode, filmer2Merged, "");
   allSources = preferAnimeSamaSources(selectedItem, allSources);
+  if (allSources.length === 0) {
+    return fetchBackupSources(selectedItem, safeSeason, safeEpisode);
+  }
+  updateLocalFallbackCache(selectedItem, allSources, { season: safeSeason, episode: safeEpisode, provider: "zenix" });
+  syncBackupCacheToServer(selectedItem, allSources, { season: safeSeason, episode: safeEpisode, provider: "zenix" });
   return allSources;
 }
 
@@ -14981,6 +15024,19 @@ async function autoRepairSourcesForPlayback(options = {}) {
   }
   setPlayerLoading(true, "Reparation automatique...");
   setPlayerStatus("Reparation automatique en cours...");
+  if (isSourceFailureModeActive()) {
+    const cached = await fetchBackupSources(item, season, episode);
+    if (cached.length > 0) {
+      state.sourcePool = cached.slice();
+      state.allEpisodeSources = cached.slice();
+      state.sourceRetryAttempts.clear();
+      state.sourceIndex = -1;
+      state.manualSourceLock = false;
+      state.manualSourceLockedIndex = -1;
+      renderPlayerSourceOptions();
+      return { ok: true, cached: true };
+    }
+  }
   const sources = await collectRepairSourcesForItem(item, season, episode, { forceExternal: true });
   if (!Array.isArray(sources) || sources.length === 0) {
     return { ok: false, pending: isLikelyRecentPendingUpload(item) };
@@ -15017,6 +15073,8 @@ async function autoRepairSourcesForPlayback(options = {}) {
   state.sourceIndex = -1;
   state.manualSourceLock = false;
   state.manualSourceLockedIndex = -1;
+  updateLocalFallbackCache(item, state.sourcePool, { season, episode, provider: "zenix" });
+  syncBackupCacheToServer(item, state.sourcePool, { season, episode, provider: "zenix" });
   renderPlayerSourceOptions();
   scheduleHlsLanguageProbe(state.allEpisodeSources);
   if (refs.playerRepairStatus) {
@@ -15054,6 +15112,27 @@ async function runPlayerRepair() {
     refs.playerRepairStatus.textContent = "Reparation en cours... ajout de lecteurs";
   }
   resetRepairPlaybackState();
+  if (isSourceFailureModeActive()) {
+    const cached = await fetchBackupSources(item, season, episode);
+    if (cached.length > 0) {
+      state.sourcePool = cached.slice();
+      state.allEpisodeSources = cached.slice();
+      state.sourceRetryAttempts.clear();
+      state.sourceIndex = -1;
+      state.manualSourceLock = false;
+      state.manualSourceLockedIndex = -1;
+      updateLocalFallbackCache(item, state.sourcePool, { season, episode, provider: "backup" });
+      syncBackupCacheToServer(item, state.sourcePool, { season, episode, provider: "backup" });
+      renderPlayerSourceOptions();
+      scheduleHlsLanguageProbe(state.allEpisodeSources);
+      if (refs.playerRepairStatus) {
+        refs.playerRepairStatus.textContent = "Reparation terminee: cache local applique.";
+      }
+      refs.playerRepairBtn.disabled = false;
+      refs.playerRepairBtn.classList.remove("is-loading");
+      return;
+    }
+  }
   try {
     const payload = await fetchJson(`${API_BASE}/repair-global`, {
       method: "POST",
@@ -15111,6 +15190,8 @@ async function runPlayerRepair() {
   state.sourceIndex = -1;
   state.manualSourceLock = false;
   state.manualSourceLockedIndex = -1;
+  updateLocalFallbackCache(item, state.sourcePool, { season, episode, provider: "zenix" });
+  syncBackupCacheToServer(item, state.sourcePool, { season, episode, provider: "zenix" });
   renderPlayerSourceOptions();
   scheduleHlsLanguageProbe(state.allEpisodeSources);
   if (refs.playerRepairStatus) {
@@ -15325,6 +15406,9 @@ async function fetchRepairSources(key, options = {}) {
   if (!key) {
     return [];
   }
+  if (isSourceFailureModeActive()) {
+    return [];
+  }
   const force = options.force === true;
   const now = Date.now();
   const cached = state.repairCache.get(key);
@@ -15343,7 +15427,14 @@ async function fetchRepairSources(key, options = {}) {
     timeoutMs: REPAIR_SOURCE_TIMEOUT_MS,
     retryDelays: [350, 800],
   })
-    .then((payload) => normalizeRepairSourceList(payload?.data?.sources || []))
+    .then((payload) => {
+      const list = normalizeRepairSourceList(payload?.data?.sources || []);
+      if (list.length > 0) {
+        const now = Date.now();
+        state.sourceFailureModeUntil = Math.min(Number(state.sourceFailureModeUntil || 0), now + 1500);
+      }
+      return list;
+    })
     .catch(() => []);
   state.repairInFlight.set(key, task);
   const sources = await task;
@@ -15610,6 +15701,11 @@ async function appendNakiosSources(item, season, episode, sources, options = {})
       }
     }
     if (raw.length === 0) {
+      const backupSources = await fetchBackupSources(item, safeSeason, safeEpisode);
+      if (backupSources.length > 0) {
+        notifyActionMessage("Mode secours actif: lecture via cache local.", false);
+        return mergeSourceLists(base, backupSources);
+      }
       return base;
     }
 
@@ -15640,10 +15736,25 @@ async function appendNakiosSources(item, season, episode, sources, options = {})
       });
 
     if (nakiosSources.length === 0) {
+      const backupSources = await fetchBackupSources(item, safeSeason, safeEpisode);
+      if (backupSources.length > 0) {
+        notifyActionMessage("Mode secours actif: lecture via cache local.", false);
+        return mergeSourceLists(base, backupSources);
+      }
       return base;
     }
-    return base.concat(nakiosSources);
+    const merged = base.concat(nakiosSources);
+    if (merged.length > 0) {
+      updateLocalFallbackCache(item, merged, { season: safeSeason, episode: safeEpisode, provider: "zenix" });
+      syncBackupCacheToServer(item, merged, { season: safeSeason, episode: safeEpisode, provider: "zenix" });
+    }
+    return merged;
   } catch {
+    const backupSources = await fetchBackupSources(item, safeSeason, safeEpisode);
+    if (backupSources.length > 0) {
+      notifyActionMessage("Mode secours actif: lecture via cache local.", false);
+      return mergeSourceLists(base, backupSources);
+    }
     return base;
   }
 }
@@ -16051,6 +16162,10 @@ function resetRepairPlaybackState() {
   state.lastAutoSwitchAt = 0;
   state.lastAutoSwitchReason = "";
   state.mobileStableLockOverride = 0;
+  if (state.sourceFallbackCache instanceof Map) {
+    state.sourceFallbackCache.clear();
+    saveSourceFallbackCache(state.sourceFallbackCache);
+  }
   if (state.sourceSuccessMap instanceof Map) {
     state.sourceSuccessMap.clear();
     saveSourceSuccessMap(state.sourceSuccessMap);
@@ -17133,6 +17248,123 @@ function rememberSourceSuccess(source, itemId = 0) {
       saveItemQualityMap(state.itemQualityMap);
     }
   }
+}
+
+function buildBackupCacheKey(mediaId, type, season = 1, episode = 1) {
+  const safeId = Number(mediaId || 0);
+  if (!Number.isFinite(safeId) || safeId <= 0) {
+    return "";
+  }
+  const mediaType = String(type || "").toLowerCase() === "tv" ? "tv" : "movie";
+  if (mediaType === "tv") {
+    const safeSeason = Math.max(1, Number(season || 1));
+    const safeEpisode = Math.max(1, Number(episode || 1));
+    return `${mediaType}:${safeId}:s${safeSeason}e${safeEpisode}`;
+  }
+  return `${mediaType}:${safeId}`;
+}
+
+function updateLocalFallbackCache(item, sources, options = {}) {
+  if (!item || !Array.isArray(sources) || sources.length === 0) {
+    return;
+  }
+  const key = buildBackupCacheKey(
+    item.id,
+    item.type,
+    options.season || item.season || 1,
+    options.episode || item.episode || 1
+  );
+  if (!key) {
+    return;
+  }
+  const normalized = sources.map((entry, index) => normalizeSourceEntry(entry, index)).filter(Boolean);
+  if (normalized.length === 0) {
+    return;
+  }
+  const map = state.sourceFallbackCache instanceof Map ? state.sourceFallbackCache : new Map();
+  map.set(key, {
+    key,
+    sources: normalized.slice(0, 6),
+    updatedAt: Date.now(),
+    provider: String(options.provider || ""),
+  });
+  state.sourceFallbackCache = map;
+  saveSourceFallbackCache(map);
+}
+
+async function syncBackupCacheToServer(item, sources, options = {}) {
+  if (!item || !Array.isArray(sources) || sources.length === 0) {
+    return;
+  }
+  const mediaId = Number(item.id || 0);
+  if (!Number.isFinite(mediaId) || mediaId <= 0) {
+    return;
+  }
+  const payload = {
+    mediaId,
+    mediaType: String(item.type || "").toLowerCase() === "tv" ? "tv" : "movie",
+    season: Math.max(1, Number(options.season || item.season || 1)),
+    episode: Math.max(1, Number(options.episode || item.episode || 1)),
+    sources,
+    provider: String(options.provider || ""),
+  };
+  try {
+    await fetchJson(`${API_BASE}/backup-cache`, {
+      method: "POST",
+      timeoutMs: 4500,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      noCache: true,
+    });
+  } catch {
+    // best effort only
+  }
+}
+
+async function fetchBackupCacheFromServer(item, season = 1, episode = 1) {
+  if (!item) {
+    return [];
+  }
+  const mediaId = Number(item.id || 0);
+  if (!Number.isFinite(mediaId) || mediaId <= 0) {
+    return [];
+  }
+  const params = new URLSearchParams({
+    mediaId: String(mediaId),
+    type: String(item.type || "").toLowerCase() === "tv" ? "tv" : "movie",
+    season: String(Math.max(1, Number(season || 1))),
+    episode: String(Math.max(1, Number(episode || 1))),
+  });
+  try {
+    const payload = await fetchJson(`${API_BASE}/backup-cache?${params.toString()}`, {
+      timeoutMs: 4500,
+      noCache: true,
+    });
+    const sources = Array.isArray(payload?.data?.sources) ? payload.data.sources : [];
+    return sources.map((entry, index) => normalizeSourceEntry(entry, index)).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+async function fetchBackupSources(item, season = 1, episode = 1) {
+  if (!item) {
+    return [];
+  }
+  const key = buildBackupCacheKey(item.id, item.type, season, episode);
+  if (!key) {
+    return [];
+  }
+  const localCache = state.sourceFallbackCache instanceof Map ? state.sourceFallbackCache : new Map();
+  const localEntry = localCache.get(key);
+  if (localEntry && Array.isArray(localEntry.sources) && localEntry.sources.length > 0) {
+    return localEntry.sources.map((entry, index) => normalizeSourceEntry(entry, index)).filter(Boolean);
+  }
+  const serverSources = await fetchBackupCacheFromServer(item, season, episode);
+  if (serverSources.length > 0) {
+    updateLocalFallbackCache(item, serverSources, { season, episode, provider: "backup" });
+  }
+  return serverSources;
 }
 
 function readAutoGlobalRepairState() {
@@ -20045,6 +20277,16 @@ function onPlayerProgress() {
           state.lastLocalPlayCountedKey = playKey;
         }
       }
+      updateLocalFallbackCache(state.nowPlaying, state.sourcePool, {
+        season: state.nowPlaying?.season || 1,
+        episode: state.nowPlaying?.episode || 1,
+        provider: currentSource?.isFastflux ? "fastflux" : currentSource?.source_name || "",
+      });
+      syncBackupCacheToServer(state.nowPlaying, state.sourcePool, {
+        season: state.nowPlaying?.season || 1,
+        episode: state.nowPlaying?.episode || 1,
+        provider: currentSource?.isFastflux ? "fastflux" : currentSource?.source_name || "",
+      });
     }
   }
   saveNowPlayingProgress();
@@ -20385,6 +20627,31 @@ function notifyActionMessage(message, isError = false) {
     return;
   }
   showToast(message, isError);
+}
+
+function isSourceFailureModeActive() {
+  return Date.now() < Number(state.sourceFailureModeUntil || 0);
+}
+
+function enterSourceFailureMode(reason = "") {
+  const now = Date.now();
+  state.sourceFailureModeLastAt = now;
+  state.sourceFailureModeHits = Math.min(12, Number(state.sourceFailureModeHits || 0) + 1);
+  state.sourceFailureModeUntil = Math.max(
+    now + SOURCE_FAILURE_MODE_MS,
+    Number(state.sourceFailureModeUntil || 0)
+  );
+  if (now - Number(state.sourceFailureModeNotifiedAt || 0) > 45000) {
+    notifyActionMessage(
+      reason ? `Mode secours actif: ${reason}` : "Mode secours actif: sources instables.",
+      false
+    );
+    state.sourceFailureModeNotifiedAt = now;
+  }
+}
+
+function exitSourceFailureMode() {
+  state.sourceFailureModeUntil = 0;
 }
 
 function getImageLoadingTargets(img) {
@@ -21821,6 +22088,51 @@ function loadSourceSuccessMap() {
     return map;
   } catch {
     return new Map();
+  }
+}
+
+function loadSourceFallbackCache() {
+  try {
+    const raw = localStorage.getItem(SOURCE_FALLBACK_CACHE_KEY);
+    if (!raw) {
+      return new Map();
+    }
+    const parsed = JSON.parse(raw);
+    const items = Array.isArray(parsed?.items) ? parsed.items : [];
+    const map = new Map();
+    items.forEach((entry) => {
+      if (!entry || typeof entry !== "object") {
+        return;
+      }
+      const key = String(entry.key || "").trim();
+      if (!key) {
+        return;
+      }
+      map.set(key, {
+        key,
+        sources: Array.isArray(entry.sources) ? entry.sources : [],
+        updatedAt: Number(entry.updatedAt || 0),
+        provider: String(entry.provider || ""),
+      });
+    });
+    return map;
+  } catch {
+    return new Map();
+  }
+}
+
+function saveSourceFallbackCache(map) {
+  if (!(map instanceof Map)) {
+    return;
+  }
+  try {
+    const items = Array.from(map.values()).slice(0, 240);
+    localStorage.setItem(
+      SOURCE_FALLBACK_CACHE_KEY,
+      JSON.stringify({ items })
+    );
+  } catch {
+    // ignore
   }
 }
 
