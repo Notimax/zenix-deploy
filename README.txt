@@ -1766,3 +1766,6 @@ GLOBAL REPAIR THROTTLE + FSVID HEADERS (2026-03-19, c404)
 - Client global repair poll + refresh cooldown softened to avoid forced restarts during playback.
 - HLS proxy adds fsvid referer/origin headers to improve s1.fsvid.lol playback on mobile.
 - Cache-bust bumped to 20260319-c404.
+
+DIRECT URL QUERY PRESERVED (2026-03-19, c405)
+- sanitizeHttpUrl no longer strips query params (?&=), so admin-added direct URLs keep tokens intact.

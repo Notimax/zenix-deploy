@@ -869,12 +869,16 @@ function rememberSuggestionFingerprint(fingerprint, now = Date.now()) {
 }
 
 function sanitizeHttpUrl(value, maxLength = 420) {
-  const raw = sanitizeToken(value, maxLength);
+  const raw = String(value || "").trim().slice(0, maxLength);
   if (!raw) {
     return "";
   }
+  const cleaned = raw.replace(/[\u0000-\u001F\u007F"'<>]+/g, "");
+  if (!cleaned) {
+    return "";
+  }
   try {
-    const parsed = new URL(raw);
+    const parsed = new URL(cleaned);
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
       return "";
     }
