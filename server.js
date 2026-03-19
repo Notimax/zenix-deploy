@@ -124,6 +124,18 @@ const FASTFLUX_WARMUP_INTERVAL_MS = Math.max(
   5 * 60 * 1000,
   Number(process.env.FASTFLUX_WARMUP_INTERVAL_MS || 20 * 60 * 1000)
 );
+const FASTFLUX_HEALTH_INTERVAL_MS = Math.max(
+  3 * 60 * 1000,
+  Number(process.env.FASTFLUX_HEALTH_INTERVAL_MS || 9 * 60 * 1000)
+);
+const FASTFLUX_HEALTH_FAIL_THRESHOLD = Math.max(
+  1,
+  Number(process.env.FASTFLUX_HEALTH_FAIL_THRESHOLD || 2)
+);
+const FASTFLUX_HEALTH_FAIL_COOLDOWN_MS = Math.max(
+  60 * 1000,
+  Number(process.env.FASTFLUX_HEALTH_FAIL_COOLDOWN_MS || 4 * 60 * 1000)
+);
 const TMDB_SEARCH_CACHE_MS = Math.max(60 * 1000, Number(process.env.TMDB_SEARCH_CACHE_MS || 10 * 60 * 1000));
 const FASTFLUX_SOURCE_REMOTE_TIMEOUT_MS = Math.max(
   10_000,
@@ -611,6 +623,11 @@ const playbackFailureByIp = new Map();
 let playbackFailureLastGlobalAt = 0;
 let fastfluxWarmupInFlight = false;
 let fastfluxWarmupTimer = null;
+let fastfluxHealthInFlight = false;
+let fastfluxHealthTimer = null;
+let fastfluxHealthFailStreak = 0;
+let fastfluxHealthLastOkAt = 0;
+let fastfluxHealthLastRepairAt = 0;
 let globalRepairEpoch = 0;
 let analyticsTotalSeen = 0;
 let analyticsTotalsHydrated = false;
@@ -2220,6 +2237,57 @@ function scheduleFastfluxWarmup() {
   setTimeout(() => {
     runFastfluxWarmup("startup").catch(() => {});
   }, 5000);
+}
+
+async function runFastfluxHealthCheck(reason = "interval") {
+  if (!USE_FASTFLUX || fastfluxHealthInFlight) {
+    return;
+  }
+  fastfluxHealthInFlight = true;
+  try {
+    const response = await fetchFastfluxPage("movies", 1, { timeoutMs: 9000 });
+    const items = Array.isArray(response?.items) ? response.items : [];
+    const ok = items.length > 0;
+    if (ok) {
+      fastfluxHealthFailStreak = 0;
+      fastfluxHealthLastOkAt = Date.now();
+      return;
+    }
+    fastfluxHealthFailStreak += 1;
+    if (
+      fastfluxHealthFailStreak >= FASTFLUX_HEALTH_FAIL_THRESHOLD &&
+      Date.now() - fastfluxHealthLastRepairAt > FASTFLUX_HEALTH_FAIL_COOLDOWN_MS
+    ) {
+      triggerGlobalRepair();
+      fastfluxHealthLastRepairAt = Date.now();
+    }
+  } catch {
+    fastfluxHealthFailStreak += 1;
+    if (
+      fastfluxHealthFailStreak >= FASTFLUX_HEALTH_FAIL_THRESHOLD &&
+      Date.now() - fastfluxHealthLastRepairAt > FASTFLUX_HEALTH_FAIL_COOLDOWN_MS
+    ) {
+      triggerGlobalRepair();
+      fastfluxHealthLastRepairAt = Date.now();
+    }
+  } finally {
+    fastfluxHealthInFlight = false;
+  }
+}
+
+function scheduleFastfluxHealthCheck() {
+  if (fastfluxHealthTimer || !USE_FASTFLUX) {
+    return;
+  }
+  fastfluxHealthTimer = setInterval(() => {
+    runFastfluxHealthCheck("interval").catch(() => {});
+  }, FASTFLUX_HEALTH_INTERVAL_MS);
+  if (typeof fastfluxHealthTimer.unref === "function") {
+    fastfluxHealthTimer.unref();
+  }
+  setTimeout(() => {
+    runFastfluxHealthCheck("startup").catch(() => {});
+  }, 8000);
 }
 
 function loadRepairStore() {
@@ -17324,6 +17392,7 @@ if (buildSuggestionsRelayUrl()) {
 }
 
 scheduleFastfluxWarmup();
+scheduleFastfluxHealthCheck();
 
 server.listen(PORT, () => {
   console.log(`Zenix Stream: http://localhost:${PORT}`);
