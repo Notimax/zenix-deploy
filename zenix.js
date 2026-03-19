@@ -1,5 +1,5 @@
 const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260319-c385";
+const ZENIX_BUILD_VERSION = "20260319-c386";
 const STORAGE_KEY = "zenix-progress-v4";
 const COVER_CACHE_KEY = "zenix-cover-cache-v1";
 const LOCAL_PLAY_KEY = "zenix-local-plays-v1";
@@ -17282,6 +17282,16 @@ async function playFromSourcePoolWithValidation(resumeTime, token, options = {})
         skipFastfluxPriority: true,
       });
     }
+    const report = await reportPlaybackFailure({
+      itemId: Number(options?.itemId || state.nowPlaying?.id || state.selectedDetailId || 0),
+      mediaType: String(state.nowPlaying?.type || ""),
+      reason: "no-playable",
+    });
+    if (report?.triggered) {
+      setPlayerStatus("Reparation globale en cours...", true);
+      await hardRefreshCurrentPlayback(false).catch(() => {});
+      return;
+    }
     const autoTriggered = await triggerAutoGlobalRepair("no-playable");
     if (autoTriggered) {
       return;
@@ -17292,6 +17302,16 @@ async function playFromSourcePoolWithValidation(resumeTime, token, options = {})
       : "Aucun lecteur en marche. Mentionner sur Discord \"Astrax\".";
     setPlayerStatus(message, true);
     setPlayerLoading(false);
+    return;
+  }
+  const report = await reportPlaybackFailure({
+    itemId: Number(options?.itemId || state.nowPlaying?.id || state.selectedDetailId || 0),
+    mediaType: String(state.nowPlaying?.type || ""),
+    reason: "no-playable",
+  });
+  if (report?.triggered) {
+    setPlayerStatus("Reparation globale en cours...", true);
+    await hardRefreshCurrentPlayback(false).catch(() => {});
     return;
   }
   const autoTriggered = await triggerAutoGlobalRepair("no-playable");
@@ -21544,6 +21564,37 @@ function sendAnalyticsHeartbeat(useBeacon = false) {
     });
 }
 
+async function reportPlaybackFailure(context = {}) {
+  if (state.analyticsDisabled) {
+    return null;
+  }
+  if (!state.analyticsClientId) {
+    state.analyticsClientId = getOrCreateAnalyticsClientId();
+  }
+  const clientId = String(state.analyticsClientId || "").trim();
+  if (!clientId) {
+    return null;
+  }
+  const payload = {
+    clientId,
+    page: window.location.pathname,
+    view: state.view,
+    itemId: Number(context?.itemId || 0),
+    mediaType: String(context?.mediaType || state.nowPlaying?.type || ""),
+    reason: String(context?.reason || "no-playable"),
+    ts: Date.now(),
+  };
+  try {
+    return await fetchJson(`${API_BASE}/analytics/playback-fail`, {
+      method: "POST",
+      timeoutMs: 4000,
+      body: payload,
+    });
+  } catch {
+    return null;
+  }
+}
+
 function startAnalyticsHeartbeat() {
   if (state.analyticsDisabled) {
     return;
@@ -22617,6 +22668,7 @@ async function cleanupLegacyServiceWorker() {
     await Promise.all(keys.map((key) => caches.delete(key)));
   }
 }
+
 
 
 

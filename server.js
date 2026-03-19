@@ -108,6 +108,22 @@ const FASTFLUX_SEARCH_CACHE_MS = Math.max(
   30 * 1000,
   Number(process.env.FASTFLUX_SEARCH_CACHE_MS || 6 * 60 * 1000)
 );
+const PLAYBACK_FAIL_WINDOW_MS = Math.max(
+  30 * 1000,
+  Number(process.env.PLAYBACK_FAIL_WINDOW_MS || 2 * 60 * 1000)
+);
+const PLAYBACK_FAIL_THRESHOLD = Math.max(
+  2,
+  Number(process.env.PLAYBACK_FAIL_THRESHOLD || 4)
+);
+const PLAYBACK_FAIL_COOLDOWN_MS = Math.max(
+  60 * 1000,
+  Number(process.env.PLAYBACK_FAIL_COOLDOWN_MS || 3 * 60 * 1000)
+);
+const FASTFLUX_WARMUP_INTERVAL_MS = Math.max(
+  5 * 60 * 1000,
+  Number(process.env.FASTFLUX_WARMUP_INTERVAL_MS || 25 * 60 * 1000)
+);
 const TMDB_SEARCH_CACHE_MS = Math.max(60 * 1000, Number(process.env.TMDB_SEARCH_CACHE_MS || 10 * 60 * 1000));
 const FASTFLUX_SOURCE_REMOTE_TIMEOUT_MS = Math.max(
   10_000,
@@ -591,6 +607,10 @@ const suggestionRateLimitMap = new Map();
 const suggestionFingerprintMap = new Map();
 const requestRateLimitMap = new Map();
 const requestFingerprintMap = new Map();
+const playbackFailureByIp = new Map();
+let playbackFailureLastGlobalAt = 0;
+let fastfluxWarmupInFlight = false;
+let fastfluxWarmupTimer = null;
 let globalRepairEpoch = 0;
 let analyticsTotalSeen = 0;
 let analyticsTotalsHydrated = false;
@@ -2138,6 +2158,68 @@ function triggerGlobalRepair() {
 
 function shouldForceRefreshGlobal() {
   return globalRepairEpoch > 0 && Date.now() - globalRepairEpoch < GLOBAL_REPAIR_FORCE_MS;
+}
+
+function prunePlaybackFailures(now) {
+  const cutoff = now - PLAYBACK_FAIL_WINDOW_MS;
+  for (const [ip, ts] of playbackFailureByIp.entries()) {
+    if (Number(ts || 0) < cutoff) {
+      playbackFailureByIp.delete(ip);
+    }
+  }
+}
+
+function recordPlaybackFailure(ip) {
+  const now = Date.now();
+  const safeIp = sanitizeToken(normalizeIpForAnalytics(ip || ""), 80) || "unknown";
+  playbackFailureByIp.set(safeIp, now);
+  prunePlaybackFailures(now);
+  const active = playbackFailureByIp.size;
+  let triggered = false;
+  if (
+    active >= PLAYBACK_FAIL_THRESHOLD &&
+    now - playbackFailureLastGlobalAt > PLAYBACK_FAIL_COOLDOWN_MS
+  ) {
+    triggerGlobalRepair();
+    playbackFailureLastGlobalAt = now;
+    triggered = true;
+  }
+  return { active, triggered, lastGlobalAt: playbackFailureLastGlobalAt };
+}
+
+async function runFastfluxWarmup(reason = "interval") {
+  if (!USE_FASTFLUX || fastfluxWarmupInFlight) {
+    return;
+  }
+  fastfluxWarmupInFlight = true;
+  try {
+    purstreamSearchCache.clear();
+    await loadFastfluxMovies(true, { minPages: FASTFLUX_MOVIES_PAGES_PER_FEED });
+    await loadFastfluxSeries(true, { minPages: FASTFLUX_SERIES_PAGES_PER_FEED });
+    console.log(`[fastflux] Warmup OK (${reason}).`);
+  } catch (error) {
+    console.warn("[fastflux] Warmup failed.", sanitizeToken(String(error?.message || ""), 120));
+  } finally {
+    fastfluxWarmupInFlight = false;
+  }
+}
+
+function scheduleFastfluxWarmup() {
+  if (fastfluxWarmupTimer) {
+    return;
+  }
+  if (!USE_FASTFLUX) {
+    return;
+  }
+  fastfluxWarmupTimer = setInterval(() => {
+    runFastfluxWarmup("interval").catch(() => {});
+  }, FASTFLUX_WARMUP_INTERVAL_MS);
+  if (typeof fastfluxWarmupTimer.unref === "function") {
+    fastfluxWarmupTimer.unref();
+  }
+  setTimeout(() => {
+    runFastfluxWarmup("startup").catch(() => {});
+  }, 5000);
 }
 
 function loadRepairStore() {
@@ -13991,6 +14073,40 @@ async function handleSuggestionSubmit(req, res, requestUrl) {
   }
 }
 
+async function handleAnalyticsPlaybackFail(req, res, requestUrl) {
+  if (requestUrl.pathname !== "/api/analytics/playback-fail") {
+    return false;
+  }
+  if (req.method === "OPTIONS") {
+    res.writeHead(204, {
+      Allow: "POST, OPTIONS",
+      "Cache-Control": "no-cache",
+    });
+    res.end();
+    return true;
+  }
+  if (req.method !== "POST") {
+    sendJson(res, 405, { error: "Method Not Allowed" });
+    return true;
+  }
+  let payload;
+  try {
+    payload = await readJsonBody(req, 4096);
+  } catch {
+    sendJson(res, 400, { error: "Invalid payload" });
+    return true;
+  }
+  const ip = normalizeIpForAnalytics(getRemoteAddress(req));
+  const result = recordPlaybackFailure(ip);
+  sendJson(res, 200, {
+    ok: true,
+    active: result.active,
+    triggered: result.triggered,
+    lastGlobalAt: result.lastGlobalAt || 0,
+  });
+  return true;
+}
+
 async function handleRequestsPublic(req, res, requestUrl) {
   if (requestUrl.pathname !== "/api/requests") {
     return false;
@@ -16873,6 +16989,12 @@ const server = http.createServer((req, res) => {
       if (handledAnalytics) {
         return true;
       }
+      return handleAnalyticsPlaybackFail(req, res, requestUrl);
+    })
+    .then((handledPlaybackFail) => {
+      if (handledPlaybackFail) {
+        return true;
+      }
       return handleAnalyticsOnline(req, res, requestUrl);
     })
     .then((handledAnalyticsOnline) => {
@@ -17200,6 +17322,8 @@ if (buildSuggestionsRelayUrl()) {
 } else {
   console.warn("[suggestions] Relay disabled: define SUGGESTIONS_RELAY_BASE and SUGGESTIONS_EMAIL_TO.");
 }
+
+scheduleFastfluxWarmup();
 
 server.listen(PORT, () => {
   console.log(`Zenix Stream: http://localhost:${PORT}`);

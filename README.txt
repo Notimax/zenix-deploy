@@ -1678,3 +1678,8 @@ AUTO GLOBAL REPAIR (2026-03-19, c385)
 - When multiple playback failures happen in a short window, a global repair is auto-triggered.
 - Global repair clears FastFlux+Purstream caches and refreshes playback for everyone.
 - Cache-bust bumped to 20260319-c385.
+
+GLOBAL FAIL AGGREGATOR + WARMUP (2026-03-19, c386)
+- Playback failure reports are aggregated server-side; multiple users failing triggers global repair.
+- FastFlux warmup runs every ~25 min (plus at startup) and clears Purstream search cache.
+- Cache-bust bumped to 20260319-c386.
