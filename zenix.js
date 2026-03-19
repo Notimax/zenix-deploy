@@ -1,5 +1,5 @@
 const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260319-c394";
+const ZENIX_BUILD_VERSION = "20260319-c396";
 const STORAGE_KEY = "zenix-progress-v4";
 const COVER_CACHE_KEY = "zenix-cover-cache-v1";
 const LOCAL_PLAY_KEY = "zenix-local-plays-v1";
@@ -128,7 +128,6 @@ const SOURCE_HOST_HEALTH_KEY = "zenix-source-health-v1";
 const SOURCE_SUCCESS_KEY = "zenix-source-success-v1";
 const SOURCE_FALLBACK_CACHE_KEY = "zenix-source-fallback-cache-v1";
 const SOURCE_FAILURE_MODE_MS = 3 * 60 * 1000;
-const SOURCE_FALLBACK_CACHE_KEY = "zenix-source-fallback-cache-v1";
 const ITEM_QUALITY_KEY = "zenix-item-quality-v1";
 const DISCORD_PROMPT_SESSION_KEY = "zenix-discord-prompt-session-v1";
 const DISCORD_INVITE_URL = "https://discord.gg/xydTB8VmZT";
