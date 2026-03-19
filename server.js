@@ -113,12 +113,12 @@ const PLAYBACK_FAIL_WINDOW_MS = Math.max(
   Number(process.env.PLAYBACK_FAIL_WINDOW_MS || 2 * 60 * 1000)
 );
 const PLAYBACK_FAIL_THRESHOLD = Math.max(
-  2,
-  Number(process.env.PLAYBACK_FAIL_THRESHOLD || 2)
+  1,
+  Number(process.env.PLAYBACK_FAIL_THRESHOLD || 1)
 );
 const PLAYBACK_FAIL_COOLDOWN_MS = Math.max(
   60 * 1000,
-  Number(process.env.PLAYBACK_FAIL_COOLDOWN_MS || 3 * 60 * 1000)
+  Number(process.env.PLAYBACK_FAIL_COOLDOWN_MS || 60 * 1000)
 );
 const FASTFLUX_WARMUP_INTERVAL_MS = Math.max(
   5 * 60 * 1000,
@@ -439,7 +439,7 @@ const REPAIR_STORE_TTL_MS = Math.max(
 );
 const REPAIR_STORE_MAX_ENTRIES = Math.max(50, toInt(process.env.REPAIR_STORE_MAX_ENTRIES, 400, 50, 4000));
 const REPAIR_STORE_MAX_SOURCES = Math.max(6, toInt(process.env.REPAIR_STORE_MAX_SOURCES, 40, 6, 120));
-const REPAIR_RATE_LIMIT_MS = Math.max(10 * 1000, Number(process.env.REPAIR_RATE_LIMIT_MS || 15 * 1000));
+const REPAIR_RATE_LIMIT_MS = Math.max(10 * 1000, Number(process.env.REPAIR_RATE_LIMIT_MS || 10 * 1000));
 const SUGGESTION_SKIP_TTL_MS = Math.max(
   6 * 60 * 60 * 1000,
   Number(process.env.SUGGESTION_SKIP_TTL_MS || 5 * 24 * 60 * 60 * 1000)

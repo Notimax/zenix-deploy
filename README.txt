@@ -1689,3 +1689,9 @@ AUTO-REPAIR SENSITIVITY (2026-03-19, c387)
 - Warmup interval lowered to ~20 min and repair cooldown reduced for faster retries.
 - Repair rate-limit reduced to 15s to allow quicker manual retries.
 - Cache-bust bumped to 20260319-c387.
+
+AUTO-REPAIR MAX (2026-03-19, c388)
+- Global repair triggers from a single failure (threshold = 1).
+- Global repair cooldown reduced to 60s; manual repair rate-limit now 10s.
+- FastFlux stall report throttled to 8s for faster detection.
+- Cache-bust bumped to 20260319-c388.

@@ -1,5 +1,5 @@
 const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260319-c387";
+const ZENIX_BUILD_VERSION = "20260319-c388";
 const STORAGE_KEY = "zenix-progress-v4";
 const COVER_CACHE_KEY = "zenix-cover-cache-v1";
 const LOCAL_PLAY_KEY = "zenix-local-plays-v1";
@@ -157,8 +157,8 @@ const SOURCE_SUCCESS_BONUS = 12;
 const SOURCE_RETRY_PER_INDEX = 1;
 const AUTO_GLOBAL_REPAIR_KEY = "zenix-auto-repair-v1";
 const AUTO_GLOBAL_REPAIR_WINDOW_MS = 2 * 60 * 1000;
-const AUTO_GLOBAL_REPAIR_THRESHOLD = 2;
-const AUTO_GLOBAL_REPAIR_COOLDOWN_MS = 2 * 60 * 1000;
+const AUTO_GLOBAL_REPAIR_THRESHOLD = 1;
+const AUTO_GLOBAL_REPAIR_COOLDOWN_MS = 60 * 1000;
 const FILTER_PREMIUM_SOURCES = false;
 const AUTO_PREMIUM_FALLBACK = true;
 const PLAYBACK_GUARD_INTERVAL_MS = 1200;
@@ -16133,7 +16133,7 @@ function shouldLockFastfluxAutoSwitch() {
 
 async function reportFastfluxStall(reason = "fastflux-stall") {
   const now = Date.now();
-  if (now - Number(state.lastFastfluxStallReportAt || 0) < 15000) {
+  if (now - Number(state.lastFastfluxStallReportAt || 0) < 8000) {
     return;
   }
   state.lastFastfluxStallReportAt = now;
@@ -22688,6 +22688,7 @@ async function cleanupLegacyServiceWorker() {
     await Promise.all(keys.map((key) => caches.delete(key)));
   }
 }
+
 
 
 
