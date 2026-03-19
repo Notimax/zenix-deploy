@@ -1714,3 +1714,7 @@ AUTO-REFRESH MESSAGE (2026-03-19, c392)
 AUTO-REFRESH COMPLETE (2026-03-19, c393)
 - Player now shows a "Resynchronisation auto terminee" message after the auto-refresh completes.
 - Cache-bust bumped to 20260319-c393 (zenix.js).
+
+AUTO-REFRESH RESULT (2026-03-19, c394)
+- Auto-resync now shows explicit success/failed messages after a global repair refresh.
+- Cache-bust bumped to 20260319-c394 (zenix.js).
