@@ -59,6 +59,7 @@ const USE_FILMER2 = false;
 const USE_MOVIX = false;
 const USE_NOCTA = false;
 const USE_YOUTUBE = false;
+const MEDIA_ID_MAX = 9999999999;
 const STRICT_NAKIOS_MATCH = true;
 const MOVIX_BASE62_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const DEFAULT_BROWSER_UA =
@@ -2051,7 +2052,7 @@ function readJsonBody(req, maxBytes = 8192) {
 }
 
 function buildRepairKey(mediaId, mediaType, season, episode) {
-  const id = toInt(mediaId, 0, 0, 999999999);
+  const id = toInt(mediaId, 0, 0, MEDIA_ID_MAX);
   if (!id) {
     return "";
   }
@@ -2215,7 +2216,7 @@ function normalizeBackupSources(list) {
 }
 
 function buildBackupCacheKey(mediaType, mediaId, season = 1, episode = 1) {
-  const safeId = toInt(mediaId, 0, 0, 999999999);
+  const safeId = toInt(mediaId, 0, 0, MEDIA_ID_MAX);
   if (!safeId) {
     return "";
   }
@@ -2339,7 +2340,7 @@ function updateBackupCacheEntry(entry) {
   const data = loadBackupCacheStore(true);
   const current = data.items[key] || {};
   data.items[key] = {
-    mediaId: toInt(entry.mediaId, 0, 0, 999999999),
+    mediaId: toInt(entry.mediaId, 0, 0, MEDIA_ID_MAX),
     mediaType: entry.mediaType === "tv" ? "tv" : "movie",
     season: toInt(entry.season, 1, 1, 500),
     episode: toInt(entry.episode, 1, 1, 50000),
@@ -2372,7 +2373,7 @@ function fetchBackupCacheEntry(mediaType, mediaId, season = 1, episode = 1) {
 }
 
 function getRepairSourcesFallback(mediaType, mediaId, season = 1, episode = 1) {
-  const safeId = toInt(mediaId, 0, 0, 999999999);
+  const safeId = toInt(mediaId, 0, 0, MEDIA_ID_MAX);
   if (!safeId) {
     return [];
   }
@@ -6453,7 +6454,7 @@ function parseNotariellesEntryFromUrl(value) {
   if (!match) {
     return null;
   }
-  const mediaId = toInt(match.groups?.id, 0, 0, 999999999);
+  const mediaId = toInt(match.groups?.id, 0, 0, MEDIA_ID_MAX);
   const slugRaw = String(match.groups?.slug || "").trim();
   const seasonEpisodeMatch = slugRaw.match(/^(?<title>.+)-saison-(?<season>\d+)-episode-(?<episode>\d+)-(?<lang>vf|vostfr)$/i);
   if (!seasonEpisodeMatch) {
@@ -6904,7 +6905,7 @@ function parseRendezvousEntryFromUrl(value) {
     return null;
   }
 
-  const mediaId = toInt(match.groups?.id, 0, 0, 999999999);
+  const mediaId = toInt(match.groups?.id, 0, 0, MEDIA_ID_MAX);
   if (mediaId <= 0) {
     return null;
   }
@@ -11008,7 +11009,7 @@ function resolveNoctaAdminEntry(options = {}) {
   const title = String(options.title || "").trim();
   const mediaType = String(options.mediaType || "").toLowerCase() === "tv" ? "tv" : "movie";
   const externalKeyParam = String(options.externalKey || "").trim();
-  const mediaId = toInt(options.mediaId, 0, 0, 999999999);
+  const mediaId = toInt(options.mediaId, 0, 0, MEDIA_ID_MAX);
   const adminData = loadAdminData();
   const custom = Array.isArray(adminData?.custom) ? adminData.custom : [];
   let entry = null;
@@ -11078,7 +11079,7 @@ function resolveYoutubeAdminEntry(options = {}) {
   const title = String(options.title || "").trim();
   const mediaType = String(options.mediaType || "").toLowerCase();
   const externalKeyParam = String(options.externalKey || "").trim();
-  const mediaId = toInt(options.mediaId, 0, 0, 999999999);
+  const mediaId = toInt(options.mediaId, 0, 0, MEDIA_ID_MAX);
   const adminData = loadAdminData();
   const custom = Array.isArray(adminData?.custom) ? adminData.custom : [];
   let entry = null;
@@ -11118,7 +11119,7 @@ function resolveDirectAdminEntry(options = {}) {
   const title = String(options.title || "").trim();
   const mediaType = String(options.mediaType || "").toLowerCase() === "tv" ? "tv" : "movie";
   const externalKeyParam = String(options.externalKey || "").trim();
-  const mediaId = toInt(options.mediaId, 0, 0, 999999999);
+  const mediaId = toInt(options.mediaId, 0, 0, MEDIA_ID_MAX);
   const adminData = loadAdminData();
   const custom = Array.isArray(adminData?.custom) ? adminData.custom : [];
   let entry = null;
@@ -15132,7 +15133,7 @@ async function handleBackupCache(req, res, requestUrl) {
   }
   if (req.method === "GET") {
     const mediaType = String(requestUrl.searchParams.get("type") || "movie").toLowerCase() === "tv" ? "tv" : "movie";
-    const mediaId = toInt(requestUrl.searchParams.get("mediaId"), 0, 0, 999999999);
+    const mediaId = toInt(requestUrl.searchParams.get("mediaId"), 0, 0, MEDIA_ID_MAX);
     const season = toInt(requestUrl.searchParams.get("season"), 1, 1, 500);
     const episode = toInt(requestUrl.searchParams.get("episode"), 1, 1, 50000);
     if (!mediaId) {
@@ -15159,7 +15160,7 @@ async function handleBackupCache(req, res, requestUrl) {
     return true;
   }
   const mediaType = String(payload?.mediaType || payload?.type || "movie").toLowerCase() === "tv" ? "tv" : "movie";
-  const mediaId = toInt(payload?.mediaId || payload?.id, 0, 0, 999999999);
+  const mediaId = toInt(payload?.mediaId || payload?.id, 0, 0, MEDIA_ID_MAX);
   if (!mediaId) {
     sendJson(res, 400, { error: "Missing mediaId" });
     return true;
@@ -15886,7 +15887,7 @@ async function handleAdminOwned(req, res, requestUrl) {
     return true;
   }
   if (req.method === "GET") {
-    const mediaId = toInt(requestUrl.searchParams.get("mediaId"), 0, 0, 999999999);
+    const mediaId = toInt(requestUrl.searchParams.get("mediaId"), 0, 0, MEDIA_ID_MAX);
     const type = String(requestUrl.searchParams.get("type") || "movie");
     const season = toInt(requestUrl.searchParams.get("season"), 1, 1, 500);
     const episode = toInt(requestUrl.searchParams.get("episode"), 1, 1, 50000);
@@ -15920,7 +15921,7 @@ async function handleAdminOwned(req, res, requestUrl) {
     const data = loadZenixOwnedSourcesData();
     const next = upsertOwnedSource(data, body);
     saveZenixOwnedSourcesData(next);
-    const mediaId = toInt(body?.mediaId, 0, 0, 999999999);
+    const mediaId = toInt(body?.mediaId, 0, 0, MEDIA_ID_MAX);
     const type = String(body?.type || "movie");
     const season = toInt(body?.season, 1, 1, 500);
     const episode = toInt(body?.episode, 1, 1, 50000);
@@ -16911,7 +16912,7 @@ async function handleZenixSource(req, res, requestUrl) {
   const episode = toInt(requestUrl.searchParams.get("episode"), 1, 1, 50000);
   const forceRefresh = requestUrl.searchParams.get("force") === "1" || shouldForceRefreshGlobal();
   const externalKeyParam = String(requestUrl.searchParams.get("externalKey") || "").trim();
-  const mediaId = toInt(requestUrl.searchParams.get("mediaId"), 0, 0, 999999999);
+  const mediaId = toInt(requestUrl.searchParams.get("mediaId"), 0, 0, MEDIA_ID_MAX);
   let tmdbId = toInt(requestUrl.searchParams.get("tmdbId"), 0, 0, 999999999);
 
   if (externalKeyParam.startsWith("direct:") || mediaId > 0) {
@@ -17642,7 +17643,7 @@ async function handleZenixOwnedSource(req, res, requestUrl) {
     return true;
   }
 
-  const mediaId = toInt(requestUrl.searchParams.get("mediaId"), 0, 0, 999999999);
+  const mediaId = toInt(requestUrl.searchParams.get("mediaId"), 0, 0, MEDIA_ID_MAX);
   if (mediaId <= 0) {
     sendJson(res, 400, { error: "Missing mediaId" });
     return true;

@@ -1769,3 +1769,6 @@ GLOBAL REPAIR THROTTLE + FSVID HEADERS (2026-03-19, c404)
 
 DIRECT URL QUERY PRESERVED (2026-03-19, c405)
 - sanitizeHttpUrl no longer strips query params (?&=), so admin-added direct URLs keep tokens intact.
+
+ADMIN MEDIA ID RANGE (2026-03-19, c406)
+- Increased mediaId upper bound to support large admin IDs (direct URL entries now resolve in /api/zenix-source).
