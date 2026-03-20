@@ -1,5 +1,11 @@
 ZENIX STREAM - OPERATIONS MEMORY
-Last updated: 2026-03-17
+Last updated: 2026-03-20
+
+LATEST FIX LOG (2026-03-20, c411)
+- Added a persistent on-disk cache DB (`cache-db.json`) for heavy upstream payloads (FastFlux catalog + IPTV).
+- FastFlux movies/series hydrate from the cache DB on startup to avoid refetch storms after restarts.
+- Warmups now persist catalog snapshots to disk; global repair clears FastFlux cache DB entries to avoid stale data.
+- IPTV payload is cached to disk to reduce repeated upstream calls.
 
 LIVE DOMAIN
 - https://zenix.best

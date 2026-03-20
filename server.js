@@ -393,6 +393,16 @@ const BACKUP_CACHE_FILE = path.resolve(
   process.env.ZENIX_BACKUP_CACHE_FILE || path.join(DATA_DIR, "backup-cache.json")
 );
 const BACKUP_CACHE_FILE_FALLBACK = path.resolve(path.join(FALLBACK_DATA_DIR, "backup-cache.json"));
+const CACHE_DB_FILE = path.resolve(process.env.ZENIX_CACHE_DB_FILE || path.join(DATA_DIR, "cache-db.json"));
+const CACHE_DB_FILE_FALLBACK = path.resolve(path.join(FALLBACK_DATA_DIR, "cache-db.json"));
+const CACHE_DB_DEFAULT_TTL_MS = Math.max(
+  10 * 60 * 1000,
+  Number(process.env.ZENIX_CACHE_DB_TTL_MS || 6 * 60 * 60 * 1000)
+);
+const CACHE_DB_MAX_ENTRIES = Math.max(
+  50,
+  toInt(process.env.ZENIX_CACHE_DB_MAX_ENTRIES, 1200, 50, 8000)
+);
 const BACKUP_CACHE_TTL_MS = Math.max(
   60 * 60 * 1000,
   Number(process.env.ZENIX_BACKUP_CACHE_TTL_MS || 7 * 24 * 60 * 60 * 1000)
@@ -415,7 +425,9 @@ const adminSessions = new Map();
 const adminDataCache = { loadedAt: 0, value: null };
 const backupConfigCache = { loadedAt: 0, value: null };
 const backupCacheStore = { loadedAt: 0, value: null };
+const cacheDbStore = { loadedAt: 0, value: null };
 let backupCacheSaveTimer = null;
+let cacheDbSaveTimer = null;
 const livewatchCache = { loadedAt: 0, payload: null, inFlight: null };
 const iptvCache = { loadedAt: 0, payload: null, inFlight: null };
 let tvChannelsPurged = false;
@@ -1321,6 +1333,13 @@ const IPTV_TNT_CHANNELS = [
 
 async function fetchIptvPayload() {
   const now = Date.now();
+  if (!iptvCache.payload) {
+    const persisted = cacheDbGet("iptv:payload");
+    if (persisted && Array.isArray(persisted.channels) && Array.isArray(persisted.streams)) {
+      iptvCache.payload = persisted;
+      iptvCache.loadedAt = Number(persisted.loadedAt || now);
+    }
+  }
   if (iptvCache.payload && now - iptvCache.loadedAt < IPTV_CACHE_MS) {
     return iptvCache.payload;
   }
@@ -1343,8 +1362,14 @@ async function fetchIptvPayload() {
     iptvCache.payload = {
       channels: Array.isArray(channels) ? channels : [],
       streams: Array.isArray(streams) ? streams : [],
+      loadedAt: Date.now(),
     };
-    iptvCache.loadedAt = Date.now();
+    iptvCache.loadedAt = iptvCache.payload.loadedAt;
+    cacheDbSet(
+      "iptv:payload",
+      iptvCache.payload,
+      Math.max(CACHE_DB_DEFAULT_TTL_MS, IPTV_CACHE_MS * 2)
+    );
     return iptvCache.payload;
   })();
   iptvCache.inFlight = task;
@@ -2217,6 +2242,167 @@ function normalizeBackupSources(list) {
   return out.slice(0, BACKUP_CACHE_MAX_SOURCES);
 }
 
+function loadCacheDbStore(force = false) {
+  const now = Date.now();
+  if (!force && cacheDbStore.value && now - cacheDbStore.loadedAt < 2000) {
+    return cacheDbStore.value;
+  }
+  let data = null;
+  try {
+    if (fs.existsSync(CACHE_DB_FILE)) {
+      const raw = fs.readFileSync(CACHE_DB_FILE, "utf-8");
+      data = parseJsonSafe(raw);
+    }
+  } catch {
+    data = null;
+  }
+  if (!data) {
+    try {
+      if (fs.existsSync(CACHE_DB_FILE_FALLBACK)) {
+        const raw = fs.readFileSync(CACHE_DB_FILE_FALLBACK, "utf-8");
+        data = parseJsonSafe(raw);
+      }
+    } catch {
+      data = null;
+    }
+  }
+  if (!data || typeof data !== "object") {
+    data = { items: {} };
+  }
+  if (!data.items || typeof data.items !== "object") {
+    data.items = {};
+  }
+  cacheDbStore.value = data;
+  cacheDbStore.loadedAt = now;
+  return data;
+}
+
+function saveCacheDbStore(data) {
+  const payload = data && typeof data === "object" ? data : { items: {} };
+  if (!payload.items || typeof payload.items !== "object") {
+    payload.items = {};
+  }
+  let saved = false;
+  try {
+    const tmp = `${CACHE_DB_FILE}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(payload, null, 2), "utf-8");
+    fs.renameSync(tmp, CACHE_DB_FILE);
+    saved = true;
+  } catch {
+    saved = false;
+  }
+  if (!saved) {
+    try {
+      const tmp = `${CACHE_DB_FILE_FALLBACK}.tmp`;
+      fs.writeFileSync(tmp, JSON.stringify(payload, null, 2), "utf-8");
+      fs.renameSync(tmp, CACHE_DB_FILE_FALLBACK);
+    } catch {
+      // best effort
+    }
+  }
+  cacheDbStore.value = payload;
+  cacheDbStore.loadedAt = Date.now();
+  return payload;
+}
+
+function scheduleCacheDbSave(data) {
+  if (cacheDbSaveTimer) {
+    return;
+  }
+  cacheDbSaveTimer = setTimeout(() => {
+    cacheDbSaveTimer = null;
+    saveCacheDbStore(data);
+  }, 1200);
+}
+
+function pruneCacheDbStore(data) {
+  if (!data || typeof data !== "object" || !data.items || typeof data.items !== "object") {
+    return;
+  }
+  const now = Date.now();
+  Object.entries(data.items).forEach(([key, entry]) => {
+    const expiresAt = Number(entry?.expiresAt || 0);
+    if (!expiresAt || expiresAt < now) {
+      delete data.items[key];
+    }
+  });
+  const keys = Object.keys(data.items);
+  if (keys.length <= CACHE_DB_MAX_ENTRIES) {
+    return;
+  }
+  keys
+    .sort((a, b) => Number(data.items[b]?.updatedAt || 0) - Number(data.items[a]?.updatedAt || 0))
+    .slice(CACHE_DB_MAX_ENTRIES)
+    .forEach((key) => {
+      delete data.items[key];
+    });
+}
+
+function cacheDbGet(key) {
+  const safeKey = String(key || "").trim();
+  if (!safeKey) {
+    return null;
+  }
+  const data = loadCacheDbStore(true);
+  const entry = data.items && typeof data.items === "object" ? data.items[safeKey] : null;
+  if (!entry) {
+    return null;
+  }
+  const expiresAt = Number(entry.expiresAt || 0);
+  if (!expiresAt || expiresAt < Date.now()) {
+    delete data.items[safeKey];
+    scheduleCacheDbSave(data);
+    return null;
+  }
+  return entry.value ?? null;
+}
+
+function cacheDbSet(key, value, ttlMs = CACHE_DB_DEFAULT_TTL_MS) {
+  const safeKey = String(key || "").trim();
+  if (!safeKey) {
+    return;
+  }
+  const ttl = Math.max(30 * 1000, Number(ttlMs || CACHE_DB_DEFAULT_TTL_MS));
+  const data = loadCacheDbStore(true);
+  data.items[safeKey] = {
+    value,
+    updatedAt: Date.now(),
+    expiresAt: Date.now() + ttl,
+  };
+  pruneCacheDbStore(data);
+  scheduleCacheDbSave(data);
+}
+
+function cacheDbDelete(key) {
+  const safeKey = String(key || "").trim();
+  if (!safeKey) {
+    return;
+  }
+  const data = loadCacheDbStore(true);
+  if (data.items && typeof data.items === "object" && data.items[safeKey]) {
+    delete data.items[safeKey];
+    scheduleCacheDbSave(data);
+  }
+}
+
+function cacheDbDeletePrefix(prefix) {
+  const safePrefix = String(prefix || "").trim();
+  if (!safePrefix) {
+    return;
+  }
+  const data = loadCacheDbStore(true);
+  let touched = false;
+  Object.keys(data.items || {}).forEach((key) => {
+    if (key.startsWith(safePrefix)) {
+      delete data.items[key];
+      touched = true;
+    }
+  });
+  if (touched) {
+    scheduleCacheDbSave(data);
+  }
+}
+
 function buildBackupCacheKey(mediaType, mediaId, season = 1, episode = 1) {
   const safeId = toInt(mediaId, 0, 0, MEDIA_ID_MAX);
   if (!safeId) {
@@ -2405,6 +2591,7 @@ function resetFastfluxCaches() {
   fastfluxSeriesCache.map = new Map();
   fastfluxSearchCache.clear();
   tmdbSearchCache.clear();
+  cacheDbDeletePrefix("fastflux:");
 }
 
 function resetBackupCacheStore() {
@@ -9374,6 +9561,23 @@ async function loadFastfluxMovies(force = false, options = {}) {
   if (!USE_FASTFLUX) {
     return [];
   }
+  if (!force && fastfluxMovieCache.loadedAt === 0 && fastfluxMovieCache.entries.length === 0) {
+    const persisted = cacheDbGet("fastflux:movies");
+    if (persisted && Array.isArray(persisted.entries) && persisted.entries.length > 0) {
+      const byTmdb = new Map();
+      persisted.entries.forEach((entry) => {
+        const tmdbId = toInt(entry?.tmdb_id || entry?.tmdbId, 0, 0, 999999999);
+        if (tmdbId && !byTmdb.has(tmdbId)) {
+          byTmdb.set(tmdbId, entry);
+        }
+      });
+      fastfluxMovieCache.entries = persisted.entries;
+      fastfluxMovieCache.loadedAt = Number(persisted.loadedAt || Date.now());
+      fastfluxMovieCache.pagesLoaded = Number(persisted.pagesLoaded || persisted.pages || 0);
+      fastfluxMovieCache.totalPages = Number(persisted.totalPages || persisted.pages || 0);
+      fastfluxMovieCache.map = byTmdb;
+    }
+  }
   const now = Date.now();
   const minPages = Math.max(1, toInt(options?.minPages, 0, 1, FASTFLUX_MOVIES_MAX_PAGES_PER_FEED));
   const targetPages = Math.min(
@@ -9433,6 +9637,16 @@ async function loadFastfluxMovies(force = false, options = {}) {
     fastfluxMovieCache.totalPages = totalPages;
     fastfluxMovieCache.map = byTmdb;
     fastfluxMovieCache.inFlight = null;
+    cacheDbSet(
+      "fastflux:movies",
+      {
+        entries,
+        loadedAt: fastfluxMovieCache.loadedAt,
+        pagesLoaded: pages,
+        totalPages,
+      },
+      Math.max(CACHE_DB_DEFAULT_TTL_MS, FASTFLUX_CATALOG_CACHE_MS * 2)
+    );
     return entries;
   })();
 
@@ -9447,6 +9661,23 @@ async function loadFastfluxMovies(force = false, options = {}) {
 async function loadFastfluxSeries(force = false, options = {}) {
   if (!USE_FASTFLUX) {
     return [];
+  }
+  if (!force && fastfluxSeriesCache.loadedAt === 0 && fastfluxSeriesCache.entries.length === 0) {
+    const persisted = cacheDbGet("fastflux:series");
+    if (persisted && Array.isArray(persisted.entries) && persisted.entries.length > 0) {
+      const byTmdb = new Map();
+      persisted.entries.forEach((entry) => {
+        const tmdbId = toInt(entry?.tmdb_id || entry?.tmdbId, 0, 0, 999999999);
+        if (tmdbId && !byTmdb.has(tmdbId)) {
+          byTmdb.set(tmdbId, entry);
+        }
+      });
+      fastfluxSeriesCache.entries = persisted.entries;
+      fastfluxSeriesCache.loadedAt = Number(persisted.loadedAt || Date.now());
+      fastfluxSeriesCache.pagesLoaded = Number(persisted.pagesLoaded || persisted.pages || 0);
+      fastfluxSeriesCache.totalPages = Number(persisted.totalPages || persisted.pages || 0);
+      fastfluxSeriesCache.map = byTmdb;
+    }
   }
   const now = Date.now();
   const minPages = Math.max(1, toInt(options?.minPages, 0, 1, FASTFLUX_SERIES_MAX_PAGES_PER_FEED));
@@ -9507,6 +9738,16 @@ async function loadFastfluxSeries(force = false, options = {}) {
     fastfluxSeriesCache.totalPages = totalPages;
     fastfluxSeriesCache.map = byTmdb;
     fastfluxSeriesCache.inFlight = null;
+    cacheDbSet(
+      "fastflux:series",
+      {
+        entries,
+        loadedAt: fastfluxSeriesCache.loadedAt,
+        pagesLoaded: pages,
+        totalPages,
+      },
+      Math.max(CACHE_DB_DEFAULT_TTL_MS, FASTFLUX_CATALOG_CACHE_MS * 2)
+    );
     return entries;
   })();
 

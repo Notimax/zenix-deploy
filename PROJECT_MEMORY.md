@@ -1,6 +1,11 @@
 # Zenix Project Memory
 
-Last update: 2026-03-16
+Last update: 2026-03-20
+
+## c411 follow-up (2026-03-20)
+- Added a persistent on-disk cache DB (`cache-db.json`) for heavy upstream payloads (FastFlux catalog + IPTV).
+- FastFlux movies/series hydrate from the cache DB on startup to avoid refetch storms after restarts.
+- Warmups now persist catalog snapshots to disk; global repair clears FastFlux cache DB entries.
 
 ## Core product constraints
 - Domain: `https://zenix.best`
