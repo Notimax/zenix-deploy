@@ -2,6 +2,12 @@
 
 Last update: 2026-03-20
 
+## c417 follow-up (2026-03-20)
+- iPhone playback hardening: trigger mobile unlock on play + source switch (keeps user gesture).
+- Mobile FastFlux buffering windows enlarged to avoid false startup stalls.
+- Playback guard now applies extended stall thresholds for FastFlux on mobile.
+- Cache-bust updated to `20260320-c417`.
+
 ## c416 follow-up (2026-03-20)
 - HLS proxy now uses long-lived timeouts for full MP4 streaming (prevents mid-play aborts).
 - Scream 7 hard-hidden ID gate removed (title visible again).

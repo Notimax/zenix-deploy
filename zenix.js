@@ -1,5 +1,5 @@
 const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260320-c416";
+const ZENIX_BUILD_VERSION = "20260320-c417";
 const STORAGE_KEY = "zenix-progress-v4";
 const COVER_CACHE_KEY = "zenix-cover-cache-v1";
 const LOCAL_PLAY_KEY = "zenix-local-plays-v1";
@@ -171,13 +171,16 @@ const AUTO_PREMIUM_FALLBACK = true;
 const PLAYBACK_GUARD_INTERVAL_MS = 1200;
 const PLAYBACK_STALL_HARD_MS = 4300;
 const PLAYBACK_STALL_PAUSED_MS = 6200;
-const PLAYBACK_STARTUP_STALL_MS = 2200;
+const PLAYBACK_STARTUP_STALL_MS = 2600;
 const PLAYBACK_STATUS_RECOVERY_MS = 1500;
 const PLAYBACK_HEALTH_FIRST_DELAY_MS = 1300;
 const PLAYBACK_HEALTH_REPEAT_DELAY_MS = 1800;
-const MOBILE_PLAYBACK_BOOTSTRAP_TIMEOUT_MS = 4200;
-const MOBILE_VIDEO_READY_TIMEOUT_MS = 7000;
-const MOBILE_EMBED_READY_TIMEOUT_MS = 6000;
+const MOBILE_PLAYBACK_BOOTSTRAP_TIMEOUT_MS = 5200;
+const MOBILE_VIDEO_READY_TIMEOUT_MS = 9000;
+const MOBILE_EMBED_READY_TIMEOUT_MS = 7000;
+const MOBILE_FASTFLUX_STARTUP_STALL_MS = 9000;
+const MOBILE_FASTFLUX_FALLBACK_STALL_MS = 16000;
+const MOBILE_FASTFLUX_PAUSED_STALL_MS = 18000;
 const EMBED_STALL_SWITCH_MS = 7000;
 const MOBILE_EMBED_STALL_SWITCH_MS = 6200;
 const MOBILE_AUTO_SWITCH_COOLDOWN_MS = 12000;
@@ -2393,6 +2396,11 @@ function bindPlayFallbackDelegation() {
       return;
     }
 
+    if (isLikelyMobileDevice()) {
+      unlockMobilePlayback(refs.playerVideo).catch(() => {
+        // best effort only
+      });
+    }
     openPlayer(fallbackId).catch(() => {
       showMessage("Impossible de lancer la lecture.", true);
     });
@@ -16787,6 +16795,9 @@ function startPlaybackGuard() {
   const fallbackStallMs = mobileGuard
     ? Math.max(5200, startupStallMs + 1800)
     : Math.max(4200, PLAYBACK_STARTUP_STALL_MS + 1800);
+  const fastfluxStartupStallMs = MOBILE_FASTFLUX_STARTUP_STALL_MS;
+  const fastfluxFallbackStallMs = MOBILE_FASTFLUX_FALLBACK_STALL_MS;
+  const fastfluxPausedStallMs = MOBILE_FASTFLUX_PAUSED_STALL_MS;
   const startupLoadingStatusPattern = /connexion source|chargement du flux|chargement de la source|fallback ios actif/;
   let trackedPlayToken = Number(state.playToken || 0);
   let lastObservedTime = 0;
@@ -16812,6 +16823,18 @@ function startPlaybackGuard() {
       }
       return;
     }
+    const currentSource = state.sourcePool[state.sourceIndex] || null;
+    const fastfluxStall = mobileGuard && Boolean(currentSource?.isFastflux);
+    const effectiveStartupStallMs = fastfluxStall ? Math.max(startupStallMs, fastfluxStartupStallMs) : startupStallMs;
+    const effectiveFallbackStallMs = fastfluxStall
+      ? Math.max(fallbackStallMs, fastfluxFallbackStallMs)
+      : fallbackStallMs;
+    const effectivePausedStallMs = fastfluxStall ? Math.max(pausedStallMs, fastfluxPausedStallMs) : pausedStallMs;
+    const effectiveHardStallMs = fastfluxStall ? Math.max(hardStallMs, fastfluxFallbackStallMs) : hardStallMs;
+    const effectiveStatusRecoveryMs = fastfluxStall
+      ? Math.max(statusRecoveryMs, Math.floor(effectiveStartupStallMs * 0.75))
+      : statusRecoveryMs;
+
     const autoSwitchCooldownActive =
       mobileGuard &&
       state.lastAutoSwitchAt > 0 &&
@@ -16820,7 +16843,7 @@ function startPlaybackGuard() {
     const loadingTooLong =
       state.sourceLoading &&
       state.sourceLoadingSince &&
-      Date.now() - state.sourceLoadingSince > fallbackStallMs &&
+      Date.now() - state.sourceLoadingSince > effectiveFallbackStallMs &&
       hasNextCandidate;
     if (state.sourceLoading || state.sourceIndex < 0) {
       if (loadingTooLong && !autoSwitchCooldownActive) {
@@ -16850,7 +16873,6 @@ function startPlaybackGuard() {
       state.mobileStableLockOverride = 0;
       return;
     }
-    const currentSource = state.sourcePool[state.sourceIndex] || null;
     const statusText = String(refs.playerStatus?.textContent || "").toLowerCase();
     if (isEmbedSource(currentSource)) {
       const embedSince = Number(state.embedLoadFinishedAt || 0) || Number(state.embedLoadStartedAt || 0);
@@ -16927,7 +16949,7 @@ function startPlaybackGuard() {
       mobileGuard && state.mobileStablePlaybackAt > 0 && Date.now() - state.mobileStablePlaybackAt < stableLockWindow;
     const canAutoRecoverWhileAwaiting =
       awaitingUser &&
-      stalledForMs > statusRecoveryMs + (mobileGuard ? 800 : 1200) &&
+      stalledForMs > effectiveStatusRecoveryMs + (mobileGuard ? 800 : 1200) &&
       /fallback ios actif|connexion source|lecture bloquee|source indisponible|chargement du flux|chargement de la source/.test(statusText);
     const allowAutoRecover = !awaitingUser || canAutoRecoverWhileAwaiting;
     const startedPlayback = Math.max(lastObservedTime, currentTime) > 0.6;
@@ -16942,19 +16964,19 @@ function startPlaybackGuard() {
       allowAutoRecover &&
       startedPlayback &&
       !video.paused &&
-      stalledForMs > hardStallMs &&
+      stalledForMs > effectiveHardStallMs &&
       (readyState <= 2 || networkState === 2 || networkState === 3);
     const hardFreezeAny =
       allowAutoRecover &&
       startedPlayback &&
       !video.paused &&
-      stalledForMs > hardStallMs + 900 &&
+      stalledForMs > effectiveHardStallMs + 900 &&
       currentTime < 8;
     const pausedBufferStall =
       allowAutoRecover &&
       startedPlayback &&
       video.paused &&
-      stalledForMs > pausedStallMs &&
+      stalledForMs > effectivePausedStallMs &&
       (readyState <= 2 || networkState === 3);
     const stalledDuringPlayback = hardFreeze || pausedBufferStall || hardFreezeAny;
     const startupStallWithAlternative =
@@ -16962,25 +16984,25 @@ function startPlaybackGuard() {
       allowAutoRecover &&
       video.paused &&
       currentTime < 0.25 &&
-      stalledForMs > startupStallMs &&
+      stalledForMs > effectiveStartupStallMs &&
       readyState === 0 &&
       (networkState === 0 || networkState === 2 || networkState === 3);
     const startupLoadingStallWithAlternative =
       hasNextCandidate &&
       allowAutoRecover &&
       currentTime < 0.25 &&
-      stalledForMs > statusRecoveryMs &&
+      stalledForMs > effectiveStatusRecoveryMs &&
       readyState <= 1 &&
       startupLoadingStatusPattern.test(statusText);
     const statusDrivenRecovery =
       hasNextCandidate &&
       allowAutoRecover &&
-      stalledForMs > statusRecoveryMs &&
+      stalledForMs > effectiveStatusRecoveryMs &&
       /lecture impossible|source selectionnee indisponible|source indisponible|fallback ios actif|connexion source|chargement du flux|chargement de la source/.test(statusText);
     const prolongedFallbackStall =
       hasNextCandidate &&
       fallbackStatusSince > 0 &&
-      Date.now() - fallbackStatusSince > fallbackStallMs &&
+      Date.now() - fallbackStatusSince > effectiveFallbackStallMs &&
       currentTime < 0.25;
     const severeAutoSwitch =
       errorCode > 0 ||
@@ -18620,6 +18642,11 @@ async function switchPlayerSource(index) {
   if (safeIndex === state.sourceIndex) {
     return;
   }
+  if (isLikelyMobileDevice()) {
+    unlockMobilePlayback(refs.playerVideo).catch(() => {
+      // best effort
+    });
+  }
   const nextSource = state.sourcePool[safeIndex] || null;
   const shouldLock = true;
   state.manualSourceLock = shouldLock;
@@ -19756,8 +19783,8 @@ async function startPlayerSource(source, resumeTime, token, options = {}) {
   let directReadyTimeout = mobilePlayback ? Math.min(VIDEO_READY_TIMEOUT_MS, MOBILE_VIDEO_READY_TIMEOUT_MS) : VIDEO_READY_TIMEOUT_MS;
   let bootstrapTimeout = mobilePlayback ? MOBILE_PLAYBACK_BOOTSTRAP_TIMEOUT_MS : 4200;
   if (mobilePlayback && isFastfluxSource && !isEmbedSource(source)) {
-    directReadyTimeout = Math.max(directReadyTimeout, 12000);
-    bootstrapTimeout = Math.max(bootstrapTimeout, 7000);
+    directReadyTimeout = Math.max(directReadyTimeout, 16000);
+    bootstrapTimeout = Math.max(bootstrapTimeout, 9000);
   }
   if (probeTimeoutMs > 0) {
     embedReadyTimeout = Math.min(embedReadyTimeout, probeTimeoutMs);

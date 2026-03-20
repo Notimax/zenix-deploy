@@ -1,6 +1,12 @@
 ZENIX STREAM - OPERATIONS MEMORY
 Last updated: 2026-03-20
 
+LATEST FIX LOG (2026-03-20, c417)
+- iPhone playback hardening: user-gesture unlock on play + source switch.
+- Mobile FastFlux buffering windows enlarged to avoid false "blocked" switches.
+- Playback guard now uses extended stall thresholds for FastFlux on mobile.
+- Cache-bust bumped to 20260320-c417.
+
 LATEST FIX LOG (2026-03-20, c416)
 - HLS proxy now uses long-lived timeouts for full MP4 streaming (prevents mid-play aborts).
 - Unhid Scream 7 by removing the hard-hidden media ID gate.
