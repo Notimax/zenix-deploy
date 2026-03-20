@@ -1,5 +1,5 @@
 const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260320-c408";
+const ZENIX_BUILD_VERSION = "20260320-c409";
 const STORAGE_KEY = "zenix-progress-v4";
 const COVER_CACHE_KEY = "zenix-cover-cache-v1";
 const LOCAL_PLAY_KEY = "zenix-local-plays-v1";
@@ -14572,6 +14572,15 @@ async function loadMovieStream(item, resumeTime, token, syncRoute = true) {
       }
     }
     if (state.sourcePool.length === 0) {
+      const backups = await fetchBackupSources(selectedItem);
+      if (backups && backups.length > 0) {
+        state.sourcePool = backups;
+        state.allEpisodeSources = backups.slice();
+        state.sourceRetryAttempts.clear();
+        notifyActionMessage("Secours cache actif.");
+      }
+    }
+    if (state.sourcePool.length === 0) {
       const pendingHint = isLikelyRecentPendingUpload(selectedItem);
       if (pendingHint) {
         markItemAvailability(selectedItem.id, "pending");
@@ -14755,6 +14764,15 @@ async function loadEpisodeStream(
     populateLanguageSelect(refs.playerLanguageSelect, state.availableLanguages, nextLanguage);
     refs.playerLanguageSelect.disabled = state.availableLanguages.length <= 1;
     setPlayerPill(refs.playerLanguagePill, nextLanguage || "Auto");
+    if (state.sourcePool.length === 0) {
+      const backups = await fetchBackupSources(selectedItem);
+      if (backups && backups.length > 0) {
+        state.sourcePool = backups;
+        state.allEpisodeSources = backups.slice();
+        state.sourceRetryAttempts.clear();
+        notifyActionMessage("Secours cache actif.");
+      }
+    }
     if (state.sourcePool.length === 0) {
       if (state.sourceWarningMessage) {
         showMessage("Sources incompatibles detectees. Aucun lecteur fiable.", true);

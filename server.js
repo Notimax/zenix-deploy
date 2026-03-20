@@ -240,6 +240,9 @@ const NOTARIELLES_FETCH_HEADERS = {
   Referer: `${NOTARIELLES_BASE}/`,
   "Accept-Language": DEFAULT_ACCEPT_LANGUAGE,
 };
+const sourceBackupCache = new Map();
+const BACKUP_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
+
 const RENDEZVOUS_BASE = "https://rendezvousmusical.fr";
 const RENDEZVOUS_HOST = "rendezvousmusical.fr";
 const RENDEZVOUS_SITEMAP_INDEX_URL = `${RENDEZVOUS_BASE}/sitemaps.xml`;
@@ -16800,6 +16803,82 @@ async function handleZenixSeasons(req, res, requestUrl) {
       items: [],
     },
   });
+  return true;
+}
+
+async function handleBackupCache(req, res, requestUrl) {
+  if (requestUrl.pathname !== "/api/backup-cache") {
+    return false;
+  }
+  if (req.method === "OPTIONS") {
+    res.writeHead(204, {
+      Allow: "GET, POST, OPTIONS",
+      "Cache-Control": "no-cache",
+    });
+    res.end();
+    return true;
+  }
+  if (req.method === "POST") {
+    let payload;
+    try {
+      payload = await readJsonBody(req, 16384);
+    } catch {
+      sendJson(res, 400, { error: "Invalid payload" });
+      return true;
+    }
+    const mediaId = Number(payload?.mediaId || 0);
+    const mediaType = String(payload?.mediaType || "").toLowerCase() === "tv" ? "tv" : "movie";
+    const season = Math.max(1, Number(payload?.season || 1));
+    const episode = Math.max(1, Number(payload?.episode || 1));
+    const sources = Array.isArray(payload?.sources) ? payload.sources : [];
+    
+    if (mediaId > 0 && sources.length > 0) {
+      const key = mediaType === "tv" ? `tv:${mediaId}:s${season}e${episode}` : `movie:${mediaId}`;
+      sourceBackupCache.set(key, {
+        sources,
+        expiresAt: Date.now() + BACKUP_CACHE_TTL_MS
+      });
+      if (sourceBackupCache.size > 20000) {
+        const now = Date.now();
+        for (const [k, v] of sourceBackupCache.entries()) {
+          if (v.expiresAt < now) sourceBackupCache.delete(k);
+        }
+      }
+    }
+    sendJson(res, 200, { ok: true });
+    return true;
+  }
+  
+  if (req.method === "GET") {
+    const mediaId = Number(requestUrl.searchParams.get("mediaId") || 0);
+    const mediaType = String(requestUrl.searchParams.get("type") || "").toLowerCase() === "tv" ? "tv" : "movie";
+    const season = Math.max(1, Number(requestUrl.searchParams.get("season") || 1));
+    const episode = Math.max(1, Number(requestUrl.searchParams.get("episode") || 1));
+    
+    if (mediaId <= 0) {
+      sendJson(res, 400, { error: "Missing mediaId" });
+      return true;
+    }
+    const key = mediaType === "tv" ? `tv:${mediaId}:s${season}e${episode}` : `movie:${mediaId}`;
+    const entry = sourceBackupCache.get(key);
+    
+    if (entry && entry.expiresAt > Date.now() && Array.isArray(entry.sources) && entry.sources.length > 0) {
+      sendJson(res, 200, {
+        apiVersion: "zenix-source-v1",
+        type: "success",
+        data: { count: entry.sources.length, sources: entry.sources }
+      });
+      return true;
+    }
+    sendJson(res, 200, {
+      apiVersion: "zenix-source-v1",
+      type: "success",
+      data: { count: 0, sources: [] }
+    });
+    return true;
+  }
+  
+  sendJson(res, 405, { error: "Method Not Allowed" });
   return true;
 }
 
