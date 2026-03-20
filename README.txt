@@ -1,6 +1,11 @@
 ZENIX STREAM - OPERATIONS MEMORY
 Last updated: 2026-03-20
 
+LATEST FIX LOG (2026-03-20, c414)
+- Added intelligent pagination across catalog, request list, TV Directs, and calendar views.
+- Pagination adapts page size to device/perf and keeps counts visible.
+- Catalog pagination integrates with load-more (next page triggers fetch when needed).
+
 LATEST FIX LOG (2026-03-20, c411)
 - Added a persistent on-disk cache DB (`cache-db.json`) for heavy upstream payloads (FastFlux catalog + IPTV).
 - FastFlux movies/series hydrate from the cache DB on startup to avoid refetch storms after restarts.

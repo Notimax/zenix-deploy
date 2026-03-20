@@ -1,5 +1,5 @@
 const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260320-c409";
+const ZENIX_BUILD_VERSION = "20260320-c414";
 const STORAGE_KEY = "zenix-progress-v4";
 const COVER_CACHE_KEY = "zenix-cover-cache-v1";
 const LOCAL_PLAY_KEY = "zenix-local-plays-v1";
@@ -620,6 +620,12 @@ themeFilters: {
     timer: 0,
     seed: Date.now(),
   },
+  pagination: {
+    catalog: { key: "", page: 1, pageSize: 0, totalPages: 1 },
+    request: { key: "", page: 1, pageSize: 0, totalPages: 1 },
+    tv: { key: "", page: 1, pageSize: 0, totalPages: 1 },
+    calendar: { key: "", page: 1, pageSize: 0, totalPages: 1 },
+  },
   repairCache: new Map(),
   repairInFlight: new Map(),
   sourceWarningMessage: "",
@@ -661,6 +667,10 @@ const refs = {
   requestSelected: document.getElementById("requestSelected"),
   requestPublicGrid: document.getElementById("requestPublicGrid"),
   requestPublicEmpty: document.getElementById("requestPublicEmpty"),
+  requestPagination: document.getElementById("requestPagination"),
+  requestPagePrev: document.getElementById("requestPagePrev"),
+  requestPageNext: document.getElementById("requestPageNext"),
+  requestPaginationMeta: document.getElementById("requestPaginationMeta"),
   tvSection: document.getElementById("tvSection"),
   tvPlayerTitle: document.getElementById("tvPlayerTitle"),
   tvPlayerStatus: document.getElementById("tvPlayerStatus"),
@@ -675,6 +685,10 @@ const refs = {
   tvPanelBackdrop: document.getElementById("tvPanelBackdrop"),
   tvChannelPanel: document.getElementById("tvChannelPanel"),
   tvPanelClose: document.getElementById("tvPanelClose"),
+  tvPagination: document.getElementById("tvPagination"),
+  tvPagePrev: document.getElementById("tvPagePrev"),
+  tvPageNext: document.getElementById("tvPageNext"),
+  tvPaginationMeta: document.getElementById("tvPaginationMeta"),
   suggestionForm: document.getElementById("suggestionForm"),
   suggestionType: document.getElementById("suggestionType"),
   suggestionTitle: document.getElementById("suggestionTitle"),
@@ -697,6 +711,14 @@ const refs = {
 
   syncInfo: document.getElementById("syncInfo"),
   supportInfo: document.getElementById("supportInfo"),
+  catalogPagination: document.getElementById("catalogPagination"),
+  catalogPagePrev: document.getElementById("catalogPagePrev"),
+  catalogPageNext: document.getElementById("catalogPageNext"),
+  catalogPaginationMeta: document.getElementById("catalogPaginationMeta"),
+  calendarPagination: document.getElementById("calendarPagination"),
+  calendarPagePrev: document.getElementById("calendarPagePrev"),
+  calendarPageNext: document.getElementById("calendarPageNext"),
+  calendarPaginationMeta: document.getElementById("calendarPaginationMeta"),
 
   topSection: document.getElementById("topSection"),
   topGrid: document.getElementById("topGrid"),
@@ -3448,6 +3470,75 @@ function bindEvents() {
       updateLoadMoreButton();
     });
   });
+
+  if (refs.catalogPagePrev) {
+    bindFastPress(refs.catalogPagePrev, () => {
+      setPaginationPage("catalog", Number(state.pagination?.catalog?.page || 1) - 1);
+    });
+  }
+  if (refs.catalogPageNext) {
+    bindFastPress(refs.catalogPageNext, () => {
+      const bucket = state.pagination?.catalog;
+      if (!bucket) {
+        return;
+      }
+      const hasQuery = state.query.trim().length > 0;
+      const canFetchMore =
+        !state.backgroundSyncRunning &&
+        state.view !== "top" &&
+        state.view !== "list" &&
+        state.view !== "info" &&
+        state.view !== "calendar" &&
+        !hasQuery &&
+        state.hasMore;
+      if (bucket.page >= bucket.totalPages && canFetchMore) {
+        const currentPage = bucket.page;
+        loadMoreCatalog()
+          .then(() => {
+            const paged = getPaginatedCatalog();
+            setPaginationPage("catalog", Math.min(currentPage + 1, paged.meta.totalPages));
+          })
+          .catch(() => {
+            updateLoadMoreButton();
+          });
+        return;
+      }
+      setPaginationPage("catalog", bucket.page + 1);
+    });
+  }
+
+  if (refs.requestPagePrev) {
+    bindFastPress(refs.requestPagePrev, () => {
+      setPaginationPage("request", Number(state.pagination?.request?.page || 1) - 1);
+    });
+  }
+  if (refs.requestPageNext) {
+    bindFastPress(refs.requestPageNext, () => {
+      setPaginationPage("request", Number(state.pagination?.request?.page || 1) + 1);
+    });
+  }
+
+  if (refs.tvPagePrev) {
+    bindFastPress(refs.tvPagePrev, () => {
+      setPaginationPage("tv", Number(state.pagination?.tv?.page || 1) - 1);
+    });
+  }
+  if (refs.tvPageNext) {
+    bindFastPress(refs.tvPageNext, () => {
+      setPaginationPage("tv", Number(state.pagination?.tv?.page || 1) + 1);
+    });
+  }
+
+  if (refs.calendarPagePrev) {
+    bindFastPress(refs.calendarPagePrev, () => {
+      setPaginationPage("calendar", Number(state.pagination?.calendar?.page || 1) - 1);
+    });
+  }
+  if (refs.calendarPageNext) {
+    bindFastPress(refs.calendarPageNext, () => {
+      setPaginationPage("calendar", Number(state.pagination?.calendar?.page || 1) + 1);
+    });
+  }
 
   bindFastPress(refs.backToTopBtn, () => {
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -6954,6 +7045,7 @@ function renderCalendarSection() {
     if (refs.calendarMergedMeta) {
       refs.calendarMergedMeta.textContent = "En attente de donnees.";
     }
+    setHidden(refs.calendarPagination, true);
     return;
   }
 
@@ -7013,6 +7105,10 @@ function renderCalendarSection() {
       return normalizeTitleKey(entry?.title || "").includes(query);
     })
     .slice(0, CALENDAR_RENDER_LIMIT);
+  const calendarKey = buildCalendarPaginationKey();
+  const pagedCalendar = paginateList(mergedRows, "calendar", calendarKey);
+  const visibleRows = pagedCalendar.items;
+  renderPaginationBar("calendar", pagedCalendar.meta, { label: "titres" });
 
   if (refs.calendarDayStats) {
     const dayBuckets = new Map();
@@ -7051,7 +7147,7 @@ function renderCalendarSection() {
     anime: "Anime",
   };
 
-  mergedRows.forEach((entry, index) => {
+  visibleRows.forEach((entry, index) => {
     const card = document.createElement("article");
     card.className = "calendar-merged-card media-card calendar-media-card";
     const detailId = resolveCalendarDetailId(entry);
@@ -7148,7 +7244,7 @@ function renderCalendarSection() {
       hydrateCalendarCardsForMedia(mediaId);
     });
     warmImageCacheFromPool(
-      mergedRows.map((entry) => ({
+      visibleRows.map((entry) => ({
         poster: resolveCalendarEntryCover(entry, resolveCalendarDetailId(entry)),
         backdrop: "",
       })),
@@ -7346,7 +7442,8 @@ function refreshMobileCoverWarmup(reason = "") {
   if (!isCompactViewport()) {
     return;
   }
-  const visible = getVisibleCatalog();
+  const pagedCatalog = getPaginatedCatalog();
+  const visible = pagedCatalog.items;
   if (!Array.isArray(visible) || visible.length === 0) {
     return;
   }
@@ -8772,9 +8869,11 @@ function renderAll() {
     state.view = "all";
   }
 
-  const visible = getVisibleCatalog();
+  const fullVisible = getVisibleCatalog();
+  const pagedCatalog = getPaginatedCatalog(fullVisible);
+  const visible = pagedCatalog.items;
   const hasQuery = state.query.trim().length > 0;
-  const heroItem = getHeroItem(visible);
+  const heroItem = getHeroItem(fullVisible);
   const isInfoView = !hasQuery && state.view === "info";
   const isCalendarView = state.view === "calendar";
   const isListView = !hasQuery && state.view === "list";
@@ -8810,6 +8909,7 @@ function renderAll() {
     renderCommunityStats();
     renderThemeFilters();
     renderCatalog(visible);
+    renderCatalogPagination(pagedCatalog.meta);
     if (!hasQuery) {
       renderContinue();
       if (state.view === "all") {
@@ -8854,7 +8954,7 @@ function renderAll() {
     renderCalendarSection();
   }
 
-  updateCatalogHeading(hasQuery, visible.length);
+  updateCatalogHeading(hasQuery, pagedCatalog.meta.totalItems);
 
   setHidden(refs.heroSection, !showHero);
   setHidden(
@@ -8930,6 +9030,223 @@ function renderAll() {
   }
   if (showBrowseView && state.hasMore) {
     scheduleScrollDrivenCatalogSync();
+  }
+}
+
+function getSmartPageSize(kind) {
+  const compact = isCompactViewport();
+  const perf = Math.min(1.2, Math.max(0.75, getPerfScale()));
+  let base = 36;
+  let min = 12;
+  let max = 120;
+  if (kind === "catalog") {
+    base = compact ? 72 : 96;
+    min = compact ? 42 : 60;
+    max = compact ? 140 : 200;
+  } else if (kind === "request") {
+    base = compact ? 12 : 18;
+    min = compact ? 8 : 12;
+    max = compact ? 30 : 48;
+  } else if (kind === "tv") {
+    base = compact ? 18 : 28;
+    min = compact ? 12 : 16;
+    max = compact ? 36 : 60;
+  } else if (kind === "calendar") {
+    base = compact ? 24 : 36;
+    min = compact ? 16 : 24;
+    max = compact ? 60 : 90;
+  }
+  return clampIntRange(Math.round(base * perf), min, max);
+}
+
+function ensurePaginationState(kind, key, totalItems) {
+  const bucket = state.pagination?.[kind];
+  if (!bucket) {
+    return { key, page: 1, pageSize: getSmartPageSize(kind), totalPages: 1 };
+  }
+  const pageSize = getSmartPageSize(kind);
+  const totalPages = Math.max(1, Math.ceil(Math.max(0, totalItems) / pageSize));
+  let page = Number(bucket.page || 1);
+  if (bucket.key !== key || bucket.pageSize !== pageSize) {
+    page = 1;
+  } else if (page > totalPages) {
+    page = totalPages;
+  }
+  bucket.key = key;
+  bucket.page = page;
+  bucket.pageSize = pageSize;
+  bucket.totalPages = totalPages;
+  return bucket;
+}
+
+function paginateList(list, kind, key) {
+  const rows = Array.isArray(list) ? list : [];
+  const stateBucket = ensurePaginationState(kind, key, rows.length);
+  const startIndex = (stateBucket.page - 1) * stateBucket.pageSize;
+  const endIndex = Math.min(rows.length, startIndex + stateBucket.pageSize);
+  return {
+    items: rows.slice(startIndex, endIndex),
+    meta: {
+      page: stateBucket.page,
+      pageSize: stateBucket.pageSize,
+      totalPages: stateBucket.totalPages,
+      totalItems: rows.length,
+      startIndex,
+      endIndex,
+    },
+  };
+}
+
+function buildCatalogPaginationKey() {
+  const activeView = resolveCatalogViewForSearch();
+  const query = normalizeTitleKey(state.query || "");
+  const themeSet = query.length === 0 ? getActiveThemeFilterSet(activeView) : null;
+  const themeKey = themeSet && themeSet.size > 0 ? Array.from(themeSet).sort().join(",") : "";
+  const sortKey = state.sortBy || "featured";
+  const chip = state.chip || "all";
+  const filters = [
+    state.uiPrefs.hideWatched ? "w1" : "w0",
+    state.uiPrefs.newOnly ? "n1" : "n0",
+    state.uiPrefs.vfOnly ? "vf1" : "vf0",
+    state.uiPrefs.vostOnly ? "vo1" : "vo0",
+  ].join("");
+  const seedKey = sortKey === "random" ? String(state.randomSortSeed || 0) : "";
+  return [activeView, chip, sortKey, query, themeKey, filters, seedKey].join("|");
+}
+
+function buildRequestPaginationKey(list) {
+  const rows = Array.isArray(list) ? list : [];
+  const head = rows[0];
+  const stamp = Number(state.request.lastUpdatedAt || 0);
+  const headStamp = head ? String(head.updatedAt || head.createdAt || "") : "";
+  return `request:${rows.length}:${stamp}:${headStamp}`;
+}
+
+function buildTvPaginationKey(list) {
+  const rows = Array.isArray(list) ? list : [];
+  const base = getTvRenderKey(rows);
+  return `tv:${base}:${state.tv.source || ""}:${state.tv.country || ""}:${normalizeTitleKey(state.tv.query || "")}`;
+}
+
+function buildCalendarPaginationKey() {
+  const query = normalizeTitleKey(state.calendarQuery || "");
+  const filters = CALENDAR_TYPE_KEYS.map((type) => (state.calendarTypeFilters[type] !== false ? "1" : "0")).join("");
+  return `calendar:${state.calendarYear}-${state.calendarMonth}:${filters}:${query}`;
+}
+
+function getPaginatedCatalog(sourceList) {
+  const list = Array.isArray(sourceList) ? sourceList : getVisibleCatalog();
+  const key = buildCatalogPaginationKey();
+  return paginateList(list, "catalog", key);
+}
+
+function getPaginationRefs(kind) {
+  if (kind === "catalog") {
+    return {
+      bar: refs.catalogPagination,
+      prev: refs.catalogPagePrev,
+      next: refs.catalogPageNext,
+      meta: refs.catalogPaginationMeta,
+      label: "titres",
+    };
+  }
+  if (kind === "request") {
+    return {
+      bar: refs.requestPagination,
+      prev: refs.requestPagePrev,
+      next: refs.requestPageNext,
+      meta: refs.requestPaginationMeta,
+      label: "demandes",
+    };
+  }
+  if (kind === "tv") {
+    return {
+      bar: refs.tvPagination,
+      prev: refs.tvPagePrev,
+      next: refs.tvPageNext,
+      meta: refs.tvPaginationMeta,
+      label: "chaines",
+    };
+  }
+  if (kind === "calendar") {
+    return {
+      bar: refs.calendarPagination,
+      prev: refs.calendarPagePrev,
+      next: refs.calendarPageNext,
+      meta: refs.calendarPaginationMeta,
+      label: "titres",
+    };
+  }
+  return null;
+}
+
+function renderPaginationBar(kind, meta, options = {}) {
+  const refsSet = getPaginationRefs(kind);
+  if (!refsSet?.bar || !refsSet.meta || !refsSet.prev || !refsSet.next) {
+    return;
+  }
+  const totalPages = Number(meta?.totalPages || 1) || 1;
+  const totalItems = Number(meta?.totalItems || 0) || 0;
+  const show = totalPages > 1;
+  setHidden(refsSet.bar, !show);
+  if (!show) {
+    return;
+  }
+  const compactLabel = options.compactLabel ?? isCompactViewport();
+  refsSet.meta.textContent = compactLabel
+    ? `Page ${meta.page}/${totalPages}`
+    : `Page ${meta.page}/${totalPages} \u00b7 ${totalItems} ${options.label || refsSet.label}`;
+  refsSet.prev.disabled = meta.page <= 1;
+  const canAdvance = meta.page < totalPages || Boolean(options.canAdvance);
+  refsSet.next.disabled = !canAdvance;
+  if (options.nextLabel) {
+    refsSet.next.textContent = options.nextLabel;
+  } else {
+    refsSet.next.textContent = "Suivant";
+  }
+  refsSet.prev.textContent = "Precedent";
+}
+
+function renderCatalogPagination(meta) {
+  if (!meta) {
+    setHidden(refs.catalogPagination, true);
+    return;
+  }
+  const hasQuery = state.query.trim().length > 0;
+  const canFetchMore =
+    !state.backgroundSyncRunning &&
+    state.view !== "top" &&
+    state.view !== "list" &&
+    state.view !== "info" &&
+    state.view !== "calendar" &&
+    !hasQuery &&
+    state.hasMore;
+  const atEnd = meta.page >= meta.totalPages;
+  renderPaginationBar("catalog", meta, {
+    canAdvance: atEnd && canFetchMore,
+    nextLabel: atEnd && canFetchMore ? "Charger plus" : "Suivant",
+    label: "titres",
+  });
+}
+
+function setPaginationPage(kind, nextPage) {
+  const bucket = state.pagination?.[kind];
+  if (!bucket) {
+    return;
+  }
+  const page = clampIntRange(Number(nextPage || 1), 1, bucket.totalPages || 1);
+  if (page === bucket.page) {
+    return;
+  }
+  bucket.page = page;
+  if (kind === "catalog") {
+    renderAll();
+  } else if (kind === "request") {
+    renderRequestPublicList();
+  } else if (kind === "tv") {
+    renderTvView();
+  } else if (kind === "calendar") {
+    renderCalendarSection();
   }
 }
 
@@ -11242,6 +11559,9 @@ function renderRequestPublicList() {
     const right = Number(b?.updatedAt || b?.createdAt || 0);
     return right - left;
   });
+  const paginationKey = buildRequestPaginationKey(list);
+  const paged = paginateList(list, "request", paginationKey);
+  renderPaginationBar("request", paged.meta, { label: "demandes" });
   refs.requestPublicGrid.innerHTML = "";
   if (list.length === 0) {
     refs.requestPublicEmpty.hidden = false;
@@ -11249,7 +11569,7 @@ function renderRequestPublicList() {
   }
   refs.requestPublicEmpty.hidden = true;
   const fragment = document.createDocumentFragment();
-  list.slice(0, 36).forEach((entry) => {
+  paged.items.forEach((entry) => {
     const cover = normalizeImageUrl(entry.poster || entry.backdrop || "");
     const status = normalizeRequestStatus(entry.status);
     const typeLabel = entry.type === "tv" ? "Serie" : "Film";
@@ -11789,8 +12109,11 @@ function renderTvView() {
     }
     return String(a.name || "").localeCompare(String(b.name || ""), "fr", { sensitivity: "base" });
   });
-  const renderKey = getTvRenderKey(sorted);
-  if (renderKey === state.tv.renderKey && refs.tvChannelList.children.length === sorted.length) {
+  const paginationKey = buildTvPaginationKey(sorted);
+  const paged = paginateList(sorted, "tv", paginationKey);
+  renderPaginationBar("tv", paged.meta, { label: "chaines" });
+  const renderKey = `${getTvRenderKey(sorted)}::page:${paged.meta.page}`;
+  if (renderKey === state.tv.renderKey && refs.tvChannelList.children.length === paged.items.length) {
     const activeId = String(state.tv.selected?.id || "");
     const nodes = refs.tvChannelList.querySelectorAll(".tv-channel-card");
     nodes.forEach((node) => {
@@ -11805,7 +12128,7 @@ function renderTvView() {
     }
     if (refs.tvChannelEmpty) refs.tvChannelEmpty.hidden = true;
     const fragment = document.createDocumentFragment();
-    sorted.forEach((channel) => {
+    paged.items.forEach((channel) => {
       const card = document.createElement("button");
       card.type = "button";
       card.className = "tv-channel-card";
@@ -12398,6 +12721,12 @@ function initSectionRevealObserver() {
 }
 
 function updateLoadMoreButton() {
+  if (refs.catalogPagination && !refs.catalogPagination.hidden) {
+    refs.loadMoreBtn.hidden = true;
+    refs.loadMoreBtn.disabled = false;
+    refs.loadMoreBtn.textContent = "Charger plus";
+    return;
+  }
   if (
     state.backgroundSyncRunning ||
     state.view === "top" ||
