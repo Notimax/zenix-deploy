@@ -17272,6 +17272,22 @@ async function handleZenixSource(req, res, requestUrl) {
       // keep original sources on probe failure
     }
   }
+  if (mediaId > 0) {
+    const owned = resolveOwnedSources(mediaType, mediaId, season, episode);
+    if (owned.length > 0) {
+      const dedupe = new Set();
+      const merged = [];
+      owned.concat(sources).forEach((entry) => {
+        const key = String(entry?.stream_url || entry?.url || "").trim();
+        if (!key || dedupe.has(key)) {
+          return;
+        }
+        dedupe.add(key);
+        merged.push(entry);
+      });
+      sources = merged;
+    }
+  }
 
   if (sources.length === 0 && mediaId > 0) {
     const backupEntry = fetchBackupCacheEntry(mediaType, mediaId, season, episode);

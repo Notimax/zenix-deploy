@@ -1,5 +1,5 @@
 const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260319-c404";
+const ZENIX_BUILD_VERSION = "20260320-c407";
 const STORAGE_KEY = "zenix-progress-v4";
 const COVER_CACHE_KEY = "zenix-cover-cache-v1";
 const LOCAL_PLAY_KEY = "zenix-local-plays-v1";
@@ -17525,6 +17525,31 @@ async function playFromSourcePoolWithValidation(resumeTime, token, options = {})
       allowPremiumRescue: true,
       fastfluxContextKey,
     });
+  }
+  if (state.sourcePool.length > 1 && options?.skipFastStart !== true) {
+    let successIndex = -1;
+    for (let idx = 0; idx < state.sourcePool.length; idx += 1) {
+      const candidate = state.sourcePool[idx];
+      if (!candidate || isEmbedSource(candidate)) {
+        continue;
+      }
+      if (hasSourceSuccess(candidate)) {
+        successIndex = idx;
+        break;
+      }
+    }
+    if (successIndex >= 0) {
+      state.sourceValidationActive = false;
+      setPlayerLoading(true, "Lecture rapide...");
+      setPlayerStatus("Lecture rapide...");
+      return playFromSourcePoolWithRescue(resumeTime, token, {
+        startIndex: successIndex,
+        strictIndex: false,
+        skipPremiumFallback: false,
+        allowPremiumRescue: true,
+        fastfluxContextKey,
+      });
+    }
   }
   if (!shouldValidate || state.sourcePool.length <= 1) {
     return playFromSourcePoolWithRescue(resumeTime, token, enrichedOptions);

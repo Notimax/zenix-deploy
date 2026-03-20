@@ -71,6 +71,13 @@ const refs = {
   selectedShowBtn: document.getElementById("adminSelectedShowBtn"),
   selectedDeleteBtn: document.getElementById("adminSelectedDeleteBtn"),
   selectedStatus: document.getElementById("adminSelectedStatus"),
+  selectedUrlInput: document.getElementById("adminSelectedUrl"),
+  selectedLangInput: document.getElementById("adminSelectedLang"),
+  selectedQualityInput: document.getElementById("adminSelectedQuality"),
+  selectedNameInput: document.getElementById("adminSelectedName"),
+  selectedFormatInput: document.getElementById("adminSelectedFormat"),
+  selectedPriorityInput: document.getElementById("adminSelectedPriority"),
+  selectedUrlBtn: document.getElementById("adminSelectedUrlBtn"),
   customStatus: document.getElementById("customStatus"),
   analyticsLive: document.getElementById("adminAnalyticsLive"),
   analyticsWatching: document.getElementById("adminAnalyticsWatching"),
@@ -428,6 +435,7 @@ function renderSelectedItem() {
     if (refs.selectedHideBtn) refs.selectedHideBtn.hidden = true;
     if (refs.selectedShowBtn) refs.selectedShowBtn.hidden = true;
     if (refs.selectedDeleteBtn) refs.selectedDeleteBtn.hidden = true;
+    if (refs.selectedUrlBtn) refs.selectedUrlBtn.disabled = true;
     if (refs.selectedStatus) refs.selectedStatus.textContent = "";
     return;
   }
@@ -445,6 +453,7 @@ function renderSelectedItem() {
   if (refs.selectedHideBtn) refs.selectedHideBtn.hidden = !target || hidden;
   if (refs.selectedShowBtn) refs.selectedShowBtn.hidden = !target || !hidden;
   if (refs.selectedDeleteBtn) refs.selectedDeleteBtn.hidden = !item.customEntry;
+  if (refs.selectedUrlBtn) refs.selectedUrlBtn.disabled = false;
   if (refs.selectedStatus) {
     refs.selectedStatus.textContent = hidden ? "Statut: masqué" : "";
   }
@@ -528,11 +537,61 @@ async function handleSelectedDelete() {
   await loadData();
 }
 
+async function handleSelectedAddUrl() {
+  if (!refs.selectedStatus) return;
+  const item = state.selectedItem;
+  if (!item) {
+    refs.selectedStatus.textContent = "Selection requise.";
+    return;
+  }
+  const mediaId = Number(item.customEntry?.id || item.id || 0);
+  if (!mediaId) {
+    refs.selectedStatus.textContent = "Media ID introuvable.";
+    return;
+  }
+  const streamUrl = String(refs.selectedUrlInput?.value || "").trim();
+  if (!streamUrl) {
+    refs.selectedStatus.textContent = "URL requise.";
+    return;
+  }
+  const type = item.type === "tv" ? "tv" : "movie";
+  try {
+    await apiFetch("/api/admin/owned", {
+      method: "POST",
+      body: JSON.stringify({
+        mediaId,
+        type,
+        season: 1,
+        episode: 1,
+        source: {
+          stream_url: streamUrl,
+          format: refs.selectedFormatInput?.value || "",
+          quality: refs.selectedQualityInput?.value || "",
+          language: refs.selectedLangInput?.value || "",
+          source_name: refs.selectedNameInput?.value || "",
+          priority: Number(refs.selectedPriorityInput?.value || 0) || 0,
+        },
+      }),
+    });
+    refs.selectedStatus.textContent = "URL ajoutée.";
+    if (refs.selectedUrlInput) refs.selectedUrlInput.value = "";
+    await loadOwnedSources();
+  } catch (err) {
+    refs.selectedStatus.textContent = err.message || "Ajout impossible.";
+  }
+}
+
 function applySelectionFromRow(row) {
   const selected = buildSelectedFromRow(row);
   setSelectedItem(selected);
   if (refs.adminSearchStatus) {
     refs.adminSearchStatus.textContent = `Selection: ${row?.title || "Titre"}`;
+  }
+  if (selected?.customEntry?.id && refs.ownedMediaId) {
+    refs.ownedMediaId.value = String(selected.customEntry.id);
+  }
+  if (selected?.customEntry?.type && refs.ownedType) {
+    refs.ownedType.value = selected.customEntry.type === "tv" ? "tv" : "movie";
   }
 }
 
@@ -1430,6 +1489,7 @@ function bindEvents() {
   if (refs.selectedHideBtn) refs.selectedHideBtn.addEventListener("click", handleSelectedHide);
   if (refs.selectedShowBtn) refs.selectedShowBtn.addEventListener("click", handleSelectedShow);
   if (refs.selectedDeleteBtn) refs.selectedDeleteBtn.addEventListener("click", handleSelectedDelete);
+  if (refs.selectedUrlBtn) refs.selectedUrlBtn.addEventListener("click", handleSelectedAddUrl);
   if (refs.requestList) {
     refs.requestList.addEventListener("change", (event) => {
       const target = event.target instanceof HTMLElement ? event.target : null;

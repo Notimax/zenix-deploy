@@ -1772,3 +1772,9 @@ DIRECT URL QUERY PRESERVED (2026-03-19, c405)
 
 ADMIN MEDIA ID RANGE (2026-03-19, c406)
 - Increased mediaId upper bound to support large admin IDs (direct URL entries now resolve in /api/zenix-source).
+
+FAST START + OWNED URL MERGE (2026-03-20, c407)
+- Player now fast-starts from a previously successful source (reduces startup delay).
+- Owned/direct URLs are merged into /api/zenix-source results for the selected mediaId.
+- Admin adds "URL direct" on selection + owned URL panel (no manual IDs required).
+- Cache-bust bumped to 20260320-c407.

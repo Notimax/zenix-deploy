@@ -228,14 +228,101 @@
         <section class="admin-card" id="adminSelectionCard">
           <h2>Selection</h2>
           <div class="admin-selected" id="adminSelectedInfo">Aucune selection.</div>
+          <div class="admin-field">
+            <label for="adminSelectedUrl">URL directe (mp4 / m3u8)</label>
+            <input id="adminSelectedUrl" type="url" placeholder="https://..." />
+          </div>
+          <div class="admin-field admin-inline">
+            <div>
+              <label for="adminSelectedLang">Langue</label>
+              <input id="adminSelectedLang" type="text" placeholder="VF" />
+            </div>
+            <div>
+              <label for="adminSelectedQuality">Qualite</label>
+              <input id="adminSelectedQuality" type="text" placeholder="HD" />
+            </div>
+            <div>
+              <label for="adminSelectedName">Nom source</label>
+              <input id="adminSelectedName" type="text" placeholder="URL Directe" />
+            </div>
+          </div>
+          <div class="admin-field admin-inline">
+            <div>
+              <label for="adminSelectedFormat">Format (auto si vide)</label>
+              <input id="adminSelectedFormat" type="text" placeholder="hls / mp4" />
+            </div>
+            <div>
+              <label for="adminSelectedPriority">Priorite</label>
+              <input id="adminSelectedPriority" type="number" placeholder="520" />
+            </div>
+          </div>
           <div class="admin-actions">
             <button class="admin-btn" id="adminSelectedAutoFixBtn" type="button">Auto-fix</button>
             <button class="admin-btn admin-ghost" id="adminSelectedImportBtn" type="button">Importer</button>
             <button class="admin-btn admin-ghost" id="adminSelectedHideBtn" type="button">Masquer</button>
             <button class="admin-btn admin-ghost" id="adminSelectedShowBtn" type="button">Afficher</button>
             <button class="admin-btn admin-danger" id="adminSelectedDeleteBtn" type="button">Supprimer (custom)</button>
+            <button class="admin-btn" id="adminSelectedUrlBtn" type="button">Ajouter URL au contenu</button>
           </div>
           <p class="admin-muted" id="adminSelectedStatus"></p>
+        </section>
+
+        <section class="admin-card" id="adminOwnedCard">
+          <h2>URL sur contenu Zenix</h2>
+          <p class="admin-muted">Selectionne un titre dans la recherche, puis ajoute une URL directe.</p>
+          <div class="admin-field admin-inline">
+            <div>
+              <label for="ownedMediaId">Media ID</label>
+              <input id="ownedMediaId" type="number" placeholder="ID Zenix" />
+            </div>
+            <div>
+              <label for="ownedType">Type</label>
+              <select id="ownedType">
+                <option value="movie">Film</option>
+                <option value="tv">Serie</option>
+              </select>
+            </div>
+            <div>
+              <label for="ownedSeason">Saison</label>
+              <input id="ownedSeason" type="number" value="1" min="1" />
+            </div>
+            <div>
+              <label for="ownedEpisode">Episode</label>
+              <input id="ownedEpisode" type="number" value="1" min="1" />
+            </div>
+          </div>
+          <div class="admin-field">
+            <label for="ownedStreamUrl">URL lecteur</label>
+            <input id="ownedStreamUrl" type="url" placeholder="https://... (m3u8 / mp4)" />
+          </div>
+          <div class="admin-field admin-inline">
+            <div>
+              <label for="ownedFormat">Format (auto si vide)</label>
+              <input id="ownedFormat" type="text" placeholder="hls / mp4" />
+            </div>
+            <div>
+              <label for="ownedQuality">Qualite</label>
+              <input id="ownedQuality" type="text" placeholder="HD" />
+            </div>
+            <div>
+              <label for="ownedLanguage">Langue</label>
+              <input id="ownedLanguage" type="text" placeholder="VF" />
+            </div>
+            <div>
+              <label for="ownedName">Nom source</label>
+              <input id="ownedName" type="text" placeholder="URL Directe" />
+            </div>
+            <div>
+              <label for="ownedPriority">Priorite</label>
+              <input id="ownedPriority" type="number" placeholder="520" />
+            </div>
+          </div>
+          <div class="admin-actions">
+            <button class="admin-btn" id="ownedAddBtn" type="button">Ajouter URL</button>
+            <button class="admin-btn admin-ghost" id="ownedLoadBtn" type="button">Charger sources</button>
+          </div>
+          <p class="admin-muted" id="ownedStatus"></p>
+          <div class="admin-list" id="ownedList"></div>
         </section>
 
         <section class="admin-card">
