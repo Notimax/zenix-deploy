@@ -1,4 +1,4 @@
-﻿const fs = require("node:fs");
+const fs = require("node:fs");
 const path = require("node:path");
 const http = require("node:http");
 const crypto = require("node:crypto");
@@ -111,15 +111,15 @@ const FASTFLUX_SEARCH_CACHE_MS = Math.max(
 );
 const PLAYBACK_FAIL_WINDOW_MS = Math.max(
   30 * 1000,
-  Number(process.env.PLAYBACK_FAIL_WINDOW_MS || 3 * 60 * 1000)
+  Number(process.env.PLAYBACK_FAIL_WINDOW_MS || 5 * 60 * 1000)
 );
 const PLAYBACK_FAIL_THRESHOLD = Math.max(
   1,
-  Number(process.env.PLAYBACK_FAIL_THRESHOLD || 3)
+  Number(process.env.PLAYBACK_FAIL_THRESHOLD || 6)
 );
 const PLAYBACK_FAIL_COOLDOWN_MS = Math.max(
-  60 * 1000,
-  Number(process.env.PLAYBACK_FAIL_COOLDOWN_MS || 3 * 60 * 1000)
+  30 * 1000,
+  Number(process.env.PLAYBACK_FAIL_COOLDOWN_MS || 90 * 1000)
 );
 const FASTFLUX_WARMUP_INTERVAL_MS = Math.max(
   5 * 60 * 1000,
@@ -131,11 +131,11 @@ const FASTFLUX_HEALTH_INTERVAL_MS = Math.max(
 );
 const FASTFLUX_HEALTH_FAIL_THRESHOLD = Math.max(
   1,
-  Number(process.env.FASTFLUX_HEALTH_FAIL_THRESHOLD || 2)
+  Number(process.env.FASTFLUX_HEALTH_FAIL_THRESHOLD || 4)
 );
 const FASTFLUX_HEALTH_FAIL_COOLDOWN_MS = Math.max(
-  60 * 1000,
-  Number(process.env.FASTFLUX_HEALTH_FAIL_COOLDOWN_MS || 4 * 60 * 1000)
+  30 * 1000,
+  Number(process.env.FASTFLUX_HEALTH_FAIL_COOLDOWN_MS || 90 * 1000)
 );
 const TMDB_SEARCH_CACHE_MS = Math.max(60 * 1000, Number(process.env.TMDB_SEARCH_CACHE_MS || 10 * 60 * 1000));
 const FASTFLUX_SOURCE_REMOTE_TIMEOUT_MS = Math.max(
