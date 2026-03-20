@@ -1778,3 +1778,13 @@ FAST START + OWNED URL MERGE (2026-03-20, c407)
 - Owned/direct URLs are merged into /api/zenix-source results for the selected mediaId.
 - Admin adds "URL direct" on selection + owned URL panel (no manual IDs required).
 - Cache-bust bumped to 20260320-c407.
+
+PLAYER STABILITY + SOURCE FALLBACK (2026-03-20, c408)
+- Global repair thresholds raised to prevent "all readers drop".
+- FastFlux health thresholds softened to avoid cascade failure.
+- Client failure mode shortened and auto-repair tolerance increased.
+
+FASTFLUX OUTAGE TOLERANCE (2026-03-20, c409)
+- Server cache + fallback used to keep readers available during FastFlux outages.
+- Client now keeps non-empty fallback sources even if FastFlux is slow.
+- Cache-bust bumped to 20260320-c409.
