@@ -241,7 +241,6 @@ const NOTARIELLES_FETCH_HEADERS = {
   "Accept-Language": DEFAULT_ACCEPT_LANGUAGE,
 };
 const sourceBackupCache = new Map();
-const BACKUP_CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 
 const RENDEZVOUS_BASE = "https://rendezvousmusical.fr";
 const RENDEZVOUS_HOST = "rendezvousmusical.fr";

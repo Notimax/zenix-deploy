@@ -1788,3 +1788,6 @@ FASTFLUX OUTAGE TOLERANCE (2026-03-20, c409)
 - Server cache + fallback used to keep readers available during FastFlux outages.
 - Client now keeps non-empty fallback sources even if FastFlux is slow.
 - Cache-bust bumped to 20260320-c409.
+
+SERVER BOOT FIX (2026-03-20, c410)
+- Removed duplicate BACKUP_CACHE_TTL_MS const that prevented server startup.
