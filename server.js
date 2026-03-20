@@ -16091,6 +16091,82 @@ async function handleAdminSuggestionAccept(req, res, requestUrl) {
   return true;
 }
 
+function searchAdminCustomEntries(query) {
+  const safeQuery = String(query || "").trim();
+  if (!safeQuery) {
+    return [];
+  }
+  const queryKey = normalizeTitleKey(safeQuery);
+  if (!queryKey) {
+    return [];
+  }
+  const words = queryKey.split("-").filter(Boolean);
+  const data = loadAdminData(true);
+  const custom = Array.isArray(data?.custom) ? data.custom : [];
+  return custom.filter((entry) => {
+    if (!entry) {
+      return false;
+    }
+    const titleKey = normalizeTitleKey(entry.title || entry.titleKey || "");
+    if (!titleKey) {
+      return false;
+    }
+    if (titleKey.includes(queryKey)) {
+      return true;
+    }
+    if (words.length >= 2 && words.every((word) => titleKey.includes(word))) {
+      return true;
+    }
+    return false;
+  });
+}
+
+async function handleSearchBarAggregate(req, res, requestUrl) {
+  if (!/^\/api\/search-bar\/search\//i.test(requestUrl.pathname)) {
+    return false;
+  }
+  if (req.method !== "GET") {
+    sendJson(res, 405, { error: "Method Not Allowed" });
+    return true;
+  }
+  const safeQuery = decodeURIComponent(requestUrl.pathname.replace(/^\/api\/search-bar\/search\//i, "") || "").trim();
+  if (safeQuery.length < 2) {
+    sendJson(res, 400, { error: "Query too short" });
+    return true;
+  }
+  const target = `${PURSTREAM_API_BASE}/search-bar/search/${encodeURIComponent(safeQuery)}`;
+  const upstream = await fetchRemote(target, {
+    Referer: `${PURSTREAM_WEB_BASE}/`,
+    Origin: PURSTREAM_WEB_BASE,
+    "Accept-Language": DEFAULT_ACCEPT_LANGUAGE,
+  });
+  let payload = upstream.status >= 200 && upstream.status < 300 ? parseJsonSafe(upstream.body) : null;
+  const adminMatches = searchAdminCustomEntries(safeQuery)
+    .map((entry) => normalizeAdminCustomEntry(entry))
+    .filter(Boolean)
+    .map((entry) => ({
+      ...entry,
+      external_provider: ZENIX_EXTERNAL_PROVIDER,
+    }));
+  if (adminMatches.length > 0) {
+    if (!payload || typeof payload !== "object") {
+      payload = { data: {} };
+    }
+    if (!payload.data || typeof payload.data !== "object") {
+      payload.data = {};
+    }
+    if (!payload.data.items || typeof payload.data.items !== "object") {
+      payload.data.items = {};
+    }
+    if (!Array.isArray(payload.data.items.items)) {
+      payload.data.items.items = [];
+    }
+    payload.data.items.items = [...adminMatches, ...payload.data.items.items];
+  }
+  sendJson(res, 200, payload || { data: { items: { items: [] } } });
+  return true;
+}
+
 async function handleFilmer2Search(req, res, requestUrl) {
   const isLegacy = requestUrl.pathname === "/api/filmer2-search";
   const isZenix = requestUrl.pathname === "/api/zenix-search";
@@ -18449,6 +18525,12 @@ const server = http.createServer((req, res) => {
     })
     .then((handledAdminTvChannels) => {
       if (handledAdminTvChannels) {
+        return true;
+      }
+      return handleSearchBarAggregate(req, res, requestUrl);
+    })
+    .then((handledSearchBarAggregate) => {
+      if (handledSearchBarAggregate) {
         return true;
       }
       return handleFilmer2Search(req, res, requestUrl);

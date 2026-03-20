@@ -1,6 +1,11 @@
 ZENIX STREAM - OPERATIONS MEMORY
 Last updated: 2026-03-20
 
+LATEST FIX LOG (2026-03-20, c419)
+- Search API now injects admin-added titles into /api/search-bar results.
+- Prevents "Demande d'ajout" films from missing in search.
+- Cache-bust bumped to 20260320-c419.
+
 LATEST FIX LOG (2026-03-20, c418)
 - Search now merges local catalog matches (admin-added titles included).
 - Search remains remote-first but no longer misses custom entries.

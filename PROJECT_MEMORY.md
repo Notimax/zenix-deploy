@@ -2,6 +2,11 @@
 
 Last update: 2026-03-20
 
+## c419 follow-up (2026-03-20)
+- /api/search-bar now injects admin-added titles directly in the search payload.
+- Fixes missing search results for "Demande d'ajout" entries.
+- Cache-bust updated to `20260320-c419`.
+
 ## c418 follow-up (2026-03-20)
 - Search now merges local catalog matches so admin-added titles appear in search.
 - Remote search failures still show local matches when available.
