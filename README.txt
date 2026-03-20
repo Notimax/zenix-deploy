@@ -1,6 +1,11 @@
 ZENIX STREAM - OPERATIONS MEMORY
 Last updated: 2026-03-20
 
+LATEST FIX LOG (2026-03-20, c418)
+- Search now merges local catalog matches (admin-added titles included).
+- Search remains remote-first but no longer misses custom entries.
+- Cache-bust bumped to 20260320-c418.
+
 LATEST FIX LOG (2026-03-20, c417)
 - iPhone playback hardening: user-gesture unlock on play + source switch.
 - Mobile FastFlux buffering windows enlarged to avoid false "blocked" switches.

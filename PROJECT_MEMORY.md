@@ -2,6 +2,11 @@
 
 Last update: 2026-03-20
 
+## c418 follow-up (2026-03-20)
+- Search now merges local catalog matches so admin-added titles appear in search.
+- Remote search failures still show local matches when available.
+- Cache-bust updated to `20260320-c418`.
+
 ## c417 follow-up (2026-03-20)
 - iPhone playback hardening: trigger mobile unlock on play + source switch (keeps user gesture).
 - Mobile FastFlux buffering windows enlarged to avoid false startup stalls.

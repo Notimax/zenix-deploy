@@ -1,5 +1,5 @@
 const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260320-c417";
+const ZENIX_BUILD_VERSION = "20260320-c418";
 const STORAGE_KEY = "zenix-progress-v4";
 const COVER_CACHE_KEY = "zenix-cover-cache-v1";
 const LOCAL_PLAY_KEY = "zenix-local-plays-v1";
@@ -8234,32 +8234,92 @@ function extractSearchRows(payload) {
   return Array.from(dedupe.values());
 }
 
+function findLocalSearchMatches(query) {
+  const raw = String(query || "").trim();
+  if (!raw) {
+    return [];
+  }
+  const queryKey = normalizeTitleKey(raw);
+  if (!queryKey) {
+    return [];
+  }
+  const words = queryKey.split("-").filter(Boolean);
+  return (Array.isArray(state.catalog) ? state.catalog : []).filter((item) => {
+    if (!item) {
+      return false;
+    }
+    const titleKey = normalizeTitleKey(item.title || item.titleKey || "");
+    if (!titleKey) {
+      return false;
+    }
+    if (titleKey.includes(queryKey)) {
+      return true;
+    }
+    if (words.length >= 2 && words.every((word) => titleKey.includes(word))) {
+      return true;
+    }
+    return false;
+  });
+}
+
+function mergeSearchResults(localMatches, remoteMatches) {
+  const merged = [];
+  const byId = new Map();
+  const bySemantic = new Map();
+  const pushUnique = (item) => {
+    if (!item) {
+      return;
+    }
+    const id = Number(item.id || 0);
+    if (id && byId.has(id)) {
+      return;
+    }
+    const semantic = getCatalogSemanticKey(item) || getCatalogSemanticLooseKey(item);
+    if (semantic && bySemantic.has(semantic)) {
+      return;
+    }
+    if (id) {
+      byId.set(id, item);
+    }
+    if (semantic) {
+      bySemantic.set(semantic, id || semantic);
+    }
+    merged.push(item);
+  };
+  (Array.isArray(localMatches) ? localMatches : []).forEach(pushUnique);
+  (Array.isArray(remoteMatches) ? remoteMatches : []).forEach(pushUnique);
+  return merged;
+}
+
 async function handleRemoteSearch(token, signal) {
   const query = state.query.trim();
   if (query.length < 2) {
     return;
   }
 
-  const payload = await fetchJson(`${API_BASE}/search-bar/search/${encodeURIComponent(query)}`, {
-    signal,
-  });
+  let payload = null;
+  try {
+    payload = await fetchJson(`${API_BASE}/search-bar/search/${encodeURIComponent(query)}`, {
+      signal,
+    });
+  } catch {
+    payload = null;
+  }
   if (token !== state.searchToken) {
     return;
   }
 
   const rows = extractSearchRows(payload);
-  if (rows.length === 0) {
-    return;
-  }
-
   const mapped = rows.map(normalizeCatalogItem).filter(Boolean);
-  if (mapped.length === 0) {
+  const localMatches = findLocalSearchMatches(query);
+  const merged = mergeSearchResults(localMatches, mapped);
+  if (merged.length === 0) {
     return;
   }
   if (CATALOG_STRICT_PAGINATION) {
-    state.searchResults = mapped;
+    state.searchResults = merged;
   } else {
-    upsertCatalogItems(mapped, { prepend: true });
+    upsertCatalogItems(merged, { prepend: true });
     saveCatalogSnapshot();
   }
 }
