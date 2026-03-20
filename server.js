@@ -347,6 +347,10 @@ const ANIME_PLANNING_URL = "https://anime-sama.tv/planning/";
 const ANIME_SAMA_BASE = "https://anime-sama.to";
 const ANIME_SAMA_SEARCH_ENDPOINT = `${ANIME_SAMA_BASE}/template-php/defaut/fetch.php`;
 const PROXY_TIMEOUT_MS = 16000;
+const STREAM_PROXY_TIMEOUT_MS = Math.max(
+  5 * 60 * 1000,
+  Number(process.env.STREAM_PROXY_TIMEOUT_MS || 2 * 60 * 60 * 1000)
+);
 const NAKIOS_SOURCE_REMOTE_TIMEOUT_MS = Math.max(
   PROXY_TIMEOUT_MS,
   toInt(process.env.NAKIOS_SOURCE_REMOTE_TIMEOUT_MS, 22000, 12000, 60000)
@@ -447,7 +451,7 @@ let cacheDbSaveTimer = null;
 const livewatchCache = { loadedAt: 0, payload: null, inFlight: null };
 const iptvCache = { loadedAt: 0, payload: null, inFlight: null };
 let tvChannelsPurged = false;
-const HARD_HIDDEN_MEDIA_IDS = new Set([1507947720]);
+const HARD_HIDDEN_MEDIA_IDS = new Set([]);
 const NAKIOS_PINNED_TITLES = [
   { title: "Go Karts", mediaType: "movie", year: 2020 },
   { title: "Minions", mediaType: "movie", year: 2015 },
@@ -9538,11 +9542,11 @@ function buildFastfluxSourceEntry(sourceRow, index = 0) {
   if (!sourceRow || typeof sourceRow !== "object") {
     return null;
   }
-  const rawStreamUrl = String(sourceRow?.url || sourceRow?.stream_url || "").trim();
+  const rawStreamUrl = String(sourceRow?.url || sourceRow?.stream_url || sourceRow?.file || "").trim();
   if (!rawStreamUrl) {
     return null;
   }
-  const formatHint = String(sourceRow?.type || sourceRow?.format || "").trim();
+  const formatHint = String(sourceRow?.type || sourceRow?.format || sourceRow?.format_hint || "").trim();
   const originalFormat = inferOwnedSourceFormat(rawStreamUrl, formatHint || "mp4");
   const streamUrl = rewriteFastfluxCdnUrl(rawStreamUrl);
   let fastfluxHost = "";
@@ -9553,7 +9557,7 @@ function buildFastfluxSourceEntry(sourceRow, index = 0) {
   }
   const isFastfluxHost =
     fastfluxHost.endsWith("fastflux.xyz") || fastfluxHost.endsWith("cdn.fastflux.xyz");
-  const language = normalizePidoovLanguage(sourceRow?.language || sourceRow?.lang || "") || "VF";
+  const language = normalizePidoovLanguage(sourceRow?.language || sourceRow?.lang || sourceRow?.audio || "") || "VF";
   const quality = normalizeFastfluxQuality(sourceRow?.quality || sourceRow?.qlt || "");
   const format = originalFormat === "unknown" ? inferOwnedSourceFormat(streamUrl, formatHint || "mp4") : originalFormat;
   const isAlreadyProxied = /\/api\/hls-proxy(?:-mobile)?\?url=/i.test(streamUrl);
@@ -14663,7 +14667,9 @@ async function handleHlsProxy(req, res, requestUrl) {
   const proxyPath = isMobileProxy ? HLS_PROXY_MOBILE_PATH : HLS_PROXY_PATH;
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), Math.max(18000, PROXY_TIMEOUT_MS));
+  const longStreamTimeout = requestMethod === "GET" && !isMobileProxy;
+  const timeoutMs = longStreamTimeout ? STREAM_PROXY_TIMEOUT_MS : Math.max(18000, PROXY_TIMEOUT_MS);
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const range = String(req.headers.range || "").trim();
     const likelyPlaylistPath = String(target.pathname || "").toLowerCase().endsWith(".m3u8");
@@ -14774,6 +14780,9 @@ async function handleHlsProxy(req, res, requestUrl) {
     if (requestMethod === "HEAD") {
       res.end();
       return true;
+    }
+    if (longStreamTimeout) {
+      clearTimeout(timeoutId);
     }
     await pipeUpstreamBodyToResponse(upstream, res);
     return true;

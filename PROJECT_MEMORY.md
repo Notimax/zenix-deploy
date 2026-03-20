@@ -2,6 +2,12 @@
 
 Last update: 2026-03-20
 
+## c416 follow-up (2026-03-20)
+- HLS proxy now uses long-lived timeouts for full MP4 streaming (prevents mid-play aborts).
+- Scream 7 hard-hidden ID gate removed (title visible again).
+- FastFlux source parsing now accepts more fields (file/audio/format_hint) for better matches.
+- Search/detail lookup now scans search results in strict pagination mode.
+
 ## c415 follow-up (2026-03-20)
 - Pagination now runs in strict mode: only current page is loaded (no background mega-fetch).
 - Catalog page size capped to 20 and page switches fetch only that page.

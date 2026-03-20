@@ -1,6 +1,12 @@
 ZENIX STREAM - OPERATIONS MEMORY
 Last updated: 2026-03-20
 
+LATEST FIX LOG (2026-03-20, c416)
+- HLS proxy now uses long-lived timeouts for full MP4 streaming (prevents mid-play aborts).
+- Unhid Scream 7 by removing the hard-hidden media ID gate.
+- FastFlux source parsing now accepts more fields (file/audio/format_hint) for better matches.
+- Search/detail lookup now also scans current search results in strict pagination mode.
+
 LATEST FIX LOG (2026-03-20, c415)
 - Pagination now runs in strict mode: only the current page is loaded (no background mega-fetch).
 - Page size capped (catalog: 20) and page switches fetch just that page.
