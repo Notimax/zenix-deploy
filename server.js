@@ -142,6 +142,18 @@ const FASTFLUX_SOURCE_REMOTE_TIMEOUT_MS = Math.max(
   10_000,
   toInt(process.env.FASTFLUX_SOURCE_REMOTE_TIMEOUT_MS, 20_000, 8000, 60_000)
 );
+const ZENIX_SOURCE_CACHE_TTL_MS = Math.max(
+  15 * 1000,
+  toInt(process.env.ZENIX_SOURCE_CACHE_TTL_MS, 90 * 1000, 10 * 1000, 10 * 60 * 1000)
+);
+const ZENIX_SOURCE_EMPTY_TTL_MS = Math.max(
+  5000,
+  toInt(process.env.ZENIX_SOURCE_EMPTY_TTL_MS, 25 * 1000, 3000, 2 * 60 * 1000)
+);
+const ZENIX_SOURCE_CACHE_MAX = Math.max(
+  200,
+  toInt(process.env.ZENIX_SOURCE_CACHE_MAX, 2400, 200, 12000)
+);
 const NAKIOS_FETCH_HEADERS = {
   Referer: `${NAKIOS_BASE}/`,
   Origin: NAKIOS_BASE,
@@ -653,6 +665,7 @@ const suggestionFingerprintMap = new Map();
 const requestRateLimitMap = new Map();
 const requestFingerprintMap = new Map();
 const playbackFailureByIp = new Map();
+const zenixSourceCache = new Map();
 let playbackFailureLastGlobalAt = 0;
 let fastfluxWarmupInFlight = false;
 let fastfluxWarmupTimer = null;
@@ -2403,6 +2416,79 @@ function cacheDbDeletePrefix(prefix) {
   }
 }
 
+function buildZenixSourceCacheKey(input) {
+  const mediaType = input?.mediaType === "tv" ? "tv" : "movie";
+  const title = normalizeTitleKey(String(input?.title || ""));
+  const year = toInt(input?.year, 0, 0, 2099);
+  const season = toInt(input?.season, 1, 1, 500);
+  const episode = toInt(input?.episode, 1, 1, 50000);
+  const tmdbId = toInt(input?.tmdbId, 0, 0, 999999999);
+  const mediaId = toInt(input?.mediaId, 0, 0, MEDIA_ID_MAX);
+  const externalKey = String(input?.externalKey || "").trim();
+  return [
+    mediaType,
+    tmdbId ? `tmdb:${tmdbId}` : title ? `t:${title}` : "t:0",
+    year ? `y:${year}` : "y:0",
+    mediaType === "tv" ? `s:${season}:e:${episode}` : "s:1:e:1",
+    mediaId ? `mid:${mediaId}` : "mid:0",
+    externalKey ? `ek:${externalKey}` : "ek:0",
+  ].join("|");
+}
+
+function readZenixSourceCache(cacheKey) {
+  const safeKey = String(cacheKey || "").trim();
+  if (!safeKey) {
+    return null;
+  }
+  const now = Date.now();
+  const entry = zenixSourceCache.get(safeKey);
+  if (entry && entry.expiresAt > now && entry.payload) {
+    return entry.payload;
+  }
+  if (entry) {
+    zenixSourceCache.delete(safeKey);
+  }
+  const persisted = cacheDbGet(`zenix-source:${safeKey}`);
+  if (persisted && typeof persisted === "object" && persisted.type === "success") {
+    zenixSourceCache.set(safeKey, {
+      payload: persisted,
+      expiresAt: now + ZENIX_SOURCE_CACHE_TTL_MS,
+    });
+    return persisted;
+  }
+  return null;
+}
+
+function rememberZenixSourceCache(cacheKey, payload) {
+  const safeKey = String(cacheKey || "").trim();
+  if (!safeKey || !payload || payload.type !== "success") {
+    return;
+  }
+  const count = Number(payload?.data?.count || 0);
+  const ttl = count > 0 ? ZENIX_SOURCE_CACHE_TTL_MS : ZENIX_SOURCE_EMPTY_TTL_MS;
+  zenixSourceCache.set(safeKey, {
+    payload,
+    expiresAt: Date.now() + ttl,
+  });
+  cacheDbSet(`zenix-source:${safeKey}`, payload, ttl);
+  if (zenixSourceCache.size <= ZENIX_SOURCE_CACHE_MAX) {
+    return;
+  }
+  const now = Date.now();
+  for (const [key, entry] of zenixSourceCache.entries()) {
+    if (!entry || entry.expiresAt <= now) {
+      zenixSourceCache.delete(key);
+    }
+  }
+  if (zenixSourceCache.size <= ZENIX_SOURCE_CACHE_MAX) {
+    return;
+  }
+  const keys = Array.from(zenixSourceCache.keys());
+  keys.slice(0, Math.max(1, keys.length - ZENIX_SOURCE_CACHE_MAX)).forEach((key) => {
+    zenixSourceCache.delete(key);
+  });
+}
+
 function buildBackupCacheKey(mediaType, mediaId, season = 1, episode = 1) {
   const safeId = toInt(mediaId, 0, 0, MEDIA_ID_MAX);
   if (!safeId) {
@@ -2606,6 +2692,8 @@ function triggerGlobalRepair() {
   purstreamSearchCache.clear();
   SOURCE_PROBE_CACHE.clear();
   resetBackupCacheStore();
+  zenixSourceCache.clear();
+  cacheDbDeletePrefix("zenix-source:");
 }
 
 function shouldForceRefreshGlobal() {
@@ -17233,6 +17321,43 @@ async function handleZenixSource(req, res, requestUrl) {
   const externalKeyParam = String(requestUrl.searchParams.get("externalKey") || "").trim();
   const mediaId = toInt(requestUrl.searchParams.get("mediaId"), 0, 0, MEDIA_ID_MAX);
   let tmdbId = toInt(requestUrl.searchParams.get("tmdbId"), 0, 0, 999999999);
+  const cacheKey = buildZenixSourceCacheKey({
+    mediaType,
+    title,
+    year,
+    season,
+    episode,
+    tmdbId,
+    mediaId,
+    externalKey: externalKeyParam,
+  });
+  if (!forceRefresh) {
+    const cached = readZenixSourceCache(cacheKey);
+    if (cached) {
+      sendJson(res, 200, cached);
+      return true;
+    }
+  }
+  const sendPayload = (payload) => {
+    rememberZenixSourceCache(cacheKey, payload);
+    if (payload?.data && payload?.data?.tmdbId) {
+      const altKey = buildZenixSourceCacheKey({
+        mediaType,
+        title: payload?.data?.title || title,
+        year: payload?.data?.year || year,
+        season: payload?.data?.season || season,
+        episode: payload?.data?.episode || episode,
+        tmdbId: payload?.data?.tmdbId || tmdbId,
+        mediaId,
+        externalKey: externalKeyParam,
+      });
+      if (altKey && altKey !== cacheKey) {
+        rememberZenixSourceCache(altKey, payload);
+      }
+    }
+    sendJson(res, 200, payload);
+    return true;
+  };
 
   if (externalKeyParam.startsWith("direct:") || mediaId > 0) {
     const directEntry = resolveDirectAdminEntry({
@@ -17248,7 +17373,7 @@ async function handleZenixSource(req, res, requestUrl) {
         quality: "HD",
       });
       if (directSource) {
-        sendJson(res, 200, {
+        return sendPayload({
           apiVersion: "zenix-source-v1",
           type: "success",
           data: {
@@ -17262,7 +17387,6 @@ async function handleZenixSource(req, res, requestUrl) {
             sources: [directSource],
           },
         });
-        return true;
       }
     }
   }
@@ -17304,7 +17428,7 @@ async function handleZenixSource(req, res, requestUrl) {
       if (debugSource) {
         sources.push(debugSource);
       }
-      sendJson(res, 200, {
+      return sendPayload({
         apiVersion: "zenix-source-v1",
         type: "success",
         data: {
@@ -17318,12 +17442,11 @@ async function handleZenixSource(req, res, requestUrl) {
           sources,
         },
       });
-      return true;
     }
   }
   if (mediaType === "movie" && isBanlieusards3Target(title) && NOCTA_BANLIEUSARDS3_DEBUG_URL) {
     const proxiedUrl = buildHlsProxyPath(NOCTA_BANLIEUSARDS3_DEBUG_URL);
-    sendJson(res, 200, {
+    return sendPayload({
       apiVersion: "zenix-source-v1",
       type: "success",
       data: {
@@ -17347,7 +17470,6 @@ async function handleZenixSource(req, res, requestUrl) {
         ],
       },
     });
-    return true;
   }
   const isCarsQuatreRoues = isCarsQuatreRouesTarget(title, tmdbId);
   if (mediaType === "movie" && isCarsQuatreRoues) {
@@ -17372,7 +17494,7 @@ async function handleZenixSource(req, res, requestUrl) {
       }
     }
     if (fastfluxSources.length > 0) {
-      sendJson(res, 200, {
+      return sendPayload({
         apiVersion: "zenix-source-v1",
         type: "success",
         data: {
@@ -17386,13 +17508,12 @@ async function handleZenixSource(req, res, requestUrl) {
           sources: fastfluxSources,
         },
       });
-      return true;
     }
     if (PURSTREAM_CARS_DEBUG_URL) {
       const proxiedUrl = buildHlsProxyPath(PURSTREAM_CARS_DEBUG_URL);
       const proxiedAlt = PURSTREAM_CARS_DEBUG_URL_ALT ? buildHlsProxyPath(PURSTREAM_CARS_DEBUG_URL_ALT) : "";
       const proxiedMobile = buildHlsProxyPath(PURSTREAM_CARS_DEBUG_URL, HLS_PROXY_MOBILE_PATH);
-      sendJson(res, 200, {
+      return sendPayload({
         apiVersion: "zenix-source-v1",
         type: "success",
         data: {
@@ -17440,7 +17561,6 @@ async function handleZenixSource(req, res, requestUrl) {
           ],
         },
       });
-      return true;
     }
   }
   if (tmdbId <= 0 && title.length >= 2) {
@@ -17622,7 +17742,7 @@ async function handleZenixSource(req, res, requestUrl) {
       warning = warning ? `${warning} Sources recuperees du cache local.` : "Sources recuperees du cache local.";
     }
   }
-  sendJson(res, 200, {
+  return sendPayload({
     apiVersion: "zenix-source-v1",
     type: "success",
     data: {
@@ -17637,7 +17757,6 @@ async function handleZenixSource(req, res, requestUrl) {
       warning,
     },
   });
-  return true;
 }
 
 async function handleFilmer2Source(req, res, requestUrl) {

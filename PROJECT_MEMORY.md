@@ -7,6 +7,10 @@ Last update: 2026-03-20
 - FastFlux movies/series hydrate from the cache DB on startup to avoid refetch storms after restarts.
 - Warmups now persist catalog snapshots to disk; global repair clears FastFlux cache DB entries.
 
+## c412 follow-up (2026-03-20)
+- Added short-lived cache for `/api/zenix-source` (memory + cache-db) to reduce per-user API storms.
+- Cache keys include title/year/tmdb/episode and are reused across requests for smoother playback.
+
 ## Core product constraints
 - Domain: `https://zenix.best`
 - SEO:

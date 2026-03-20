@@ -7,6 +7,10 @@ LATEST FIX LOG (2026-03-20, c411)
 - Warmups now persist catalog snapshots to disk; global repair clears FastFlux cache DB entries to avoid stale data.
 - IPTV payload is cached to disk to reduce repeated upstream calls.
 
+LATEST FIX LOG (2026-03-20, c412)
+- Added a short-lived cache for `/api/zenix-source` (memory + cache-db) to cut repeat source calls per user.
+- Cache keys are stable by title/year/tmdb/episode and persist briefly to smooth bursts.
+
 LIVE DOMAIN
 - https://zenix.best
 
