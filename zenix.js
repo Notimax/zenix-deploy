@@ -1,5 +1,5 @@
 const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260320-c414";
+const ZENIX_BUILD_VERSION = "20260320-c415";
 const STORAGE_KEY = "zenix-progress-v4";
 const COVER_CACHE_KEY = "zenix-cover-cache-v1";
 const LOCAL_PLAY_KEY = "zenix-local-plays-v1";
@@ -55,6 +55,8 @@ const CATALOG_VISIBLE_APPEND_MAX_STEPS_SCROLL = 4;
 const CATALOG_VISIBLE_APPEND_MAX_STEPS_MANUAL = 5;
 const CATALOG_RENDER_CHUNK_MIN = 28;
 const CATALOG_RENDER_CHUNK_MAX = 90;
+const CATALOG_STRICT_PAGINATION = true;
+const CATALOG_STRICT_PAGE_SIZE = 20;
 const MOBILE_VIEWPORT_MAX_WIDTH = 740;
 const MOBILE_CATALOG_FIRST_PAINT = 84;
 const MOBILE_CATALOG_CHUNK_MIN = 64;
@@ -409,6 +411,7 @@ const state = {
   searchToken: 0,
   page: 0,
   totalPages: 0,
+  catalogTotalItems: 0,
   catalogSyncPage: 0,
   supplementalLastPage: Number.POSITIVE_INFINITY,
   hasMore: true,
@@ -466,6 +469,7 @@ const state = {
   hlsPlaylistBlobUrls: [],
   segmentFallback: null,
   searchAbortController: null,
+  searchResults: [],
   apiCache: new Map(),
   streamPayloadCache: new Map(),
   streamInFlight: new Map(),
@@ -4781,6 +4785,9 @@ function applySearchQuery(query, options = {}) {
   }
 
   state.query = next;
+  if (CATALOG_STRICT_PAGINATION) {
+    state.searchResults = [];
+  }
   if (options.persist !== false) {
     rememberSearchQuery(next);
   }
@@ -6085,6 +6092,9 @@ function isNearCatalogBottom(thresholdPx = SCROLL_SYNC_THRESHOLD_PX) {
 }
 
 async function syncCatalogBatch(reason = "active", options = {}) {
+  if (CATALOG_STRICT_PAGINATION) {
+    return false;
+  }
   const activeView = resolveCatalogViewForSearch();
   if (!isCatalogBrowseView(activeView)) {
     return false;
@@ -6151,6 +6161,9 @@ async function syncCatalogUntilVisibleGain(reason, minVisibleGain, options = {})
 }
 
 function scheduleScrollDrivenCatalogSync(options = {}) {
+  if (CATALOG_STRICT_PAGINATION) {
+    return;
+  }
   const immediate = options.immediate === true;
   const force = options.force === true;
   const nearBottom = isNearCatalogBottom();
@@ -6180,6 +6193,9 @@ function scheduleScrollDrivenCatalogSync(options = {}) {
 }
 
 async function syncCatalogForScroll(options = {}) {
+  if (CATALOG_STRICT_PAGINATION) {
+    return;
+  }
   if (!refs.playerOverlay.hidden || !refs.detailModal.hidden) {
     return;
   }
@@ -6215,6 +6231,9 @@ async function syncCatalogForScroll(options = {}) {
 }
 
 async function ensureSearchCoverage(token, options = {}) {
+  if (CATALOG_STRICT_PAGINATION) {
+    return;
+  }
   const query = String(state.query || "").trim();
   if (query.length < 2 || token !== state.searchToken) {
     return;
@@ -7839,7 +7858,8 @@ function applyCatalogSnapshot(snapshot) {
   if (!snapshot || typeof snapshot !== "object" || !Array.isArray(snapshot.items) || snapshot.items.length === 0) {
     return false;
   }
-  const items = snapshot.items.map(normalizeCatalogItem).filter(Boolean);
+  const maxItems = CATALOG_STRICT_PAGINATION ? getSmartPageSize("catalog") : 900;
+  const items = snapshot.items.slice(0, maxItems).map(normalizeCatalogItem).filter(Boolean);
   if (items.length === 0) {
     return false;
   }
@@ -7847,6 +7867,7 @@ function applyCatalogSnapshot(snapshot) {
   state.catalog = items;
   state.page = Math.max(1, Number(snapshot.page || 1));
   state.totalPages = Math.max(state.page, Number(snapshot.totalPages || state.page || 1));
+  state.catalogTotalItems = Math.max(0, Number(snapshot.totalItems || 0));
   state.catalogSyncPage = Math.max(1, Number(snapshot.catalogSyncPage || state.page || 1));
   state.supplementalLastPage = Number(snapshot.supplementalLastPage || Number.POSITIVE_INFINITY);
   state.hasMore = Boolean(snapshot.hasMore);
@@ -7871,40 +7892,57 @@ async function loadInitialCatalog() {
   }
 
   try {
-    const firstResult = await fetchCatalogPage(1, { includeSupplemental: false });
+    const pageSize = CATALOG_STRICT_PAGINATION ? getSmartPageSize("catalog") : 0;
+    const includeSupplemental = CATALOG_STRICT_PAGINATION ? true : false;
+    const firstResult = await fetchCatalogPage(1, { includeSupplemental, pageSize });
     state.catalog = [];
     state.page = 0;
     state.totalPages = 0;
     state.catalogSyncPage = 0;
+    state.catalogTotalItems = 0;
     state.supplementalLastPage = Number.POSITIVE_INFINITY;
     state.hasMore = true;
-    upsertCatalogItems(firstResult.items, { prepend: false });
-    state.page = firstResult.currentPage;
-    state.totalPages = firstResult.lastPage;
-    state.catalogSyncPage = firstResult.currentPage;
-    state.hasMore = firstResult.currentPage < firstResult.lastPage;
-
-    const initialProfile = getCatalogSyncProfile(resolveCatalogViewForSearch());
-    state.lastSyncAt = new Date();
-
-    if (state.page < state.totalPages) {
-      const batchPages = Math.max(
-        1,
-        Math.max(
-          Number(initialProfile.activeBatch || 4),
-          Number(initialProfile.initialPages || INITIAL_CATALOG_WARMUP_PAGES) - 1
-        )
-      );
-      const endPage = Math.min(state.totalPages, state.page + batchPages);
-      if (state.page + 1 <= endPage) {
-        startBackgroundCatalogSync(state.page + 1, endPage);
+    if (CATALOG_STRICT_PAGINATION) {
+      const strictItems = firstResult.items.slice(0, pageSize || firstResult.items.length);
+      state.catalog = strictItems;
+      state.page = firstResult.currentPage;
+      state.totalPages = Math.max(firstResult.lastPage || 1, state.page);
+      state.catalogSyncPage = state.page;
+      state.catalogTotalItems = Number(firstResult.totalItems || 0);
+      if (!state.catalogTotalItems) {
+        state.catalogTotalItems = Math.max(state.totalPages, 1) * Math.max(1, strictItems.length);
+      }
+      state.hasMore = state.page < state.totalPages;
+    } else {
+      upsertCatalogItems(firstResult.items, { prepend: false });
+      state.page = firstResult.currentPage;
+      state.totalPages = firstResult.lastPage;
+      state.catalogSyncPage = firstResult.currentPage;
+      state.hasMore = firstResult.currentPage < firstResult.lastPage;
+      const initialProfile = getCatalogSyncProfile(resolveCatalogViewForSearch());
+      if (state.page < state.totalPages) {
+        const batchPages = Math.max(
+          1,
+          Math.max(
+            Number(initialProfile.activeBatch || 4),
+            Number(initialProfile.initialPages || INITIAL_CATALOG_WARMUP_PAGES) - 1
+          )
+        );
+        const endPage = Math.min(state.totalPages, state.page + batchPages);
+        if (state.page + 1 <= endPage) {
+          startBackgroundCatalogSync(state.page + 1, endPage);
+        }
       }
     }
-    window.setTimeout(() => {
-      refreshCatalogHead().catch(() => {
-        // best effort only
-      });
-    }, 900);
+
+    state.lastSyncAt = new Date();
+    if (!CATALOG_STRICT_PAGINATION) {
+      window.setTimeout(() => {
+        refreshCatalogHead().catch(() => {
+          // best effort only
+        });
+      }, 900);
+    }
     saveCatalogSnapshot();
   } catch {
     if (state.catalog.length > 0) {
@@ -7933,6 +7971,11 @@ async function loadInitialCatalog() {
 }
 
 async function loadMoreCatalog() {
+  if (CATALOG_STRICT_PAGINATION) {
+    const targetPage = Number(state.page || 1) + 1;
+    await loadCatalogPage(targetPage);
+    return;
+  }
   if (
     state.loadingCatalog ||
     state.backgroundSyncRunning ||
@@ -7965,7 +8008,42 @@ async function loadMoreCatalog() {
   }
 }
 
+async function loadCatalogPage(page) {
+  if (state.loadingCatalog || state.backgroundSyncRunning) {
+    return;
+  }
+  const targetPage = Math.max(1, Number(page || 1));
+  const totalPages = Math.max(1, Number(state.totalPages || targetPage));
+  const safePage = Math.min(targetPage, totalPages);
+  state.loadingCatalog = true;
+  updateLoadMoreButton();
+
+  try {
+    const pageSize = getSmartPageSize("catalog");
+    const result = await fetchCatalogPage(safePage, { includeSupplemental: true, pageSize });
+    const items = result.items.slice(0, pageSize || result.items.length);
+    state.catalog = items;
+    state.page = result.currentPage;
+    state.totalPages = Math.max(result.lastPage || 1, state.page);
+    state.catalogSyncPage = state.page;
+    state.hasMore = state.page < state.totalPages;
+    state.catalogTotalItems = Number(result.totalItems || 0);
+    if (!state.catalogTotalItems) {
+      state.catalogTotalItems = Math.max(state.totalPages, 1) * Math.max(1, items.length);
+    }
+    state.lastSyncAt = new Date();
+    saveCatalogSnapshot();
+    renderAll();
+  } finally {
+    state.loadingCatalog = false;
+    updateLoadMoreButton();
+  }
+}
+
 async function startBackgroundCatalogSync(startPage, lastPage) {
+  if (CATALOG_STRICT_PAGINATION) {
+    return;
+  }
   if (state.backgroundSyncRunning || startPage > lastPage) {
     return;
   }
@@ -8013,8 +8091,30 @@ async function startBackgroundCatalogSync(startPage, lastPage) {
 }
 
 async function refreshCatalogHead() {
+  if (CATALOG_STRICT_PAGINATION && Number(state.page || 1) !== 1) {
+    updateSyncText();
+    return;
+  }
   try {
-    const result = await fetchCatalogPage(1);
+    const pageSize = CATALOG_STRICT_PAGINATION ? getSmartPageSize("catalog") : 0;
+    const result = await fetchCatalogPage(1, { includeSupplemental: true, pageSize });
+    if (CATALOG_STRICT_PAGINATION) {
+      const items = result.items.slice(0, pageSize || result.items.length);
+      state.catalog = items;
+      state.page = result.currentPage;
+      state.totalPages = Math.max(result.lastPage || 1, state.page);
+      state.catalogSyncPage = state.page;
+      state.hasMore = state.page < state.totalPages;
+      state.catalogTotalItems = Number(result.totalItems || 0);
+      if (!state.catalogTotalItems) {
+        state.catalogTotalItems = Math.max(state.totalPages, 1) * Math.max(1, items.length);
+      }
+      state.lastSyncAt = new Date();
+      saveCatalogSnapshot();
+      renderAll();
+      return;
+    }
+
     const beforeCount = state.catalog.length;
     const preferPrepend =
       Number(window.scrollY || 0) < 120 &&
@@ -8148,8 +8248,12 @@ async function handleRemoteSearch(token, signal) {
   if (mapped.length === 0) {
     return;
   }
-  upsertCatalogItems(mapped, { prepend: true });
-  saveCatalogSnapshot();
+  if (CATALOG_STRICT_PAGINATION) {
+    state.searchResults = mapped;
+  } else {
+    upsertCatalogItems(mapped, { prepend: true });
+    saveCatalogSnapshot();
+  }
 }
 
 function upsertCatalogItems(items, { prepend }) {
@@ -8396,11 +8500,18 @@ function mergeCatalogSemanticItem(existing, incoming) {
 
 async function fetchCatalogPage(page, options = {}) {
   const includeSupplemental = options.includeSupplemental !== false;
+  const pageSize = Math.max(0, Number(options.pageSize || 0));
   const shouldFetchSupplemental =
     includeSupplemental && Number(page || 1) <= Number(state.supplementalLastPage || Number.POSITIVE_INFINITY);
   const supplementalPerPage = getSupplementalPerPage();
+  const movieParams = new URLSearchParams();
+  movieParams.set("page", String(page || 1));
+  if (pageSize > 0) {
+    movieParams.set("perPage", String(pageSize));
+    movieParams.set("per_page", String(pageSize));
+  }
   const [payload, supplementalPayload] = await Promise.all([
-    fetchJson(`${API_BASE}/catalog/movies?page=${page}`),
+    fetchJson(`${API_BASE}/catalog/movies?${movieParams.toString()}`),
     shouldFetchSupplemental
       ? fetchJson(`${API_BASE}/catalog/supplemental?page=${page}&perPage=${supplementalPerPage}`, {
           timeoutMs: SUPPLEMENTAL_CATALOG_TIMEOUT_MS,
@@ -8410,6 +8521,9 @@ async function fetchCatalogPage(page, options = {}) {
   ]);
   const items = payload?.data?.items || {};
   const rows = Array.isArray(items.data) ? items.data : [];
+  const totalItems = Number(
+    items.total || items.total_items || payload?.data?.total || payload?.data?.count || 0
+  );
   const supplementalLastPage = Number(supplementalPayload?.data?.items?.last_page || 0);
   if (supplementalLastPage > 0) {
     state.supplementalLastPage = supplementalLastPage;
@@ -8422,6 +8536,7 @@ async function fetchCatalogPage(page, options = {}) {
     items: rows.concat(supplementalRows).map(normalizeCatalogItem).filter(Boolean),
     currentPage: Number(items.current_page || page),
     lastPage: Number(items.last_page || page),
+    totalItems: totalItems,
   };
 }
 
@@ -9028,13 +9143,16 @@ function renderAll() {
     state.pendingScrollRestoreView = "";
     restoreScrollForView(pending);
   }
-  if (showBrowseView && state.hasMore) {
+  if (showBrowseView && state.hasMore && !CATALOG_STRICT_PAGINATION) {
     scheduleScrollDrivenCatalogSync();
   }
 }
 
 function getSmartPageSize(kind) {
   const compact = isCompactViewport();
+  if (kind === "catalog" && CATALOG_STRICT_PAGINATION) {
+    return CATALOG_STRICT_PAGE_SIZE;
+  }
   const perf = Math.min(1.2, Math.max(0.75, getPerfScale()));
   let base = 36;
   let min = 12;
@@ -9137,6 +9255,26 @@ function buildCalendarPaginationKey() {
 function getPaginatedCatalog(sourceList) {
   const list = Array.isArray(sourceList) ? sourceList : getVisibleCatalog();
   const key = buildCatalogPaginationKey();
+  const hasQuery = state.query.trim().length > 0;
+  if (CATALOG_STRICT_PAGINATION && !hasQuery) {
+    const bucket = ensurePaginationState("catalog", key, list.length);
+    const totalPages = Math.max(1, Number(state.totalPages || bucket.totalPages || 1));
+    const page = clampIntRange(Number(state.page || bucket.page || 1), 1, totalPages);
+    bucket.page = page;
+    bucket.totalPages = totalPages;
+    const totalItems = Number(state.catalogTotalItems || 0);
+    return {
+      items: list,
+      meta: {
+        page,
+        pageSize: bucket.pageSize,
+        totalPages,
+        totalItems: totalItems > 0 ? totalItems : Math.max(list.length, totalPages * bucket.pageSize),
+        startIndex: (page - 1) * bucket.pageSize,
+        endIndex: (page - 1) * bucket.pageSize + list.length,
+      },
+    };
+  }
   return paginateList(list, "catalog", key);
 }
 
@@ -9214,6 +9352,7 @@ function renderCatalogPagination(meta) {
   }
   const hasQuery = state.query.trim().length > 0;
   const canFetchMore =
+    !CATALOG_STRICT_PAGINATION &&
     !state.backgroundSyncRunning &&
     state.view !== "top" &&
     state.view !== "list" &&
@@ -9240,7 +9379,13 @@ function setPaginationPage(kind, nextPage) {
   }
   bucket.page = page;
   if (kind === "catalog") {
-    renderAll();
+    if (CATALOG_STRICT_PAGINATION) {
+      loadCatalogPage(page).catch(() => {
+        showToast("Impossible de charger cette page.", true);
+      });
+    } else {
+      renderAll();
+    }
   } else if (kind === "request") {
     renderRequestPublicList();
   } else if (kind === "tv") {
@@ -9285,15 +9430,19 @@ function getVisibleCatalog(options = {}) {
 
   const query = state.query.trim().toLowerCase();
   if (query.length > 0) {
-    const queryKey = normalizeTitleKey(query);
-    list = list.filter((item) => {
-      const title = item.titleLower || item.title.toLowerCase();
-      if (title.includes(query)) {
-        return true;
-      }
-      const normalized = item.titleKey || normalizeTitleKey(item.title || "");
-      return queryKey.length > 0 && normalized.includes(queryKey);
-    });
+    if (CATALOG_STRICT_PAGINATION && Array.isArray(state.searchResults) && state.searchResults.length > 0) {
+      list = state.searchResults.slice();
+    } else {
+      const queryKey = normalizeTitleKey(query);
+      list = list.filter((item) => {
+        const title = item.titleLower || item.title.toLowerCase();
+        if (title.includes(query)) {
+          return true;
+        }
+        const normalized = item.titleKey || normalizeTitleKey(item.title || "");
+        return queryKey.length > 0 && normalized.includes(queryKey);
+      });
+    }
   }
 
   if (!options.skipThemeFilters) {
@@ -12721,6 +12870,12 @@ function initSectionRevealObserver() {
 }
 
 function updateLoadMoreButton() {
+  if (CATALOG_STRICT_PAGINATION) {
+    refs.loadMoreBtn.hidden = true;
+    refs.loadMoreBtn.disabled = false;
+    refs.loadMoreBtn.textContent = "Charger plus";
+    return;
+  }
   if (refs.catalogPagination && !refs.catalogPagination.hidden) {
     refs.loadMoreBtn.hidden = true;
     refs.loadMoreBtn.disabled = false;
@@ -23026,14 +23181,16 @@ function saveCatalogSnapshot() {
     if (!Array.isArray(state.catalog) || state.catalog.length === 0) {
       return;
     }
+    const snapshotLimit = CATALOG_STRICT_PAGINATION ? getSmartPageSize("catalog") : 900;
     const payload = JSON.stringify({
       savedAt: Date.now(),
       page: state.page,
       totalPages: state.totalPages,
+      totalItems: state.catalogTotalItems,
       catalogSyncPage: state.catalogSyncPage,
       supplementalLastPage: state.supplementalLastPage,
       hasMore: state.hasMore,
-      items: state.catalog.slice(0, 900),
+      items: state.catalog.slice(0, snapshotLimit),
     });
     localStorage.setItem(CATALOG_CACHE_KEY, payload);
     sessionStorage.setItem(CATALOG_CACHE_KEY, payload);

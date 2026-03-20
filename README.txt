@@ -1,6 +1,11 @@
 ZENIX STREAM - OPERATIONS MEMORY
 Last updated: 2026-03-20
 
+LATEST FIX LOG (2026-03-20, c415)
+- Pagination now runs in strict mode: only the current page is loaded (no background mega-fetch).
+- Page size capped (catalog: 20) and page switches fetch just that page.
+- Search uses remote results without inflating the catalog cache.
+
 LATEST FIX LOG (2026-03-20, c414)
 - Added intelligent pagination across catalog, request list, TV Directs, and calendar views.
 - Pagination adapts page size to device/perf and keeps counts visible.

@@ -2,6 +2,11 @@
 
 Last update: 2026-03-20
 
+## c415 follow-up (2026-03-20)
+- Pagination now runs in strict mode: only current page is loaded (no background mega-fetch).
+- Catalog page size capped to 20 and page switches fetch only that page.
+- Search uses remote results without inflating the catalog cache.
+
 ## c414 follow-up (2026-03-20)
 - Added intelligent pagination across catalog, request list, TV Directs, and calendar views.
 - Pagination adapts page size to device/perf and keeps counts visible.
