@@ -154,6 +154,10 @@ const ZENIX_SOURCE_CACHE_MAX = Math.max(
   200,
   toInt(process.env.ZENIX_SOURCE_CACHE_MAX, 2400, 200, 12000)
 );
+const ZENIX_SEARCH_CACHE_TTL_MS = Math.max(
+  5 * 60 * 1000,
+  toInt(process.env.ZENIX_SEARCH_CACHE_TTL_MS, 2 * 60 * 60 * 1000, 10 * 60 * 1000, 12 * 60 * 60 * 1000)
+);
 const NAKIOS_FETCH_HEADERS = {
   Referer: `${NAKIOS_BASE}/`,
   Origin: NAKIOS_BASE,
@@ -9944,6 +9948,11 @@ async function searchTmdbCatalog(query, mediaType) {
   if (cached && cached.expiresAt > Date.now()) {
     return cached.items || [];
   }
+  const persisted = cacheDbGet(`search:${cacheKey}`);
+  if (persisted && Array.isArray(persisted)) {
+    tmdbSearchCache.set(cacheKey, { items: persisted, expiresAt: Date.now() + TMDB_SEARCH_CACHE_MS });
+    return persisted;
+  }
   const params = new URLSearchParams({
     api_key: TMDB_API_KEY,
     language: "fr-FR",
@@ -9983,6 +9992,7 @@ async function searchTmdbCatalog(query, mediaType) {
     items: mapped,
     expiresAt: Date.now() + TMDB_SEARCH_CACHE_MS,
   });
+  cacheDbSet(`search:${cacheKey}`, mapped, ZENIX_SEARCH_CACHE_TTL_MS);
   return mapped;
 }
 
@@ -10028,6 +10038,11 @@ async function searchFastfluxCatalog(query, mediaType) {
   if (cached && cached.expiresAt > Date.now()) {
     return cached.items || [];
   }
+  const persisted = cacheDbGet(`search:${cacheKey}`);
+  if (persisted && Array.isArray(persisted)) {
+    fastfluxSearchCache.set(cacheKey, { items: persisted, expiresAt: Date.now() + FASTFLUX_SEARCH_CACHE_MS });
+    return persisted;
+  }
   const route = normalizedType === "tv" ? "series/search" : "movies/search";
   const payload = await fetchFastfluxPage(route, 1, { q: safeQuery });
   const items = Array.isArray(payload?.items) ? payload.items : [];
@@ -10035,6 +10050,7 @@ async function searchFastfluxCatalog(query, mediaType) {
     items,
     expiresAt: Date.now() + FASTFLUX_SEARCH_CACHE_MS,
   });
+  cacheDbSet(`search:${cacheKey}`, items, ZENIX_SEARCH_CACHE_TTL_MS);
   return items;
 }
 

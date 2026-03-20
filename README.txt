@@ -11,6 +11,9 @@ LATEST FIX LOG (2026-03-20, c412)
 - Added a short-lived cache for `/api/zenix-source` (memory + cache-db) to cut repeat source calls per user.
 - Cache keys are stable by title/year/tmdb/episode and persist briefly to smooth bursts.
 
+LATEST FIX LOG (2026-03-20, c413)
+- Added persistent DB caching for search results (FastFlux + TMDB) to reduce repeated search API load.
+
 LIVE DOMAIN
 - https://zenix.best
 

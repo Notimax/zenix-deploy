@@ -11,6 +11,9 @@ Last update: 2026-03-20
 - Added short-lived cache for `/api/zenix-source` (memory + cache-db) to reduce per-user API storms.
 - Cache keys include title/year/tmdb/episode and are reused across requests for smoother playback.
 
+## c413 follow-up (2026-03-20)
+- Added persistent DB caching for search results (FastFlux + TMDB) to reduce repeated search API load.
+
 ## Core product constraints
 - Domain: `https://zenix.best`
 - SEO:
