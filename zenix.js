@@ -1,5 +1,5 @@
 const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260321-c410";
+const ZENIX_BUILD_VERSION = "20260321-c412";
 const STORAGE_KEY = "zenix-progress-v4";
 const COVER_CACHE_KEY = "zenix-cover-cache-v1";
 const LOCAL_PLAY_KEY = "zenix-local-plays-v1";
@@ -306,7 +306,7 @@ const FASTFLUX_SMARTLINK_URL = "https://walkeralacrityfavorite.com/k1kzat14?key=
 const FASTFLUX_SMARTLINK_SESSION_KEY = "zenix-fastflux-smartlink-v1";
 const FASTFLUX_SMARTLINK_TTL_MS = 2 * 60 * 60 * 1000;
 const FASTFLUX_SMARTLINK_COOKIE = "zenix_fastflux=1";
-const FASTFLUX_SMARTLINK_PER_CONTENT = false;
+const FASTFLUX_SMARTLINK_PER_CONTENT = true;
 const FASTFLUX_SMARTLINK_CONTENT_KEY = "zenix-fastflux-content";
 const ADBLOCK_MONITOR_INTERVAL_MS = 8500;
 const ADBLOCK_BOOT_DELAY_MS = 950;
@@ -5831,6 +5831,7 @@ function resolveFastfluxGate(result) {
 }
 
 function requestFastfluxSmartlink(contextKey = "") {
+  state.fastfluxGateContext = contextKey;
   if (hasFastfluxPromptSession(contextKey)) {
     return Promise.resolve(true);
   }
@@ -11658,6 +11659,37 @@ async function performRequestSearch(query, token) {
     renderRequestSearchPanel();
     return;
   }
+  const tmdbUrlMatch = safeQuery.match(/themoviedb.org\/(movie|tv)\/(\d+)/i);
+  if (tmdbUrlMatch) {
+    setRequestStatus("Recherche URL locale en cours...");
+    const urlType = tmdbUrlMatch[1].toLowerCase();
+    const urlId = Number(tmdbUrlMatch[2]);
+    try {
+      const payload = await fetchJson(`${API_BASE}/media/${urlId}/sheet`, {
+        timeoutMs: 9000,
+        noCache: true,
+      });
+      if (token !== state.request.searchToken) return;
+      const details = payload?.data?.items;
+      if (details && details.id) {
+        state.request.results = [{
+          title: String(details.title || "Titre inconnu").trim(),
+          type: normalizeRequestType(urlType),
+          year: getYear(details.releaseDate || ""),
+          poster: String(details?.posters?.small || details?.posters?.large || "").trim(),
+          backdrop: String(details?.posters?.wallpaper || details?.posters?.large || "").trim(),
+          overview: String(details.overview || "").trim(),
+          tmdbId: urlId
+        }];
+        renderRequestSearchPanel();
+        setRequestStatus("Film/Série trouvé depuis URL.");
+        return;
+      }
+    } catch {}
+    setRequestStatus("URL invalide ou inaccessible.", true);
+    return;
+  }
+
   setRequestStatus("Recherche en cours...");
   const params = new URLSearchParams({
     q: safeQuery,

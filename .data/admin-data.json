@@ -1,0 +1,44 @@
+{
+  "announcement": {
+    "message": "",
+    "enabled": false,
+    "expiresAt": 0,
+    "updatedAt": ""
+  },
+  "custom": [],
+  "overrides": {
+    "byId": {},
+    "byExternalKey": {}
+  },
+  "repairs": {
+    "3940:movie:1:1": {
+      "sources": [
+        {
+          "stream_url": "https://zebi.xalaflix.design/movie/911430/premium-b6m285/master.m3u8",
+          "source_name": "Zenix",
+          "quality": "HD",
+          "language": "MULTI",
+          "format": "hls",
+          "priority": 0
+        }
+      ],
+      "updatedAt": 1773685990169
+    },
+    "5301:movie:1:1": {
+      "sources": [
+        {
+          "stream_url": "https://zebi.xalaflix.design/movie/1228246/premium-aw91oj/master.m3u8",
+          "source_name": "Zenix",
+          "quality": "HD",
+          "language": "MULTI",
+          "format": "hls",
+          "priority": 0
+        }
+      ],
+      "updatedAt": 1773686023958
+    }
+  },
+  "suggestions": {
+    "skips": {}
+  }
+}

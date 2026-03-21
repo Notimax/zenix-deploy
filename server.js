@@ -2364,7 +2364,7 @@ function cacheDbGet(key) {
   if (!safeKey) {
     return null;
   }
-  const data = loadCacheDbStore(true);
+  const data = loadCacheDbStore(false);
   const entry = data.items && typeof data.items === "object" ? data.items[safeKey] : null;
   if (!entry) {
     return null;
@@ -2384,7 +2384,7 @@ function cacheDbSet(key, value, ttlMs = CACHE_DB_DEFAULT_TTL_MS) {
     return;
   }
   const ttl = Math.max(30 * 1000, Number(ttlMs || CACHE_DB_DEFAULT_TTL_MS));
-  const data = loadCacheDbStore(true);
+  const data = loadCacheDbStore(false);
   data.items[safeKey] = {
     value,
     updatedAt: Date.now(),
@@ -2399,7 +2399,7 @@ function cacheDbDelete(key) {
   if (!safeKey) {
     return;
   }
-  const data = loadCacheDbStore(true);
+  const data = loadCacheDbStore(false);
   if (data.items && typeof data.items === "object" && data.items[safeKey]) {
     delete data.items[safeKey];
     scheduleCacheDbSave(data);
@@ -2411,7 +2411,7 @@ function cacheDbDeletePrefix(prefix) {
   if (!safePrefix) {
     return;
   }
-  const data = loadCacheDbStore(true);
+  const data = loadCacheDbStore(false);
   let touched = false;
   Object.keys(data.items || {}).forEach((key) => {
     if (key.startsWith(safePrefix)) {
@@ -18261,16 +18261,31 @@ async function handleApiProxy(req, res, requestUrl) {
     res.end(cached.body);
     return true;
   }
+  if (ttl > 0) {
+    const persisted = cacheDbGet("proxy:" + cacheKey);
+    if (persisted && typeof persisted === "object" && persisted.expiresAt > now) {
+      res.writeHead(persisted.status, {
+        "Content-Type": persisted.contentType,
+        "Cache-Control": "no-cache",
+        "X-Zenix-Cache": "HIT-DB",
+      });
+      res.end(persisted.body);
+      proxyCache.set(cacheKey, persisted);
+      return true;
+    }
+  }
 
   try {
     const upstream = await fetchRemote(target, upstreamHeaders);
     if (ttl > 0 && upstream.status >= 200 && upstream.status < 300) {
-      proxyCache.set(cacheKey, {
+      const entry = {
         status: upstream.status,
         body: upstream.body,
         contentType: upstream.contentType,
         expiresAt: now + ttl,
-      });
+      };
+      proxyCache.set(cacheKey, entry);
+      cacheDbSet("proxy:" + cacheKey, entry, ttl);
     }
     res.writeHead(upstream.status, {
       "Content-Type": upstream.contentType,
