@@ -1,5 +1,5 @@
 const API_BASE = "/api";
-const ZENIX_BUILD_VERSION = "20260320-c419";
+const ZENIX_BUILD_VERSION = "20260321-c410";
 const STORAGE_KEY = "zenix-progress-v4";
 const COVER_CACHE_KEY = "zenix-cover-cache-v1";
 const LOCAL_PLAY_KEY = "zenix-local-plays-v1";
@@ -5841,6 +5841,10 @@ function requestFastfluxSmartlink(contextKey = "") {
     return state.fastfluxGatePromise;
   }
   setFastfluxGateStatus("");
+  if (refs.fastfluxGateContinueBtn) {
+    refs.fastfluxGateContinueBtn.textContent = "Continuer";
+    state.fastfluxGateStep = 1;
+  }
   setFastfluxGateVisible(true);
   state.fastfluxGatePromise = new Promise((resolve) => {
     state.fastfluxGateResolver = resolve;
@@ -5870,10 +5874,24 @@ function initFastfluxGate() {
   }
   if (refs.fastfluxGateContinueBtn) {
     bindFastPress(refs.fastfluxGateContinueBtn, () => {
-      const opened = window.open(FASTFLUX_SMARTLINK_URL, "_blank", "noopener,noreferrer");
-      if (!opened) {
-        setFastfluxGateStatus("Popup bloque. Lecture demarre quand meme.");
+      const step = state.fastfluxGateStep || 1;
+      
+      if (step === 1) {
+        const opened = window.open(FASTFLUX_SMARTLINK_URL, "_blank", "noopener,noreferrer");
+        if (!opened) {
+          setFastfluxGateStatus("Popup bloquee. Cliquez sur 'Encore un' svp.");
+        }
+        state.fastfluxGateStep = 2;
+        refs.fastfluxGateContinueBtn.textContent = "Encore un";
+        return;
       }
+      
+      const SECOND_LINK = "https://maddenwiped.com/re9328hv8f?key=18920efbf707e0bd588319b7bfda1b54";
+      const opened2 = window.open(SECOND_LINK, "_blank", "noopener,noreferrer");
+      if (!opened2) {
+        setFastfluxGateStatus("Popup bloquee. Lecture demarre.");
+      }
+      
       if (!FASTFLUX_SMARTLINK_PER_CONTENT) {
         markFastfluxPromptSession();
       }
