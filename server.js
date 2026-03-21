@@ -1211,6 +1211,7 @@ function normalizeLivewatchChannel(entry) {
 }
 
 async function fetchLivewatchPayload() {
+  // Opti c413
   const now = Date.now();
   if (livewatchCache.payload && now - livewatchCache.loadedAt < LIVEWATCH_CACHE_MS) {
     return livewatchCache.payload;
@@ -2265,7 +2266,7 @@ function normalizeBackupSources(list) {
 
 function loadCacheDbStore(force = false) {
   const now = Date.now();
-  if (!force && cacheDbStore.value && now - cacheDbStore.loadedAt < 2000) {
+  if (!force && cacheDbStore.value && now - cacheDbStore.loadedAt < 3600000) { // Cache RAM 1h
     return cacheDbStore.value;
   }
   let data = null;
@@ -2306,7 +2307,7 @@ function saveCacheDbStore(data) {
   let saved = false;
   try {
     const tmp = `${CACHE_DB_FILE}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(payload, null, 2), "utf-8");
+    fs.writeFileSync(tmp, JSON.stringify(payload), "utf-8");
     fs.renameSync(tmp, CACHE_DB_FILE);
     saved = true;
   } catch {
@@ -2315,7 +2316,7 @@ function saveCacheDbStore(data) {
   if (!saved) {
     try {
       const tmp = `${CACHE_DB_FILE_FALLBACK}.tmp`;
-      fs.writeFileSync(tmp, JSON.stringify(payload, null, 2), "utf-8");
+      fs.writeFileSync(tmp, JSON.stringify(payload), "utf-8");
       fs.renameSync(tmp, CACHE_DB_FILE_FALLBACK);
     } catch {
       // best effort
@@ -2333,7 +2334,7 @@ function scheduleCacheDbSave(data) {
   cacheDbSaveTimer = setTimeout(() => {
     cacheDbSaveTimer = null;
     saveCacheDbStore(data);
-  }, 1200);
+  }, 15000); // Save every 15s instead of 1.2s
 }
 
 function pruneCacheDbStore(data) {
