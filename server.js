@@ -383,6 +383,8 @@ const GATE_DISABLED = String(process.env.ZENIX_GATE_DISABLE || "").trim() === "1
 const gateChallenges = new Map();
 const ADMIN_COOKIE_NAME = "zenix_admin";
 const ADMIN_PASSWORD = String(process.env.ZENIX_ADMIN_PASSWORD || "").trim();
+const BACKUP_CONFIG_PASSWORD =
+  String(process.env.ZENIX_BACKUP_ADMIN_PASSWORD || "").trim() || "admin1234";
 const ADMIN_SESSION_SECRET =
   String(process.env.ZENIX_ADMIN_SESSION_SECRET || "").trim() || crypto.randomBytes(32).toString("hex");
 const ADMIN_SESSION_TTL_MS = Math.max(
@@ -15439,7 +15441,7 @@ async function handleBackupConfig(req, res, requestUrl) {
     sendJson(res, 405, { error: "Method Not Allowed" });
     return true;
   }
-  if (!ADMIN_PASSWORD) {
+  if (!BACKUP_CONFIG_PASSWORD) {
     sendJson(res, 503, { error: "Admin disabled" });
     return true;
   }
@@ -15456,7 +15458,7 @@ async function handleBackupConfig(req, res, requestUrl) {
     return true;
   }
   const password = String(body?.password || "");
-  if (!timingSafeEqualStrings(password, ADMIN_PASSWORD)) {
+  if (!timingSafeEqualStrings(password, BACKUP_CONFIG_PASSWORD)) {
     sendJson(res, 401, { error: "Unauthorized" });
     return true;
   }
