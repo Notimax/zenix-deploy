@@ -3851,7 +3851,14 @@ function saveBackupConfig(next) {
 }
 
 function setBackupCors(res, origin) {
-  const allowed = new Set(["https://zenix.lol", "https://www.zenix.lol"]);
+  const allowed = new Set([
+    "https://zenix.lol",
+    "https://www.zenix.lol",
+    "http://127.0.0.1:8080",
+    "http://localhost:8080",
+    "http://127.0.0.1:4173",
+    "http://localhost:4173",
+  ]);
   if (origin && allowed.has(origin)) {
     res.setHeader("Access-Control-Allow-Origin", origin);
     res.setHeader("Vary", "Origin");
@@ -15422,7 +15429,8 @@ async function handleAnnouncement(req, res, requestUrl) {
 }
 
 async function handleBackupConfig(req, res, requestUrl) {
-  if (requestUrl.pathname !== "/api/backup-config") {
+  const normalizedPath = String(requestUrl.pathname || "").replace(/\/+$/, "") || "/";
+  if (normalizedPath !== "/api/backup-config") {
     return false;
   }
   const origin = String(req.headers.origin || "");
